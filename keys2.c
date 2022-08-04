@@ -8,9 +8,9 @@
 #include <tchar.h>
 #include <wingdi.h>
 #include <shlwapi.h>
-#include <initguid.h> // https://stackoverflow.com/a/31757757
-#include <mmdeviceapi.h> // IMMDevice, IMMDeviceEnumerator
-#include <endpointvolume.h> // IAudioMeterInformation
+#include <initguid.h>
+#include <mmdeviceapi.h>
+#include <endpointvolume.h>
 #pragma comment(lib, "user32.lib")
 #pragma comment(lib, "Oleacc.lib")
 #pragma comment(lib, "Gdi32.lib")
@@ -162,11 +162,11 @@ HFONT font;
 
 DWORD keyBindModifier = VK_LMENU;
 COLORREF barBackgroundColor = 0x282828;
-COLORREF barSelectedBackgroundColor = 0x3c3836;
+COLORREF barSelectedBackgroundColor = RGB(69, 133, 136);// 0x3c3836;
 COLORREF buttonSelectedTextColor = RGB(204, 36, 29);
 COLORREF buttonWithWindowsTextColor = RGB(255, 255, 247);
 COLORREF buttonWithoutWindowsTextColor = 0x504945;
-COLORREF barTextColor = RGB(168, 153, 132);
+COLORREF barTextColor =RGB(235, 219, 178); // RGB(168, 153, 132);
 
 BOOL CALLBACK con_handler(DWORD stub)
 {
@@ -1101,7 +1101,10 @@ void close_focused_window(void)
 {
     HWND foregroundHwnd = GetForegroundWindow();
     Client* existingClient = find_client_in_workspaces_by_hwnd(foregroundHwnd);
-    CloseWindow(foregroundHwnd);
+    LRESULT res = SendMessage(foregroundHwnd, WM_CLOSE, NULL, NULL);
+    DWORD err = GetLastError();
+    CloseHandle(foregroundHwnd);
+
     if(existingClient)
     {
         remove_client_From_workspace_and_arrange(existingClient->workspace, existingClient);
