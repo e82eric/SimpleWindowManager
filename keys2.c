@@ -1542,7 +1542,7 @@ void run_bar_window(Bar *bar, WNDCLASSEX *barWindowClass)
 
 BOOL chrome_workspace_filter(Client *client)
 {
-    if(wcsstr(client->processImageName, L"chrome.exe"))
+    if(wcsstr(client->processImageName, L"chrome.exe") || wcsstr(client->processImageName, L"brave.exe"))
     {
         if(wcsstr(client->className, L"Chrome_WidgetWin_2"))
         {
