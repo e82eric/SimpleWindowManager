@@ -54,6 +54,7 @@ typedef BOOL (*WindowFilter)(Client *client);
 
 struct Layout
 {
+    TCHAR *tag;
     void (*select_next_window) (Workspace *workspace);
     void (*move_client_to_master) (Client *client);
     void (*move_client_next) (Client *client);
@@ -190,6 +191,7 @@ Layout deckLayout = {
     .move_client_next = deckLayout_move_client_next,
     .apply_to_workspace = deckLayout_apply_to_workspace,
     .next = NULL,
+    .tag = L"D"
 };
 
 Layout monacleLayout = {
@@ -198,6 +200,7 @@ Layout monacleLayout = {
     .move_client_next = move_client_next,
     .apply_to_workspace = calc_new_sizes_for_monacle_workspace,
     .next = &deckLayout,
+    .tag = L"M"
 };
 
 Layout tileLayout = {
@@ -206,6 +209,7 @@ Layout tileLayout = {
     .move_client_next = move_client_next,
     .apply_to_workspace = calc_new_sizes_for_workspace,
     .next = &monacleLayout,
+    .tag = L"T"
 };
 
 Layout *headLayoutNode = &tileLayout;
@@ -1438,8 +1442,8 @@ void bar_render_selected_window_description(Bar *bar)
         LPCWSTR processShortFileName = PathFindFileName( bar->monitor->workspace->selected->processImageName);
 
         TCHAR displayStr[MAX_PATH];
-        int displayStrLen = swprintf(displayStr, MAX_PATH, L": %ls (%d)",
-            processShortFileName, bar->monitor->workspace->selected->processId);
+        int displayStrLen = swprintf(displayStr, MAX_PATH, L"[%ls] : %ls (%d)",
+            bar->monitor->workspace->layout->tag, processShortFileName, bar->monitor->workspace->selected->processId);
         bar->windowContextText = _wcsdup(displayStr);
         bar->windowContextTextLen = displayStrLen;
     }
