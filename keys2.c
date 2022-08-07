@@ -11,6 +11,7 @@
 #include <initguid.h>
 #include <mmdeviceapi.h>
 #include <endpointvolume.h>
+#include <commctrl.h>
 #pragma comment(lib, "user32.lib")
 #pragma comment(lib, "Oleacc.lib")
 #pragma comment(lib, "Gdi32.lib")
@@ -36,8 +37,18 @@ typedef struct Workspace Workspace;
 typedef struct Client Client;
 typedef struct Bar Bar;
 typedef struct Button Button;
+typedef struct ClientData ClientData;
+
 struct Client {
-    char name[256];
+    BOOL isVisible;
+    ClientData *data;
+    Client *next;
+    Client *previous;
+    Workspace *workspace;
+};
+
+struct ClientData
+{
     int x, y, w, h;
     BOOL isDirty;
     HWND hwnd;
@@ -45,11 +56,8 @@ struct Client {
     TCHAR *processImageName;
     TCHAR *className;
     TCHAR *title;
-    Client *next;
-    Client *previous;
-    Workspace *workspace;
-    BOOL isVisible;
 };
+
 typedef BOOL (*WindowFilter)(Client *client);
 
 struct Layout
@@ -72,6 +80,7 @@ struct Workspace {
     WCHAR *tag;
     int numberOfClients;
     Button **buttons;
+    int numberOfButtons;
     int masterOffset;
     Layout *layout;
 };
@@ -130,7 +139,7 @@ static void arrange_workspace(Workspace *workspace);
 static void associate_workspace_to_monitor(Workspace *workspace, Monitor *monitor);
 static void remove_client(HWND hwnd);
 static void swap_selected_monitor_to(Workspace *workspace);
-static void select_next_window();
+static void select_next_window(void);
 static void apply_workspace_to_monitor_with_window_focus(Workspace *workspace, Monitor *monitor);
 static void apply_workspace_to_monitor(Workspace *workspace, Monitor *monitor);
 static void select_monitor(Monitor *monitor);
@@ -149,7 +158,7 @@ static Client* find_client_in_workspace_by_hwnd(Workspace *workspace, HWND hwnd)
 static void close_focused_window(void);
 static void kill_focused_window(void);
 static void move_client_next(Client *client);
-static void move_focused_client_next();
+static void move_focused_client_next(void);
 static void button_press_handle(Button *button);
 static void bar_apply_workspace_change(Bar *bar, Workspace *previousWorkspace, Workspace *newWorkspace);
 static void monitor_set_workspace(Monitor *monitor, Workspace *workspace);
@@ -163,12 +172,15 @@ static void bar_trigger_paint(Bar *bar);
 static void workspace_increase_master_width(Workspace *workspace);
 static void workspace_decrease_master_width(Workspace *workspace);
 static void deckLayout_move_client_next(Client *client);
-static void deckLayout_move_client_to_master(Client *client);
 static void deckLayout_select_next_window(Workspace *workspace);
 static void deckLayout_apply_to_workspace(Workspace *workspace);
 static void stackBasedLayout_select_next_window(Workspace *workspace);
 static void noop_move_client_to_master(Client *client);
 static void calc_new_sizes_for_monacle_workspace(Workspace *workspace);
+static void tileLayout_move_client_to_master(Client *client);
+static int get_number_of_workspace_clients(Workspace *workspace);
+static int get_cpu_usage(void);
+static int get_memory_percent(void);
 
 static IAudioEndpointVolume *audioEndpointVolume;
 static Workspace *workspaces[9];
@@ -187,7 +199,7 @@ COLORREF barTextColor =RGB(235, 219, 178); // RGB(168, 153, 132);
 
 Layout deckLayout = {
     .select_next_window = deckLayout_select_next_window,
-    .move_client_to_master = deckLayout_move_client_to_master,
+    .move_client_to_master = tileLayout_move_client_to_master,
     .move_client_next = deckLayout_move_client_next,
     .apply_to_workspace = deckLayout_apply_to_workspace,
     .next = NULL,
@@ -205,7 +217,7 @@ Layout monacleLayout = {
 
 Layout tileLayout = {
     .select_next_window = stackBasedLayout_select_next_window,
-    .move_client_to_master = noop_move_client_to_master,
+    .move_client_to_master = tileLayout_move_client_to_master,
     .move_client_next = move_client_next,
     .apply_to_workspace = calc_new_sizes_for_workspace,
     .next = &monacleLayout,
@@ -216,12 +228,15 @@ Layout *headLayoutNode = &tileLayout;
 
 BOOL CALLBACK con_handler(DWORD stub)
 {
+    UNREFERENCED_PARAMETER(stub);
+
     PostThreadMessage(g_main_tid, WM_QUIT, 0, 0);
     return TRUE;
 };
 
 static BOOL CALLBACK enum_windows_callback(HWND hwnd, LPARAM lparam)
 {
+    UNREFERENCED_PARAMETER(lparam);
     register_window(hwnd);
     return TRUE;
 }
@@ -377,7 +392,7 @@ BOOL is_root_window(HWND hwnd)
     return TRUE;
 }
 
-LRESULT CALLBACK kb_proc(int code, WPARAM w, LPARAM l)
+LRESULT CALLBACK key_bindings(int code, WPARAM w, LPARAM l)
 {
     PKBDLLHOOKSTRUCT p = (PKBDLLHOOKSTRUCT)l;
     if (code ==0 && (w == WM_KEYDOWN || w == WM_SYSKEYDOWN))
@@ -484,12 +499,15 @@ LRESULT CALLBACK kb_proc(int code, WPARAM w, LPARAM l)
 void CALLBACK HandleWinEvent(
     HWINEVENTHOOK hook, DWORD event, HWND hwnd, LONG idObject, LONG idChild, DWORD dwEventThread, DWORD dwmsEventTime)
 {
+    UNREFERENCED_PARAMETER(dwmsEventTime);
+    UNREFERENCED_PARAMETER(dwEventThread);
+    UNREFERENCED_PARAMETER(hook);
+
     if (idChild == CHILDID_SELF && idObject == OBJID_WINDOW && hwnd)
     {
         if (event == EVENT_OBJECT_SHOW || event == EVENT_SYSTEM_MOVESIZEEND)
         {
             printf("EVENT_OBJECT_SHOW [%p]\n", hwnd);
-            BOOL isRootWindow = is_root_window(hwnd);
             register_window(hwnd);
         }
         else if (event == EVENT_OBJECT_DESTROY)
@@ -513,7 +531,7 @@ void CALLBACK HandleWinEvent(
 Client* client_from_hwnd(HWND hwnd)
 {
     DWORD processId = 0;
-    DWORD getWindowThreadProcessIdResult = GetWindowThreadProcessId(hwnd, &processId);
+    GetWindowThreadProcessId(hwnd, &processId);
 
     HANDLE hProcess;
     hProcess = OpenProcess( PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, FALSE, processId);
@@ -538,22 +556,26 @@ Client* client_from_hwnd(HWND hwnd)
         printf("ERROR Message [%ls]\n", buf);
     }
 
-    TCHAR title[256] = {0};
-    int titelResult =  GetWindowTextW(
+    TCHAR title[256];
+    GetWindowTextW(
       hwnd,
       title,
-      sizeof(title)
+      sizeof(title)/sizeof(TCHAR)
     );
 
     TCHAR className[256] = {0};
-    int classNameResult = GetClassName(hwnd, className, sizeof(className));
+    GetClassName(hwnd, className, sizeof(className)/sizeof(TCHAR));
+
+    ClientData *clientData = calloc(1, sizeof(ClientData));
+    clientData->hwnd = hwnd;
+    clientData->processId = processId;
+    clientData->className = _wcsdup(className);
+    clientData->processImageName = _wcsdup(processImageFileName);
+    clientData->title = _wcsdup(title);
+
     Client *c;
     c = calloc(1, sizeof(Client));
-    c->hwnd = hwnd;
-    c->processId = processId;
-    c->className = _wcsdup(className);
-    c->processImageName = _wcsdup(processImageFileName);
-    c->title = _wcsdup(title);
+    c->data = clientData;
 
     return c;
 }
@@ -561,7 +583,7 @@ Client* client_from_hwnd(HWND hwnd)
 //workspace_add_client
 void add_client_to_workspace(Workspace *workspace, Client *client)
 {
-    printf("add_client_to_workspace [%ls] [%ls]\n", workspace->name, client->title);
+    printf("add_client_to_workspace [%ls] [%ls]\n", workspace->name, client->data->title);
     client->workspace = workspace;
     if(workspace->clients)
     {
@@ -592,7 +614,7 @@ void remove_client_From_workspace_and_arrange(Workspace *workspace, Client *clie
 //workspaceController_redraw_buttons
 void workspace_redraw_buttons(Workspace *workspace)
 {
-    for(int i = 0; i < sizeof(workspace->buttons)/sizeof(Button *); i++)
+    for(int i = 0; i < workspace->numberOfButtons; i++)
     {
         button_redraw(workspace->buttons[i]);
     }
@@ -655,21 +677,19 @@ void arrange_clients_in_workspace(Workspace *workspace) {
     Client *c = workspace->clients;
     int numberOfClients = 0;
     while(c) {
-      if(c->isDirty)
+      if(c->data->isDirty)
       {
-          printf("MoveWindow hwnd [%p] x [%u] y [%u] w [%u] h [%u]\n", c->hwnd, c->x, c->y, c->w, c->h);
-          MoveWindow(c->hwnd, c->x, c->y, c->w, c->h, TRUE);
-          ShowWindow(c->hwnd, SW_RESTORE);
+          MoveWindow(c->data->hwnd, c->data->x, c->data->y, c->data->w, c->data->h, TRUE);
+          ShowWindow(c->data->hwnd, SW_RESTORE);
       }
       if(c->isVisible)
       {
-          printf("Setting top [%ls]\n", c->title);
-          SetWindowPos(c->hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_SHOWWINDOW|SWP_NOSIZE|SWP_NOMOVE);
+          SetWindowPos(c->data->hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_SHOWWINDOW | SWP_NOSIZE | SWP_NOMOVE);
+          SetWindowPos(c->data->hwnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_SHOWWINDOW | SWP_NOSIZE | SWP_NOMOVE);
       }
       else
       {
-          printf("Setting not top [%ls]\n", c->title);
-          SetWindowPos(c->hwnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_SHOWWINDOW | SWP_NOSIZE | SWP_NOMOVE);
+          SetWindowPos(c->data->hwnd, HWND_BOTTOM, 0, 0, 0, 0, SWP_SHOWWINDOW | SWP_NOSIZE | SWP_NOMOVE);
       }
       numberOfClients++;
       c = c->next;
@@ -682,7 +702,7 @@ void arrange_clients_in_workspace(Workspace *workspace) {
     if(workspace->monitor == selectedMonitor && workspace->clients)
     {
         HWND activeWindow = GetActiveWindow();
-        if(workspace->selected->hwnd != activeWindow)
+        if(workspace->selected->data->hwnd != activeWindow)
         {
             focus_workspace_selected_window(workspace);
         }
@@ -705,49 +725,42 @@ void move_focused_client_next()
 
 void noop_move_client_to_master(Client *client)
 {
+    UNREFERENCED_PARAMETER(client);
 }
 
-void deckLayout_move_client_to_master(Client *client)
+void tileLayout_move_client_to_master(Client *client)
 {
-    if(client->workspace->clients == client && !client->next)
+    if(client->workspace->clients == client)
     {
-        printf("move_client_next only client in workspace\n");
+        //This is the master do nothing
         return;
     }
 
-    if(!client->previous)
-    {
-        //Exit we are in the first position
-        return;
-    }
-
-    Client *currentMaster = client->workspace->clients;
-    Client *currentNext = client->next;
-
-    client->next = client->workspace->clients;
-    client->previous = NULL;
-    currentMaster->previous = client;
-    currentMaster->next = currentNext;
-    client->workspace->selected = client;
-    client->workspace->clients = client;
-
-    int numberOfClients = 0;
-    Client *c = client->workspace->clients;
+    ClientData *temp = client->data;
+    client->data = client->workspace->clients->data;
+    client->workspace->clients->data = temp;
+    client->workspace->selected = client->workspace->clients;
+    arrange_workspace(client->workspace);
 }
 
 //workspace_move_client_to_next_position
 void deckLayout_move_client_next(Client *client)
 {
-    printf("calling deckLayout_move_client_next\n");
+    if(!client->workspace->clients)
+    {
+        //Exit no clients
+        return;
+    }
+
     if(client->workspace->clients == client && !client->next)
     {
-        printf("move_client_next only client in workspace\n");
+        //Exit there is only one window
         return;
     }
 
     if(!client->previous)
     {
-        //Exit we are in the first position
+        //Exit we are in the master position
         return;
     }
 
@@ -757,99 +770,72 @@ void deckLayout_move_client_next(Client *client)
         return;
     }
 
-    if(!client->previous->previous && client->next)
+    Client *c = client->workspace->clients->next;
+    ClientData *topOfDeckData = c->data;
+    while(c)
     {
-        printf("client is 1st secondar window and there is another window\n");
-        Client *currentNext = client->next;
-
-        Client *c = client->workspace->clients->next;
-        Client *lastClient = NULL;
-        while(c)
-        {
-            if(!c->next)
-            {
-                lastClient = c;
-            }
-            c = c->next;
+        if(c->next) {
+            c->data = c->next->data;
         }
-
-        lastClient->next = client;
-        client->previous = lastClient;
-        client->next = NULL;
-
-        client->workspace->clients->next = currentNext;
-        currentNext->previous = client->workspace->clients;
-        client->workspace->selected = currentNext;
-        arrange_workspace(client->workspace);
-        return;
+        else
+        {
+            c->data = topOfDeckData;
+        }
+        c = c->next;
     }
+
+    arrange_workspace(client->workspace);
 }
 
 //workspace_move_client_to_next_position
 void move_client_next(Client *client)
 {
+    if(client->workspace->clients)
+    {
+        //Exit no clients
+    }
+
     if(client->workspace->clients == client && !client->next)
     {
-        printf("move_client_next only client in workspace\n");
+        //Exit there is only one client
         return;
     }
 
-    if(!client->previous && client->next)
+    if(client->next)
     {
-        printf("client is 1st window and there is another window\n");
-        Client *currentNext = client->next;
-        if(currentNext->next)
+        ClientData *temp = client->data;
+        client->data = client->next->data;
+        client->next->data = temp;
+        client->workspace->selected = client->next;
+    }
+    else
+    {
+        Client *c = client->workspace->clients;
+        ClientData *previousClientData = NULL;
+        while(c)
         {
-            currentNext->next->previous = client;
-            client->next = currentNext->next;
+            if(!previousClientData)
+            {
+                previousClientData = c->data;
+            }
+            else if(c->next)
+            {
+                ClientData *temp = c->data;
+                c->data = previousClientData;
+                previousClientData = temp;
+            }
+            else
+            {
+                ClientData *temp = c->data;
+                c->data = previousClientData;
+                client->workspace->clients->data = temp;
+            }
+            c = c->next;
         }
-        else
-        {
-            client->next = NULL;
-        }
-        client->previous = currentNext;
-        currentNext->previous = NULL;
-        currentNext->next = client;
-        client->workspace->clients = currentNext;
-        arrange_workspace(client->workspace);
-        return;
+        client->workspace->selected = client->workspace->clients;
     }
 
-    if(client->previous && client->next)
-    {
-        printf("client is a middle node\n");
-        Client *currentNext = client->next;
-        Client *currentPrevious = client->previous;
-        if(currentNext->next)
-        {
-            currentNext->next->previous = client;
-            client->next = currentNext->next;
-        }
-        else
-        {
-            client->next = NULL;
-        }
-        client->previous = currentNext;
-        currentNext->next = client;
-        currentNext->previous = currentPrevious;
-        currentPrevious->next = currentNext;
-        arrange_workspace(client->workspace);
-        return;
-    }
-
-    if(client->previous && !client->next)
-    {
-        printf("client is the last node\n");
-        Client *currentHead = client->workspace->clients;
-        Client *currentPrevious = client->previous;
-        currentPrevious->next = NULL;
-        currentHead->previous = client;
-        client->next = currentHead;
-        client->workspace->clients = client;
-        client->previous = NULL;
-        arrange_workspace(client->workspace);
-        return;
-    }
+    arrange_workspace(client->workspace);
 }
 
 void workspace_increase_master_width(Workspace *workspace)
@@ -1019,25 +1005,25 @@ int get_number_of_workspace_clients(Workspace *workspace) {
 
 //client_set_position
 void apply_sizes(Client *client, int w, int h, int x, int y) {
-    if(client->x != x || client->w != w || client->h != h || client->y != y) {
-        client->isDirty = TRUE;
-        client->w = w;
-        client->h = h;
-        client->x = x;
-        client->y = y;
-        printf("apply_sizes [%p] w [%u] h [%u] x [%u] y [%u]\n", client->hwnd, w, h, x, y);
+    if(client->data->x != x || client->data->w != w || client->data->h != h || client->data->y != y) {
+        client->data->isDirty = TRUE;
+        client->data->w = w;
+        client->data->h = h;
+        client->data->x = x;
+        client->data->y = y;
+        printf("apply_sizes [%p] w [%u] h [%u] x [%u] y [%u]\n", client->data->hwnd, w, h, x, y);
     }
 }
 
 //workspace_add_client_if_new_add_trigger_render
 void register_client_to_workspace(Workspace *workspace, Client *client)
 {
-    printf("register_client_to_workspace [%ls] [%ls] [%p]\n", workspace->name, client->title, client->hwnd); 
-    Client *existingClient = find_client_in_workspace_by_hwnd(workspace, client->hwnd);
+    printf("register_client_to_workspace [%ls] [%ls] [%p]\n", workspace->name, client->data->title, client->data->hwnd); 
+    Client *existingClient = find_client_in_workspace_by_hwnd(workspace, client->data->hwnd);
     if(existingClient)
     {
         printf("skipping client because hwnd match hwnd [%p] processId [%u] title [%ls] class [%ls]\n",
-            client->hwnd, client->processId, client->title, client->className);
+            client->data->hwnd, client->data->processId, client->data->title, client->data->className);
         free(client);
         arrange_workspace(workspace);
         return;
@@ -1087,7 +1073,7 @@ Client* find_client_in_workspace_by_hwnd(Workspace *workspace, HWND hwnd)
 {
     Client *c = workspace->clients;
     while(c) {
-        if(c->hwnd == hwnd)
+        if(c->data->hwnd == hwnd)
         {
             return c;
         }
@@ -1221,7 +1207,6 @@ void associate_workspace_to_monitor(Workspace *workspace, Monitor *monitor) {
     monitor->workspace = workspace;
     if(workspace->monitor->bar)
     {
-        Button *button;
         for(int i = 0; i < sizeof(workspace->monitor->bar->buttons)/sizeof(Button *); i++)
         {
             if(workspace->monitor->bar->buttons[i]->workspace == workspace)
@@ -1291,7 +1276,7 @@ void bar_trigger_paint(Bar *bar)
 {
     RECT rc;
     GetClientRect(bar->hwnd, &rc);
-    BOOL invlidateRectResult = InvalidateRect(
+    InvalidateRect(
       bar->hwnd,
       &rc,
       FALSE
@@ -1309,8 +1294,7 @@ void close_focused_window(void)
 {
     HWND foregroundHwnd = GetForegroundWindow();
     Client* existingClient = find_client_in_workspaces_by_hwnd(foregroundHwnd);
-    LRESULT res = SendMessage(foregroundHwnd, WM_CLOSE, (WPARAM)NULL, (LPARAM)NULL);
-    DWORD err = GetLastError();
+    SendMessage(foregroundHwnd, WM_CLOSE, (WPARAM)NULL, (LPARAM)NULL);
     CloseHandle(foregroundHwnd);
 
     if(existingClient)
@@ -1323,7 +1307,7 @@ void kill_focused_window(void)
 {
     HWND foregroundHwnd = GetForegroundWindow();
     DWORD processId = 0;
-    DWORD getWindowThreadProcessIdResult =  GetWindowThreadProcessId(foregroundHwnd, &processId);
+    GetWindowThreadProcessId(foregroundHwnd, &processId);
     Client* existingClient = find_client_in_workspaces_by_hwnd(foregroundHwnd);
     HANDLE processHandle = OpenProcess(PROCESS_TERMINATE, FALSE, processId);
     TerminateProcess(processHandle, 1);
@@ -1391,7 +1375,7 @@ void focus_workspace_selected_window(Workspace *workspace) {
     keybd_event(0, 0, 0, 0);
     if(workspace->clients)
     {
-        SetForegroundWindow(workspace->selected->hwnd);
+        SetForegroundWindow(workspace->selected->data->hwnd);
     }
     if(workspace->monitor->bar)
     {
@@ -1439,11 +1423,11 @@ void bar_render_selected_window_description(Bar *bar)
 {
     if(bar->monitor->workspace->selected)
     {
-        LPCWSTR processShortFileName = PathFindFileName( bar->monitor->workspace->selected->processImageName);
+        LPCWSTR processShortFileName = PathFindFileName( bar->monitor->workspace->selected->data->processImageName);
 
         TCHAR displayStr[MAX_PATH];
         int displayStrLen = swprintf(displayStr, MAX_PATH, L"[%ls] : %ls (%d)",
-            bar->monitor->workspace->layout->tag, processShortFileName, bar->monitor->workspace->selected->processId);
+            bar->monitor->workspace->layout->tag, processShortFileName, bar->monitor->workspace->selected->data->processId);
         bar->windowContextText = _wcsdup(displayStr);
         bar->windowContextTextLen = displayStrLen;
     }
@@ -1480,7 +1464,7 @@ void bar_render_times(Bar *bar)
     GetLocalTime(&lt);
     TCHAR displayStr[MAX_PATH];
     int displayStrLen = swprintf(displayStr, MAX_PATH, L"Volume: %.0f %% | Memory %ld %% | CPU: %ld %% | %04d-%02d-%02d %02d:%02d:%02d | %02d:%02d:%02d\n",
-            currentVol * 100, memoryPercent, cpuUsage, lt.wYear, lt.wMonth, lt.wDay, lt.wHour, lt.wMinute, lt.wSecond,  st.wHour, st.wMinute, st.wSecond);
+        currentVol * 100, memoryPercent, cpuUsage, lt.wYear, lt.wMonth, lt.wDay, lt.wHour, lt.wMinute, lt.wSecond,  st.wHour, st.wMinute, st.wSecond);
     bar->environmentContextText =  _wcsdup(displayStr);
     bar->environmentContextTextLen = displayStrLen;
 }
@@ -1551,12 +1535,15 @@ Bar* find_bar_by_hwnd(HWND hwnd)
 LRESULT CALLBACK WorkspaceButtonProc(
     HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam, UINT_PTR uIdSubclass, DWORD_PTR dwRefData)
 {
+    UNREFERENCED_PARAMETER(uIdSubclass);
     switch (uMsg)
     {
         case WM_LBUTTONDOWN:
-            Button *button = (Button *) dwRefData;
+        {
+            Button* button = (Button*)dwRefData;
             button_press_handle(button);
             break;
+        }
     }
 
     return DefSubclassProc(hWnd, uMsg, wParam, lParam);
@@ -1567,34 +1554,36 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
     HDC hdc;
     PAINTSTRUCT ps;
     Bar *msgBar;
+    Button* button = NULL;
 
     switch(msg)
     {
         case WM_DRAWITEM:
+        {
             LPDRAWITEMSTRUCT pdis = (LPDRAWITEMSTRUCT)lParam;
-            Bar *msgBar = (Bar *) GetWindowLongPtr(hwnd, GWLP_USERDATA);
-            Button *button = NULL;
-            for(int i = 0; i < sizeof(msgBar->buttons)/sizeof(Button *); i++)
+            msgBar = (Bar*)GetWindowLongPtr(hwnd, GWLP_USERDATA);
+            
+            for (int i = 0; i < sizeof(msgBar->buttons) / sizeof(Button*); i++)
             {
-                if(msgBar->buttons[i]->hwnd == pdis->hwndItem)
+                if (msgBar->buttons[i]->hwnd == pdis->hwndItem)
                 {
                     button = msgBar->buttons[i];
                     break;
                 }
             }
-            if(button)
+            if (button)
             {
-                HDC hdc = pdis->hDC;
+                hdc = pdis->hDC;
                 RECT rect = pdis->rcItem;
-                HBRUSH brush  = CreateSolidBrush(barBackgroundColor);
+                HBRUSH brush = CreateSolidBrush(barBackgroundColor);
                 SetBkColor(hdc, barBackgroundColor);
-                if(button->workspace == msgBar->monitor->workspace)
+                if (button->workspace == msgBar->monitor->workspace)
                 {
                     SetTextColor(hdc, buttonSelectedTextColor);
                 }
                 else
                 {
-                    if(button->workspace->numberOfClients > 0)
+                    if (button->workspace->numberOfClients > 0)
                     {
                         SetTextColor(hdc, buttonWithWindowsTextColor);
                     }
@@ -1606,44 +1595,42 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
                 FillRect(hdc, &rect, brush);
                 DeleteObject(brush);
 
-                HFONT hfOld = SelectObject(hdc, font);
+                SelectObject(hdc, font);
                 DrawTextW(
-                  hdc,
-                  button->workspace->tag,
-                  1,
-                  &rect,
-                  DT_CENTER | DT_VCENTER | DT_SINGLELINE
+                    hdc,
+                    button->workspace->tag,
+                    1,
+                    &rect,
+                    DT_CENTER | DT_VCENTER | DT_SINGLELINE
                 );
             }
             return TRUE;
+        }
         case WM_CREATE:
-            CREATESTRUCT *createStruct = (CREATESTRUCT *)lParam;
-            msgBar = (Bar *)createStruct->lpCreateParams;
+        {
+            CREATESTRUCT* createStruct = (CREATESTRUCT*)lParam;
+            msgBar = (Bar*)createStruct->lpCreateParams;
             SetWindowLongPtr(hwnd, GWLP_USERDATA, (LONG_PTR)msgBar);
 
-            for(int i = 0; i < sizeof(msgBar->buttons)/sizeof(Button*); i++) {
-                wchar_t string[20];
-                _itow(i + 1, string, 10);
-                Workspace *workspace = workspaces[i];
-
-                Button *button = msgBar->buttons[i];
+            for (int i = 0; i < sizeof(msgBar->buttons) / sizeof(Button*); i++) {
+                button = msgBar->buttons[i];
                 HINSTANCE hInst = (HINSTANCE)GetWindowLongPtr(hwnd, GWLP_HINSTANCE);
                 HWND buttonHwnd = CreateWindow(
                     TEXT("BUTTON"),
-                    string, 
-                    WS_VISIBLE | WS_CHILD | BS_OWNERDRAW | WS_CLIPCHILDREN | WS_CLIPSIBLINGS, 
+                    button->workspace->tag,
+                    WS_VISIBLE | WS_CHILD | BS_OWNERDRAW | WS_CLIPCHILDREN | WS_CLIPSIBLINGS,
                     button->rect->left - button->bar->monitor->xOffset,
                     button->rect->top,
                     button->rect->right - button->rect->left,
                     button->rect->bottom - button->rect->top,
                     hwnd,
-                    (HMENU)0ll +i,
+                    (HMENU)0ll + i,
                     hInst,
                     button);
 
-                SetWindowSubclass(buttonHwnd, WorkspaceButtonProc, 0, button);
+                SetWindowSubclass(buttonHwnd, WorkspaceButtonProc, 0, (DWORD_PTR)button);
 
-                if(!buttonHwnd)
+                if (!buttonHwnd)
                 {
                     MessageBox(NULL, L"Button Creation Failed.", L"Error", MB_OK | MB_ICONERROR);
                     return 0;
@@ -1652,6 +1639,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
                 button->hwnd = buttonHwnd;
             }
             return 0;
+        }
         case WM_PAINT:
             msgBar = (Bar *) GetWindowLongPtr(hwnd, GWLP_USERDATA);
             hdc = BeginPaint(hwnd, &ps);
@@ -1669,7 +1657,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
                 FillRect(hdc, &ps.rcPaint, brush);
                 DeleteObject(brush);
 
-                HFONT hfOld = SelectObject(hdc, font);
+                SelectObject(hdc, font);
                 SetTextColor(hdc, barTextColor);
                 SetBkMode(hdc, TRANSPARENT);
                 DrawText(
@@ -1696,7 +1684,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
             RECT rc;
             GetClientRect(msgBar->hwnd, &rc); 
             bar_render_times(msgBar);
-            BOOL invlidateRectResult = InvalidateRect(
+            InvalidateRect(
               msgBar->hwnd,
               &rc,
               FALSE
@@ -1774,11 +1762,11 @@ void run_bar_window(Bar *bar, WNDCLASSEX *barWindowClass)
     ShowWindow(hwnd, SW_SHOWDEFAULT);
     UpdateWindow(hwnd);
 
-    BOOL isWindowUniCode = IsWindowUnicode(
-        hwnd
-    );
+    /* BOOL isWindowUniCode = IsWindowUnicode( */
+    /*     hwnd */
+    /* ); */
 
-    UINT setTimerResult = SetTimer(
+    SetTimer(
         hwnd,
         0,
         1000,
@@ -1787,14 +1775,14 @@ void run_bar_window(Bar *bar, WNDCLASSEX *barWindowClass)
 
 BOOL chrome_workspace_filter(Client *client)
 {
-    if(wcsstr(client->processImageName, L"chrome.exe") || wcsstr(client->processImageName, L"brave.exe"))
+    if(wcsstr(client->data->processImageName, L"chrome.exe") || wcsstr(client->data->processImageName, L"brave.exe"))
     {
-        if(wcsstr(client->className, L"Chrome_WidgetWin_2"))
+        if(wcsstr(client->data->className, L"Chrome_WidgetWin_2"))
         {
-            printf("class name [%ls]\n", client->className);
+            printf("class name [%ls]\n", client->data->className);
             return FALSE;
         }
-        printf("class name [%ls]\n", client->className);
+        printf("class name [%ls]\n", client->data->className);
         return TRUE;
     }
     return FALSE;
@@ -1802,7 +1790,7 @@ BOOL chrome_workspace_filter(Client *client)
 
 BOOL terminal_workspace_filter(Client *client)
 {
-    if(wcsstr(client->processImageName, L"WindowsTerminal.exe"))
+    if(wcsstr(client->data->processImageName, L"WindowsTerminal.exe"))
     {
         return TRUE;
     }
@@ -1811,11 +1799,11 @@ BOOL terminal_workspace_filter(Client *client)
 
 BOOL rider_workspace_filter(Client *client)
 {
-    if(wcsstr(client->processImageName, L"rider64.exe"))
+    if(wcsstr(client->data->processImageName, L"rider64.exe"))
     {
         return TRUE;
     }
-    if(wcsstr(client->className, L"CASCADIA_HOSTING_WINDOW_CLASS"))
+    if(wcsstr(client->data->className, L"CASCADIA_HOSTING_WINDOW_CLASS"))
     {
         return TRUE;
     }
@@ -1824,7 +1812,7 @@ BOOL rider_workspace_filter(Client *client)
 
 BOOL archvm_workspace_filter(Client *client)
 {
-    if(wcsstr(client->title, L"ArchSoClose"))
+    if(wcsstr(client->data->title, L"ArchSoClose"))
     {
         return TRUE;
     }
@@ -1833,7 +1821,7 @@ BOOL archvm_workspace_filter(Client *client)
 
 BOOL virtualboxmanager_workspace_filter(Client *client)
 {
-    if(wcsstr(client->title, L"Oracle VM VirtualBox Manager"))
+    if(wcsstr(client->data->title, L"Oracle VM VirtualBox Manager"))
     {
         return TRUE;
     }
@@ -1842,7 +1830,16 @@ BOOL virtualboxmanager_workspace_filter(Client *client)
 
 BOOL windowsvm_workspace_filter(Client *client)
 {
-    if(wcsstr(client->title, L"NewWindows10"))
+    if(wcsstr(client->data->title, L"NewWindows10"))
+    {
+        return TRUE;
+    }
+    return FALSE;
+}
+
+BOOL paint_workspace_filter(Client *client)
+{
+    if(wcsstr(client->data->className, L"MSPaintApp"))
     {
         return TRUE;
     }
@@ -1851,6 +1848,7 @@ BOOL windowsvm_workspace_filter(Client *client)
 
 BOOL null_filter(Client *client)
 {
+    UNREFERENCED_PARAMETER(client);
     return FALSE;
 }
 
@@ -1878,7 +1876,7 @@ int main (void)
     font = CreateFontW(lfHeight, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, TEXT("Hack Regular Nerd Font Complete"));
     DeleteDC(hdc);
 
-    g_kb_hook = SetWindowsHookEx(WH_KEYBOARD_LL, &kb_proc, moduleHandle, 0);
+    g_kb_hook = SetWindowsHookEx(WH_KEYBOARD_LL, &key_bindings, moduleHandle, 0);
     if (g_kb_hook == NULL)
     {
         fprintf (stderr, "SetWindowsHookEx WH_KEYBOARD_LL [%p] failed with error %d\n", moduleHandle, GetLastError ());
@@ -1924,10 +1922,13 @@ int main (void)
     WCHAR windows10Tag = { 0xe70f };
     Workspace *windows10vmWorkspace = workspace_create(L"Windows10Vm", windowsvm_workspace_filter, &windows10Tag, &tileLayout);
 
-    Workspace *sixWorkspace = workspace_create(L"6", null_filter, L"6", &tileLayout);
+    WCHAR mediaTag = { 0xf447 };
+    Workspace *sixWorkspace = workspace_create(L"6", null_filter, &mediaTag, &tileLayout);
     Workspace *sevenWorkspace = workspace_create(L"7", null_filter, L"7", &tileLayout);
     Workspace *eightWorkspace = workspace_create(L"8", virtualboxmanager_workspace_filter, L"8", &tileLayout);
-    Workspace *nineWorkspace = workspace_create(L"9", null_filter, L"9", &tileLayout);
+
+    WCHAR paintTag = { 0xf77b };
+    Workspace *nineWorkspace = workspace_create(L"9", paint_workspace_filter, &paintTag, &tileLayout);
 
     workspaces[0] = chromeWorkspace;
     workspaces[1] = terminalWorkspace;
@@ -1940,7 +1941,7 @@ int main (void)
     workspaces[8] = nineWorkspace;
 
     for(int i = 0; i < (sizeof(workspaces)/sizeof(Workspace *)); i++) {
-        Workspace *workspace = workspaces[i];
+        /* Workspace *workspace = workspaces[i]; */
         Monitor *monitor = calloc(1, sizeof(Monitor));
         monitors[i] = monitor;
         calclulate_monitor(monitor, i + 1);
@@ -1975,6 +1976,7 @@ int main (void)
                 bar->buttons[j] = button;
 
                 workspaces[j]->buttons[i] = button;
+                workspaces[j]->numberOfButtons = i + 1;
             }
             bars[i] = bar;
             bar->monitor = monitors[i];
@@ -1999,7 +2001,7 @@ int main (void)
         associate_workspace_to_monitor(workspaces[i], monitors[i]);
     }
 
-    BOOL enumWindowsResult = EnumWindows(enum_windows_callback, 0);
+    EnumWindows(enum_windows_callback, 0);
 
     for(int i = 0; i < sizeof(bars)/sizeof(Bar *); i++)
     {
