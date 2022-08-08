@@ -181,6 +181,7 @@ static void tileLayout_move_client_to_master(Client *client);
 static int get_number_of_workspace_clients(Workspace *workspace);
 static int get_cpu_usage(void);
 static int get_memory_percent(void);
+static void start_launcher(TCHAR *cmdArgs);
 
 static IAudioEndpointVolume *audioEndpointVolume;
 static Workspace *workspaces[9];
@@ -444,6 +445,19 @@ LRESULT CALLBACK key_bindings(int code, WPARAM w, LPARAM l)
             else if(p->vkCode == VK_OEM_COMMA)
             {
                 monitor_select_next();
+                return 1;
+            }
+            //ALT-o
+            else if(p->vkCode == 0x4f)
+            {
+                start_launcher(L"cmd /c pg");
+                return 1;
+            }
+            //ALT-k
+            else if(p->vkCode == 0x4B)
+            {
+                start_launcher(L"cmd /c pl2");
+                return 1;
             }
             //ALT-J
             else if(p->vkCode == 0x4A)
@@ -505,6 +519,21 @@ void CALLBACK HandleWinEvent(
 
     if (idChild == CHILDID_SELF && idObject == OBJID_WINDOW && hwnd)
     {
+        if (event == EVENT_OBJECT_CREATE)
+        {
+            TCHAR title[256];
+            GetWindowTextW(
+              hwnd,
+              title,
+              sizeof(title)/sizeof(TCHAR)
+            );
+            if(wcsstr(title, L"SimpleWindowManager Scratch"))
+            {
+                MoveWindow(hwnd, 200, 100, 2000, 1200, FALSE);
+                SetForegroundWindow(hwnd);
+                ShowWindow(hwnd, SW_SHOW);
+            }
+        }
         if (event == EVENT_OBJECT_SHOW || event == EVENT_SYSTEM_MOVESIZEEND)
         {
             printf("EVENT_OBJECT_SHOW [%p]\n", hwnd);
@@ -1864,6 +1893,41 @@ Workspace* workspace_create(TCHAR *name, WindowFilter windowFilter, WCHAR* tag, 
     return result;
 }
 
+void start_launcher(TCHAR *cmdArgs)
+{
+    STARTUPINFO si = { 0 };
+    si.dwFlags = STARTF_USEPOSITION |  STARTF_USESIZE | STARTF_USESHOWWINDOW;
+    si.dwX= 200;
+    si.dwY = 100;
+    si.dwXSize = 2000;
+    si.dwYSize = 1200;
+    si.wShowWindow = SW_HIDE;
+    si.lpTitle = L"SimpleWindowManager Scratch";
+
+    PROCESS_INFORMATION pi = { 0 };
+
+    // Start the child process. 
+    if( !CreateProcess(NULL,//L"c:\\Windows\\system32\\cmd.exe",   // No module name (use command line)
+        cmdArgs,
+        /* L"cmd /c pg",        // Command line */
+        NULL,           // Process handle not inheritable
+        NULL,           // Thread handle not inheritable
+        FALSE,          // Set handle inheritance to FALSE
+        CREATE_NEW_CONSOLE,
+        NULL,           // Use parent's environment block
+        NULL,           // Use parent's starting directory 
+        &si,            // Pointer to STARTUPINFO structure
+        &pi)           // Pointer to PROCESS_INFORMATION structure
+    ) 
+    {
+        printf( "CreateProcess failed (%d).\n", GetLastError() );
+        return;
+    }
+
+    CloseHandle( pi.hProcess );
+    CloseHandle( pi.hThread );
+}
+
 int main (void)
 {
     HINSTANCE moduleHandle = GetModuleHandle(NULL);
@@ -1882,6 +1946,14 @@ int main (void)
         fprintf (stderr, "SetWindowsHookEx WH_KEYBOARD_LL [%p] failed with error %d\n", moduleHandle, GetLastError ());
         return 0;
     };
+
+    g_win_hook = SetWinEventHook(
+        EVENT_OBJECT_CREATE, EVENT_OBJECT_CREATE,
+        NULL,// Handle to DLL.
+        HandleWinEvent,// The callback.
+        0,
+        0,// Process and thread IDs of interest (0 = all)
+        WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
 
     g_win_hook = SetWinEventHook(
         EVENT_OBJECT_DESTROY, EVENT_OBJECT_SHOW,
