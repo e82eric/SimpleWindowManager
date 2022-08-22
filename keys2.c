@@ -157,7 +157,6 @@ struct Bar
     Monitor *monitor;
     int numberOfButtons;
     Button **buttons;
-    /* Button *currentButton; */
     RECT *selectedWindowDescRect;
     RECT *timesRect;
     TCHAR *windowContextText;
@@ -295,7 +294,8 @@ Layout tileLayout = {
 
 Layout *headLayoutNode = &tileLayout;
 static TCHAR *cmdLineExe = L"C:\\Windows\\System32\\cmd.exe";
-static TCHAR *launcherCommand = L"cmd /c for /f \"delims=\" %i in ('fd -t f -g \"*{.lnk,.exe}\" \"%USERPROFILE\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\" \"C:\\ProgramData\\Microsoft\\Windows\\Start Menu\" \"C:\\Users\\eric\\AppData\\Local\\Microsoft\\WindowsApps\" ^| fzf') do start \" \" \"%i\"";
+static TCHAR *launcherCommand = L"cmd /c for /f \"delims=\" %i in ('fd -t f -g \"*{.lnk,.exe}\" \"%USERPROFILE\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\" \"C:\\ProgramData\\Microsoft\\Windows\\Start Menu\" \"C:\\Users\\eric\\AppData\\Local\\Microsoft\\WindowsApps\" ^| fzf --bind=\"ctrl-c:execute(echo {} | clip)\"') do start \" \" \"%i\"";
+static TCHAR *allFilesCommand = L"cmd /c set /p \"pth=Enter Path: \" && for /f \"delims=\" %i in ('fd . -t f %^pth% ^| fzf --bind=\"ctrl-c:execute(echo {} | clip)\"') do start \" \" \"%i\"";
 static TCHAR *processListCommand = L"/c tasklist /nh | sort | fzf -e --bind=\"ctrl-k:execute(for /f \\\"tokens=2\\\" %f in ({}) do taskkill /f /pid %f)+reload(tasklist /nh | sort)\" --bind=\"ctrl-r:reload(tasklist /nh | sort)\" --header \"ctrl-k Kill Pid\" --reverse";
 
 enum Modifiers
@@ -2130,12 +2130,12 @@ int run (void)
         }
     }
 
-    numberOfKeyBindings = 31;
+    numberOfKeyBindings = 33;
     keyBindings = calloc(numberOfKeyBindings, sizeof(KeyBinding*));
     keyBindings[0] = keybinding_create_no_args(LAlt, VK_J, select_next_window);
     keyBindings[1] = keybinding_create_no_args(LAlt, VK_OEM_COMMA, monitor_select_next);
-    keyBindings[2] = keybinding_create_cmd_args(LAlt, VK_O, start_launcher, launcherCommand);
-    keyBindings[3] = keybinding_create_cmd_args(LAlt, VK_I, start_scratch_not_elevated, launcherCommand);
+    keyBindings[2] = keybinding_create_cmd_args(LShift | LAlt, VK_P, start_launcher, launcherCommand);
+    keyBindings[3] = keybinding_create_cmd_args(LAlt, VK_P, start_scratch_not_elevated, launcherCommand);
     keyBindings[4] = keybinding_create_cmd_args(LAlt, VK_K, start_launcher, processListCommand);
     keyBindings[5] = keybinding_create_no_args(LAlt, VK_SPACE, toggle_selected_monitor_layout);
     keyBindings[6] = keybinding_create_no_args(LAlt, VK_N, arrange_clients_in_selected_workspace);
@@ -2167,6 +2167,8 @@ int run (void)
 
     keyBindings[29] = keybinding_create_no_args(LShift | LAlt, VK_C, close_focused_window);
     keyBindings[30] = keybinding_create_no_args(LShift | LAlt, VK_C, kill_focused_window);
+    keyBindings[31] = keybinding_create_cmd_args(LAlt, VK_S, start_scratch_not_elevated, allFilesCommand);
+    keyBindings[32] = keybinding_create_cmd_args(LShift | LAlt, VK_S, start_launcher, allFilesCommand);
 
     int barTop = 0;
     int barBottom = 26;
