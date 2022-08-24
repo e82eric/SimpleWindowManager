@@ -294,6 +294,7 @@ Layout tileLayout = {
 
 Layout *headLayoutNode = &tileLayout;
 static TCHAR *cmdLineExe = L"C:\\Windows\\System32\\cmd.exe";
+static TCHAR *cmdScratchCmd = L"cmd /k";
 static TCHAR *launcherCommand = L"cmd /c for /f \"delims=\" %i in ('fd -t f -g \"*{.lnk,.exe}\" \"%USERPROFILE\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\" \"C:\\ProgramData\\Microsoft\\Windows\\Start Menu\" \"C:\\Users\\eric\\AppData\\Local\\Microsoft\\WindowsApps\" ^| fzf --bind=\"ctrl-c:execute(echo {} | clip)\"') do start \" \" \"%i\"";
 static TCHAR *allFilesCommand = L"cmd /c set /p \"pth=Enter Path: \" && for /f \"delims=\" %i in ('fd . -t f %^pth% ^| fzf --bind=\"ctrl-c:execute(echo {} | clip)\"') do start \" \" \"%i\"";
 static TCHAR *processListCommand = L"/c tasklist /nh | sort | fzf -e --bind=\"ctrl-k:execute(for /f \\\"tokens=2\\\" %f in ({}) do taskkill /f /pid %f)+reload(tasklist /nh | sort)\" --bind=\"ctrl-r:reload(tasklist /nh | sort)\" --header \"ctrl-k Kill Pid\" --reverse";
@@ -1530,7 +1531,6 @@ void bar_render_selected_window_description(Bar *bar)
     }
 }
 
-
 void bar_render_times(Bar *bar)
 {
     float currentVol = -1.0f;
@@ -1616,6 +1616,23 @@ int get_cpu_usage(void)
         return previousResult;
     }
     return nRes;
+}
+
+void taskbar_toggle(void)
+{
+    HWND taskBarHandle = FindWindow(
+      L"Shell_TrayWnd",
+      NULL
+    );
+    long taskBarStyles = GetWindowLong(taskBarHandle, GWL_STYLE);
+    if(taskBarStyles & WS_VISIBLE)
+    {
+        ShowWindow(taskBarHandle, SW_HIDE);
+    }
+    else
+    {
+        ShowWindow(taskBarHandle, SW_SHOW);
+    }
 }
 
 LRESULT CALLBACK WorkspaceButtonProc(
@@ -2130,7 +2147,7 @@ int run (void)
         }
     }
 
-    numberOfKeyBindings = 33;
+    numberOfKeyBindings = 36;
     keyBindings = calloc(numberOfKeyBindings, sizeof(KeyBinding*));
     keyBindings[0] = keybinding_create_no_args(LAlt, VK_J, select_next_window);
     keyBindings[1] = keybinding_create_no_args(LAlt, VK_OEM_COMMA, monitor_select_next);
@@ -2169,6 +2186,9 @@ int run (void)
     keyBindings[30] = keybinding_create_no_args(LShift | LAlt, VK_C, kill_focused_window);
     keyBindings[31] = keybinding_create_cmd_args(LAlt, VK_S, start_scratch_not_elevated, allFilesCommand);
     keyBindings[32] = keybinding_create_cmd_args(LShift | LAlt, VK_S, start_launcher, allFilesCommand);
+    keyBindings[33] = keybinding_create_cmd_args(LAlt, VK_T, start_scratch_not_elevated, cmdScratchCmd);
+    keyBindings[34] = keybinding_create_cmd_args(LShift | LAlt, VK_T, start_launcher, cmdScratchCmd);
+    keyBindings[35] = keybinding_create_no_args(LAlt, VK_V, taskbar_toggle);
 
     int barTop = 0;
     int barBottom = 26;
