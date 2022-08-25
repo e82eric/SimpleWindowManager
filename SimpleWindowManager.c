@@ -308,7 +308,7 @@ enum Modifiers
     LWin = 0x10,
     RWin = 0x20,
     RCtl = 0x40,
-    WCtl = 0x80
+    LCtl = 0x80
 };
 
 int numberOfKeyBindings;
@@ -486,9 +486,29 @@ LRESULT CALLBACK key_bindings(int code, WPARAM w, LPARAM l)
                 {
                     modifiersPressed |= LShift;
                 }
+                if(GetKeyState(VK_RSHIFT) & 0x8000)
+                {
+                    modifiersPressed |= RShift;
+                }
                 if(GetKeyState(VK_LMENU) & 0x8000)
                 {
                     modifiersPressed |= LAlt;
+                }
+                if(GetKeyState(VK_RMENU) & 0x8000)
+                {
+                    modifiersPressed |= RAlt;
+                }
+                if(GetKeyState(VK_CONTROL) & 0x8000)
+                {
+                    modifiersPressed |= LCtl;
+                }
+                if(GetKeyState(VK_LWIN) & 0x8000)
+                {
+                    modifiersPressed |= LWin;
+                }
+                if(GetKeyState(VK_RWIN) & 0x8000)
+                {
+                    modifiersPressed |= RWin;
                 }
 
                 if(keyBindings[i]->modifiers == modifiersPressed)
