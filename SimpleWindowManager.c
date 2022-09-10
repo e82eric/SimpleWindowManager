@@ -15,6 +15,8 @@
 #include <processthreadsapi.h>
 #include <securitybaseapi.h>
 #include <windowsx.h>
+#include <netlistmgr.h>
+#include <dwmapi.h>
 #pragma comment(lib, "user32.lib")
 #pragma comment(lib, "Oleacc.lib")
 #pragma comment(lib, "Gdi32.lib")
@@ -22,10 +24,13 @@
 #pragma comment(lib, "Shlwapi.lib")
 #pragma comment(lib, "OLE32.lib")
 #pragma comment(lib, "Advapi32.lib")
+#pragma comment(lib, "Dwmapi.lib")
 
 DEFINE_GUID(IID_IMMDeviceEnumerator, 0xa95664d2, 0x9614, 0x4f35, 0xa7, 0x46, 0xde, 0x8d, 0xb6, 0x36, 0x17, 0xe6);
 DEFINE_GUID(CLSID_MMDeviceEnumerator, 0xbcde0395, 0xe52f, 0x467c, 0x8e, 0x3d, 0xc4, 0x57, 0x92, 0x91, 0x69, 0x2e);
-DEFINE_GUID(IID_IAudioEndpointVolume, 0x5cdf2c82, 0x841e, 0x4546, 0x97,0x22, 0x0c,0xf7,0x40,0x78,0x22,0x9a);
+DEFINE_GUID(IID_IAudioEndpointVolume, 0x5cdf2c82, 0x841e, 0x4546, 0x97, 0x22, 0x0c, 0xf7, 0x40, 0x78, 0x22, 0x9a);
+DEFINE_GUID(CLSID_NetworkListManager, 0xdcb00c01, 0x570f, 0x4a9b, 0x8d,0x69, 0x19,0x9f,0xdb,0xa5,0x72,0x3b);
+DEFINE_GUID(IID_INetworkListManager, 0xdcb00000, 0x570f, 0x4a9b, 0x8d,0x69, 0x19,0x9f,0xdb,0xa5,0x72,0x3b);
 
 #define VK_A 0x41
 #define VK_B 0x42
@@ -230,6 +235,7 @@ static void deckLayout_apply_to_workspace(Workspace *workspace);
 static void stackBasedLayout_select_next_window(Workspace *workspace);
 static void noop_move_client_to_master(Client *client);
 static void calc_new_sizes_for_monacle_workspace(Workspace *workspace);
+static void monacleLayout_select_next_client(Workspace *workspace);
 static void tileLayout_move_client_to_master(Client *client);
 static int get_number_of_workspace_clients(Workspace *workspace);
 static int get_cpu_usage(void);
@@ -242,9 +248,14 @@ static void free_client(Client *client);
 static void button_set_selected(Button *button, BOOL value);
 static void workspace_set_number_of_clients(Workspace *workspace, int value);
 static void button_set_has_clients(Button *button, BOOL value);
+static void client_move_to_location_on_screen(Client *client);
+static void swap_selected_monitor_to_monacle_layout(void);
+static void swap_selected_monitor_to_deck_layout(void);
+static void swap_selected_monitor_to_tile_layout(void);
 static int run (void);
 
 static IAudioEndpointVolume *audioEndpointVolume;
+static INetworkListManager *networkListManager;
 
 int numberOfWorkspaces;
 static Workspace **workspaces;
@@ -259,11 +270,15 @@ int numberOfBars;
 HFONT font;
 
 COLORREF barBackgroundColor = 0x282828;
-COLORREF barSelectedBackgroundColor = RGB(69, 133, 136);// 0x3c3836;
+/* COLORREF barSelectedBackgroundColor = RGB(69, 133, 136);// 0x3c3836; */
+COLORREF barSelectedBackgroundColor = RGB(84, 133, 36);// 0x3c3836;
 COLORREF buttonSelectedTextColor = RGB(204, 36, 29);
 COLORREF buttonWithWindowsTextColor = RGB(255, 255, 247);
 COLORREF buttonWithoutWindowsTextColor = 0x504945;
 COLORREF barTextColor =RGB(235, 219, 178); // RGB(168, 153, 132);
+
+long barHeight = 29;
+long gapWidth = 13;
 
 Layout deckLayout = {
     .select_next_window = deckLayout_select_next_window,
@@ -275,7 +290,7 @@ Layout deckLayout = {
 };
 
 Layout monacleLayout = {
-    .select_next_window = stackBasedLayout_select_next_window,
+    .select_next_window = monacleLayout_select_next_client,
     .move_client_to_master = noop_move_client_to_master,
     .move_client_next = move_client_next,
     .apply_to_workspace = calc_new_sizes_for_monacle_workspace,
@@ -335,7 +350,6 @@ BOOL is_root_window(HWND hwnd)
 
     if(exWindowLongPtr & WS_EX_NOACTIVATE)
     {
-        /* printf("WS_EX_NOACTIVATE [%p]\n", hwnd); */
         return FALSE;
     }
     else
@@ -344,128 +358,16 @@ BOOL is_root_window(HWND hwnd)
 
     if(windowLongPtr & WS_CHILD)
     {
-        /* printf("WS_CHILD [%p]\n", hwnd); */
         return FALSE;
     }
     else
     {
     }
 
-    /* if(windowLongPtr & WS_BORDER) */
-    /* { */
-    /*     printf("WS_BORDER [%p]\n", hwnd); */
-    /* } */
-
-    /* if(windowLongPtr & WS_CAPTION) */
-    /* { */
-    /*     printf("WS_CAPTION [%p]\n", hwnd); */
-    /* } */
-
-    /* if(windowLongPtr & WS_CHILD) */
-    /* { */
-    /*     printf("WS_CHILD [%p]\n", hwnd); */
-    /* } */
-
-    /* if(windowLongPtr & WS_CHILDWINDOW) */
-    /* { */
-    /*     printf("WS_CHILDWINDOW [%p]\n", hwnd); */
-    /* } */
-
-    /* if(windowLongPtr & WS_CLIPCHILDREN) */
-    /* { */
-    /*     printf("WS_CLIPCHILDREN [%p]\n", hwnd); */
-    /* } */
-    /* if(windowLongPtr & WS_CLIPSIBLINGS) */
-    /* { */
-    /*     printf("WS_CLIPSIBLINGS [%p]\n", hwnd); */
-    /* } */
-    /* if(windowLongPtr & WS_DISABLED) */
-    /* { */
-    /*     printf("WS_DISABLED [%p]\n", hwnd); */
-    /* } */
-    /* if(windowLongPtr & WS_DISABLED) */
-    /* { */
-    /*     printf("WS_DISABLED [%p]\n", hwnd); */
-    /* } */
-    /* if(windowLongPtr & WS_DLGFRAME) */
-    /* { */
-    /*     printf("WS_DLGFRAME [%p]\n", hwnd); */
-    /* } */
-    /* if(windowLongPtr & WS_GROUP) */
-    /* { */
-    /*     printf("WS_GROUP [%p]\n", hwnd); */
-    /* } */
-    /* if(windowLongPtr & WS_HSCROLL) */
-    /* { */
-    /*     printf("WS_HSCROLL [%p]\n", hwnd); */
-    /* } */
-    /* if(windowLongPtr & WS_ICONIC) */
-    /* { */
-    /*     printf("WS_ICONIC [%p]\n", hwnd); */
-    /* } */
-    /* if(windowLongPtr & WS_MAXIMIZE) */
-    /* { */
-    /*     printf("WS_MAXIMIZE [%p]\n", hwnd); */
-    /* } */
-    /* if(windowLongPtr & WS_MAXIMIZEBOX) */
-    /* { */
-    /*     printf("WS_MAXIMIZEBOX [%p]\n", hwnd); */
-    /* } */
-    /* if(windowLongPtr & WS_OVERLAPPED) */
-    /* { */
-    /*     printf("WS_OVERLAPPED [%p]\n", hwnd); */
-    /* } */
-    /* if(windowLongPtr & WS_OVERLAPPEDWINDOW) */
-    /* { */
-    /*     printf("WS_OVERLAPPEDWINDOW [%p]\n", hwnd); */
-    /* } */
-    /* if(windowLongPtr & WS_POPUP) */
-    /* { */
-    /*     printf("WS_POPUP [%p]\n", hwnd); */
-    /* } */
-    /* if(windowLongPtr & WS_POPUPWINDOW) */
-    /* { */
-    /*     printf("WS_POPUPWINDOW [%p]\n", hwnd); */
-    /* } */
-    /* if(windowLongPtr & WS_SIZEBOX) */
-    /* { */
-    /*     printf("WS_SIZEBOX [%p]\n", hwnd); */
-    /* } */
-    /* if(windowLongPtr & WS_SYSMENU) */
-    /* { */
-    /*     printf("WS_SYSMENU [%p]\n", hwnd); */
-    /* } */
-    /* if(windowLongPtr & WS_TABSTOP) */
-    /* { */
-    /*     printf("WS_TABSTOP [%p]\n", hwnd); */
-    /* } */
-    /* if(windowLongPtr & WS_THICKFRAME) */
-    /* { */
-    /*     printf("WS_THICKFRAME [%p]\n", hwnd); */
-    /* } */
-    /* if(windowLongPtr & WS_TILED) */
-    /* { */
-    /*     printf("WS_TILED [%p]\n", hwnd); */
-    /* } */
-    /* if(windowLongPtr & WS_TILEDWINDOW) */
-    /* { */
-    /*     printf("WS_TILEDWINDOW [%p]\n", hwnd); */
-    /* } */
-    /* if(windowLongPtr & WS_VISIBLE) */
-    /* { */
-    /*     printf("WS_VISIBLE [%p]\n", hwnd); */
-    /* } */
-    /* if(windowLongPtr & WS_VSCROLL) */
-    /* { */
-    /*     printf("WS_VSCROLL [%p]\n", hwnd); */
-    /* } */
-
     HWND parentHwnd = GetParent(hwnd);
-    /* printf("PARENT [%p] [%p]\n", parentHwnd, hwnd); */
 
     if(windowLongPtr & WS_POPUP && !(windowLongPtr & WS_CLIPCHILDREN) || parentHwnd)
     {
-        /* printf("WS_POPUPWINDOW [%p]\n", hwnd); */
         return FALSE;
     }
 
@@ -561,12 +463,13 @@ void CALLBACK HandleWinEvent(
             );
             if(wcsstr(title, L"SimpleWindowManager Scratch"))
             {
-                MoveWindow(hwnd, 200, 100, 2000, 1200, FALSE);
-                SetForegroundWindow(hwnd);
+                MoveWindow(hwnd, selectedMonitor->xOffset + 200, 200, selectedMonitor->w - 500, selectedMonitor->h - 500, FALSE);
                 ShowWindow(hwnd, SW_SHOW);
+                SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_SHOWWINDOW | SWP_NOSIZE | SWP_NOMOVE);
+                SetForegroundWindow(hwnd);
             }
         }
-        if (event == EVENT_OBJECT_SHOW || event == EVENT_SYSTEM_MOVESIZEEND)
+        if (event == EVENT_OBJECT_SHOW || event == EVENT_SYSTEM_MOVESIZEEND || event == EVENT_OBJECT_LOCATIONCHANGE)
         {
             register_window(hwnd);
         }
@@ -739,39 +642,59 @@ BOOL remove_client_from_workspace(Workspace *workspace, Client *client) {
 //workspace_arrange_clients
 void arrange_clients_in_workspace(Workspace *workspace) {
     Client *c = workspace->clients;
+    Client *lastClient = NULL;
     int numberOfClients = 0;
     while(c)
     {
-      if(c->data->isDirty)
-      {
-          MoveWindow(c->data->hwnd, c->data->x, c->data->y, c->data->w, c->data->h, TRUE);
-          ShowWindow(c->data->hwnd, SW_RESTORE);
-      }
-      if(c->isVisible)
-      {
-          SetWindowPos(c->data->hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_SHOWWINDOW | SWP_NOSIZE | SWP_NOMOVE);
-          SetWindowPos(c->data->hwnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_SHOWWINDOW | SWP_NOSIZE | SWP_NOMOVE);
-      }
-      else
-      {
-          SetWindowPos(c->data->hwnd, HWND_BOTTOM, 0, 0, 0, 0, SWP_SHOWWINDOW | SWP_NOSIZE | SWP_NOMOVE);
-      }
-      numberOfClients++;
-      c = c->next;
+        if(!c->next)
+        {
+            lastClient = c;
+        }
+        numberOfClients++;
+        c = c->next;
+    }
+
+    c = lastClient;
+    while(c)
+    {
+        if(c->data->isDirty)
+        {
+            client_move_to_location_on_screen(c);
+            ShowWindow(c->data->hwnd, SW_RESTORE);
+        }
+        if(c->isVisible)
+        {
+            SetWindowPos(c->data->hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_SHOWWINDOW | SWP_NOSIZE | SWP_NOMOVE);
+            SetWindowPos(c->data->hwnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_SHOWWINDOW | SWP_NOSIZE | SWP_NOMOVE);
+        }
+        else
+        {
+            SetWindowPos(c->data->hwnd, HWND_BOTTOM, 0, 0, 0, 0, SWP_SHOWWINDOW | SWP_NOSIZE | SWP_NOMOVE);
+        }
+        numberOfClients++;
+        c = c->previous;
     }
     workspace_set_number_of_clients(workspace, numberOfClients);
-    if(!workspace->selected && workspace->clients)
-    {
-        workspace->selected = workspace->clients;
-    }
-    if(workspace->monitor == selectedMonitor && workspace->clients)
-    {
-        HWND activeWindow = GetActiveWindow();
-        if(workspace->selected->data->hwnd != activeWindow)
-        {
-            focus_workspace_selected_window(workspace);
-        }
-    }
+}
+
+void client_move_to_location_on_screen(Client *client)
+{
+    RECT wrect;
+    RECT xrect;
+    GetWindowRect(client->data->hwnd, &wrect);
+    DwmGetWindowAttribute(client->data->hwnd, 9, &xrect, sizeof(RECT));
+
+    long leftBorderWidth = xrect.left - wrect.left;
+    long rightBorderWidth = wrect.right - xrect.right;
+    long topBorderWidth = wrect.top - xrect.top;
+    long bottomBorderWidth = wrect.bottom - xrect.bottom;
+
+    long targetTop = client->data->y - topBorderWidth;
+    long targetHeight = client->data->h + topBorderWidth + bottomBorderWidth;
+    long targetLeft = client->data->x - leftBorderWidth;
+    long targetWidth = client->data->w + leftBorderWidth + rightBorderWidth;
+
+    MoveWindow(client->data->hwnd, targetLeft, targetTop, targetWidth, targetHeight, FALSE);
 }
 
 void workspace_set_number_of_clients(Workspace* workspace, int value)
@@ -858,10 +781,6 @@ void deckLayout_move_client_next(Client *client)
         {
             c->data = topOfDeckData;
         }
-        /* if(numberOfClients == 0) */
-        /* { */
-        /*     client->workspace->selected = c; */
-        /* } */
         numberOfClients++;
         c = c->next;
     }
@@ -920,6 +839,41 @@ void move_client_next(Client *client)
     arrange_workspace(client->workspace);
 }
 
+void monacleLayout_select_next_client(Workspace *workspace)
+{
+    if(!workspace->clients)
+    {
+        //Exit no clients
+        return;
+    }
+
+    if(!workspace->clients->next)
+    {
+        //Exit there is only one window
+        return;
+    }
+
+    Client *c = workspace->clients;
+    ClientData *topOfDeckData = c->data;
+    int numberOfClients = 0;
+    while(c)
+    {
+        if(c->next)
+        {
+            c->data = c->next->data;
+        }
+        else
+        {
+            c->data = topOfDeckData;
+        }
+        numberOfClients++;
+        c = c->next;
+    }
+
+    workspace->selected = workspace->clients;
+    arrange_workspace(workspace);
+}
+
 void workspace_increase_master_width_selected_monitor(void)
 {
     workspace_increase_master_width(selectedMonitor->workspace);
@@ -949,34 +903,41 @@ void calc_new_sizes_for_workspace(Workspace *workspace) {
 
     int numberOfClients = get_number_of_workspace_clients(workspace);
 
-    int gapWidth = 10;
-    int barHeight = 25;
-
     int masterX = workspace->monitor->xOffset + gapWidth;
     int allWidth = 0;
 
     int masterWidth;
     int tileWidth;
-    if(numberOfClients == 1) {
-      masterWidth = screenWidth - gapWidth;
+    if(numberOfClients == 1)
+    {
+      masterWidth = screenWidth - (gapWidth * 2);
       tileWidth = 0;
-      allWidth = screenWidth - gapWidth;
-    } else {
-      masterWidth = (screenWidth / 2) - gapWidth + workspace->masterOffset;
-      tileWidth = (screenWidth / 2) - gapWidth - workspace->masterOffset;
+      allWidth = screenWidth - (gapWidth * 2);
+    }
+    else
+    {
+      masterWidth = (screenWidth / 2) - gapWidth - (gapWidth / 2) + workspace->masterOffset;
+      tileWidth = (screenWidth / 2) - gapWidth - (gapWidth / 2) + workspace->masterOffset;
       allWidth = (screenWidth / 2) - gapWidth;
     }
 
-    int masterHeight = screenHeight - barHeight - gapWidth;
+    int masterHeight = screenHeight - barHeight - (gapWidth * 2);
     int tileHeight = 0;
-    if(numberOfClients < 3) {
-      tileHeight = masterHeight;
-    } else {
-      tileHeight = (masterHeight / (numberOfClients - 1)) - (gapWidth / 2);
+    if(numberOfClients < 3)
+    {
+        tileHeight = masterHeight;
+    }
+    else
+    {
+        long numberOfTiles = numberOfClients - 1;
+        long numberOfGaps = numberOfTiles - 1;
+        long spaceForGaps = numberOfGaps * gapWidth;
+        long spaceForTiles = masterHeight - spaceForGaps;
+        tileHeight = spaceForTiles / numberOfTiles;
     }
 
     int masterY = barHeight + gapWidth;
-    int tileX = workspace->monitor->xOffset + masterWidth + gapWidth;
+    int tileX = workspace->monitor->xOffset + masterWidth + (gapWidth * 2);
 
     Client *c  = workspace->clients;
     int NumberOfClients2 = 0;
@@ -1007,28 +968,27 @@ void deckLayout_apply_to_workspace(Workspace *workspace)
 
     int numberOfClients = get_number_of_workspace_clients(workspace);
 
-    int gapWidth = 10;
-    int barHeight = 25;
-
     int masterX = workspace->monitor->xOffset + gapWidth;
 
     int masterWidth;
     int secondaryWidth;
-    if(numberOfClients == 1) {
-      masterWidth = screenWidth - gapWidth;
-      secondaryWidth = 0;
-    } else {
-      masterWidth = (screenWidth / 2) - gapWidth + workspace->masterOffset;
-      secondaryWidth = (screenWidth / 2) - gapWidth - workspace->masterOffset;
+    if(numberOfClients == 1)
+    {
+        masterWidth = screenWidth - gapWidth;
+        secondaryWidth = 0;
+    }
+    else
+    {
+        masterWidth = (screenWidth / 2) - gapWidth - (gapWidth / 2) + workspace->masterOffset;
+        secondaryWidth = (screenWidth / 2) - gapWidth - (gapWidth / 2) + workspace->masterOffset;
     }
 
-    int allHeight = screenHeight - barHeight - gapWidth;
+    int allHeight = screenHeight - barHeight - (gapWidth * 2);
     int allY = barHeight + gapWidth;
-    int secondaryX = workspace->monitor->xOffset + masterWidth + gapWidth;
+    int secondaryX = workspace->monitor->xOffset + masterWidth + (gapWidth * 2);
 
     Client *c  = workspace->clients;
     int numberOfClients2 = 0;
-    BOOL foundSelected = FALSE;
     while(c)
     {
       if(numberOfClients2 == 0)
@@ -1037,25 +997,16 @@ void deckLayout_apply_to_workspace(Workspace *workspace)
       }
       else
       {
-        apply_sizes(c, secondaryWidth, allHeight, secondaryX, allY);
+          apply_sizes(c, secondaryWidth, allHeight, secondaryX, allY);
       }
       if(numberOfClients2 == 0 || numberOfClients2 == 1)
       {
-          if(workspace->selected == c)
-          {
-              foundSelected = TRUE;
-          }
           c->isVisible = TRUE;
       }
       else
       {
           c->isVisible = FALSE;
       }
-
-      /* if(!foundSelected) */
-      /* { */
-      /*     workspace->selected = workspace->clients; */
-      /* } */
 
       numberOfClients2++;
       c = c->next;
@@ -1068,12 +1019,9 @@ void calc_new_sizes_for_monacle_workspace(Workspace *workspace)
     int screenWidth = workspace->monitor->w;
     int screenHeight = workspace->monitor->h;
 
-    int gapWidth = 10;
-    int barHeight = 25;
-
     int allX = workspace->monitor->xOffset + gapWidth;
-    int allWidth = screenWidth - gapWidth;
-    int allHeight = screenHeight - barHeight - gapWidth;
+    int allWidth = screenWidth - (gapWidth * 2);
+    int allHeight = screenHeight - barHeight - (gapWidth * 2);
     int allY = barHeight + gapWidth;
 
     Client *c  = workspace->clients;
@@ -1290,6 +1238,7 @@ void arrange_workspace(Workspace *workspace)
 }
 
 void apply_workspace_to_monitor_with_window_focus(Workspace *workspace, Monitor *monitor) {
+
     apply_workspace_to_monitor(workspace, monitor);
     focus_workspace_selected_window(workspace);
 }
@@ -1440,7 +1389,6 @@ void deckLayout_select_next_window(Workspace *workspace) {
     }
     else
     {
-        /* printf("Something weird is going on with deck move next\n"); */
         //somehow we are not on the secondary or master.  Maybe fail instead 
         workspace->selected = workspace->clients;
     }
@@ -1479,7 +1427,11 @@ void focus_workspace_selected_window(Workspace *workspace) {
     keybd_event(0, 0, 0, 0);
     if(workspace->clients)
     {
-        SetForegroundWindow(workspace->selected->data->hwnd);
+        HWND focusedHwnd = GetForegroundWindow();
+        if(workspace->selected->data->hwnd != focusedHwnd)
+        {
+            SetForegroundWindow(workspace->selected->data->hwnd);
+        }
     }
     if(workspace->monitor->bar)
     {
@@ -1515,6 +1467,21 @@ void swap_selected_monitor_to_layout(Layout *layout)
     Workspace *workspace = selectedMonitor->workspace;
     workspace->layout = layout;
     arrange_workspace(workspace);
+}
+
+void swap_selected_monitor_to_monacle_layout(void)
+{
+    swap_selected_monitor_to_layout(&monacleLayout);
+}
+
+void swap_selected_monitor_to_deck_layout(void)
+{
+    swap_selected_monitor_to_layout(&deckLayout);
+}
+
+void swap_selected_monitor_to_tile_layout(void)
+{
+    swap_selected_monitor_to_layout(&tileLayout);
 }
 
 //reset selected workspace
@@ -1553,6 +1520,30 @@ void bar_render_selected_window_description(Bar *bar)
 
 void bar_render_times(Bar *bar)
 {
+    VARIANT_BOOL isInternetConnected;
+    WCHAR internetUnknown = { 0xf128 };
+    WCHAR internetUp = { 0xf817 };
+    WCHAR internetDown = { 0xf127 };
+    WCHAR internetStatusChar;
+
+    HRESULT hr;
+    hr = INetworkListManager_get_IsConnectedToInternet(networkListManager, &isInternetConnected);
+    if(FAILED(hr))
+    {
+        internetStatusChar = internetUnknown;
+    }
+    else
+    {
+        if(isInternetConnected)
+        {
+            internetStatusChar = internetUp;
+        }
+        else
+        {
+            internetStatusChar = internetDown;
+        }
+    }
+
     float currentVol = -1.0f;
     IAudioEndpointVolume_GetMasterVolumeLevelScalar(
       audioEndpointVolume,
@@ -1576,8 +1567,8 @@ void bar_render_times(Bar *bar)
     GetSystemTime(&st);
     GetLocalTime(&lt);
     TCHAR displayStr[MAX_PATH];
-    int displayStrLen = swprintf(displayStr, MAX_PATH, L"Volume: %.0f %% | Memory %ld %% | CPU: %ld %% | %04d-%02d-%02d %02d:%02d:%02d | %02d:%02d:%02d\n",
-        currentVol * 100, memoryPercent, cpuUsage, lt.wYear, lt.wMonth, lt.wDay, lt.wHour, lt.wMinute, lt.wSecond,  st.wHour, st.wMinute, st.wSecond);
+    int displayStrLen = swprintf(displayStr, MAX_PATH, L"Internet: %lc | Volume: %.0f %% | Memory %ld %% | CPU: %ld %% | %04d-%02d-%02d %02d:%02d:%02d | %02d:%02d:%02d\n",
+        internetStatusChar, currentVol * 100, memoryPercent, cpuUsage, lt.wYear, lt.wMonth, lt.wDay, lt.wHour, lt.wMinute, lt.wSecond,  st.wHour, st.wMinute, st.wSecond);
 
     if(bar->environmentContextText)
     {
@@ -1644,14 +1635,20 @@ void taskbar_toggle(void)
       L"Shell_TrayWnd",
       NULL
     );
+    HWND taskBar2Handle = FindWindow(
+      L"Shell_SecondaryTrayWnd",
+      NULL
+    );
     long taskBarStyles = GetWindowLong(taskBarHandle, GWL_STYLE);
     if(taskBarStyles & WS_VISIBLE)
     {
         ShowWindow(taskBarHandle, SW_HIDE);
+        ShowWindow(taskBar2Handle, SW_HIDE);
     }
     else
     {
         ShowWindow(taskBarHandle, SW_SHOW);
+        ShowWindow(taskBar2Handle, SW_SHOW);
     }
 }
 
@@ -1701,9 +1698,10 @@ LRESULT CALLBACK WorkspaceButtonProc(
             button_press_handle(button);
             break;
         }
+        default:
+            return DefSubclassProc(hWnd, uMsg, wParam, lParam);
     }
-
-    return DefSubclassProc(hWnd, uMsg, wParam, lParam);
+    return 0;
 }
 
 LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
@@ -1848,7 +1846,7 @@ void run_bar_window(Bar *bar, WNDCLASSEX *barWindowClass)
         bar->monitor->xOffset,
         0,
         bar->monitor->w,
-        26,
+        barHeight,
         NULL,
         NULL,
         GetModuleHandle(0),
@@ -1880,9 +1878,19 @@ void run_bar_window(Bar *bar, WNDCLASSEX *barWindowClass)
 
 BOOL chrome_workspace_filter(Client *client)
 {
-    if(wcsstr(client->data->processImageName, L"chrome.exe") || wcsstr(client->data->processImageName, L"brave.exe"))
+    if(wcsstr(client->data->processImageName, L"chrome.exe") || wcsstr(client->data->processImageName, L"brave.exe") || wcsstr(client->data->processImageName, L"firefox.exe"))
     {
         if(wcsstr(client->data->className, L"Chrome_WidgetWin_2"))
+        {
+            return FALSE;
+        }
+        if(
+                wcsstr(client->data->className, L"MozillaDropShadowWindowClass")
+                /* || wcsstr(client->data->className, L"MozillaHiddenWindowClass") */
+                || wcsstr(client->data->className, L"MozillaDialogClass")
+                /* || wcsstr(client->data->className, L"MozillaTempWindowClass") */
+                /* || wcsstr(client->data->className, L"MozillaTransitionWindowClass") */
+            )
         {
             return FALSE;
         }
@@ -2084,6 +2092,7 @@ void start_launcher(TCHAR *cmdArgs)
 
 int run (void)
 {
+    SetProcessDPIAware();
     HINSTANCE moduleHandle = GetModuleHandle(NULL);
     g_main_tid = GetCurrentThreadId ();
 
@@ -2102,6 +2111,14 @@ int run (void)
 
     g_win_hook = SetWinEventHook(
         EVENT_OBJECT_CREATE, EVENT_OBJECT_CREATE,
+        NULL,
+        HandleWinEvent,
+        0,
+        0,
+        WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
+
+    g_win_hook = SetWinEventHook(
+        EVENT_OBJECT_LOCATIONCHANGE, EVENT_OBJECT_LOCATIONCHANGE,
         NULL,
         HandleWinEvent,
         0,
@@ -2167,7 +2184,7 @@ int run (void)
         }
     }
 
-    numberOfKeyBindings = 36;
+    numberOfKeyBindings = 39;
     keyBindings = calloc(numberOfKeyBindings, sizeof(KeyBinding*));
     keyBindings[0] = keybinding_create_no_args(LAlt, VK_J, select_next_window);
     keyBindings[1] = keybinding_create_no_args(LAlt, VK_OEM_COMMA, monitor_select_next);
@@ -2206,12 +2223,16 @@ int run (void)
     keyBindings[30] = keybinding_create_no_args(LShift | LAlt, VK_C, kill_focused_window);
     keyBindings[31] = keybinding_create_cmd_args(LAlt, VK_S, start_scratch_not_elevated, allFilesCommand);
     keyBindings[32] = keybinding_create_cmd_args(LShift | LAlt, VK_S, start_launcher, allFilesCommand);
-    keyBindings[33] = keybinding_create_cmd_args(LAlt, VK_T, start_scratch_not_elevated, cmdScratchCmd);
-    keyBindings[34] = keybinding_create_cmd_args(LShift | LAlt, VK_T, start_launcher, cmdScratchCmd);
+    keyBindings[33] = keybinding_create_cmd_args(LWin, VK_1, start_scratch_not_elevated, cmdScratchCmd);
+    keyBindings[34] = keybinding_create_cmd_args(LShift | LWin, VK_1, start_launcher, cmdScratchCmd);
     keyBindings[35] = keybinding_create_no_args(LAlt, VK_V, taskbar_toggle);
 
+    keyBindings[36] = keybinding_create_no_args(LAlt, VK_M, swap_selected_monitor_to_monacle_layout);
+    keyBindings[37] = keybinding_create_no_args(LAlt, VK_D, swap_selected_monitor_to_deck_layout);
+    keyBindings[38] = keybinding_create_no_args(LAlt, VK_T, swap_selected_monitor_to_tile_layout);
+
     int barTop = 0;
-    int barBottom = 26;
+    int barBottom = barHeight;
     int buttonWidth = 30;
 
     bars = calloc(numberOfBars, sizeof(Bar*));
@@ -2290,12 +2311,27 @@ int run (void)
     if (FAILED(hr)) {
       return 1;
     }
-  
+
+    networkListManager = NULL;
     hr = CoCreateInstance(
-      &CLSID_MMDeviceEnumerator, NULL,
-      CLSCTX_ALL, &IID_IMMDeviceEnumerator,
+        &CLSID_NetworkListManager,
+        NULL,
+        CLSCTX_ALL,
+        &IID_INetworkListManager,
+        &networkListManager);
+    if (FAILED(hr))
+    {
+        return 1;
+    }
+
+    hr = CoCreateInstance(
+      &CLSID_MMDeviceEnumerator,
+      NULL,
+      CLSCTX_ALL,
+      &IID_IMMDeviceEnumerator,
       (void**)&dev_enumerator);
-    if (FAILED(hr)) {
+    if (FAILED(hr))
+    {
       return 1;
     }
   
