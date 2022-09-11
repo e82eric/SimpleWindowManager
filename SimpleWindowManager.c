@@ -785,6 +785,8 @@ void deckLayout_move_client_next(Client *client)
         c = c->next;
     }
 
+    client->workspace->selected = client->workspace->clients->next;
+    focus_workspace_selected_window(client->workspace);
     arrange_workspace(client->workspace);
 }
 
