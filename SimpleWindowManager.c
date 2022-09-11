@@ -664,12 +664,12 @@ void arrange_clients_in_workspace(Workspace *workspace) {
         }
         if(c->isVisible)
         {
-            SetWindowPos(c->data->hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_SHOWWINDOW | SWP_NOSIZE | SWP_NOMOVE);
-            SetWindowPos(c->data->hwnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_SHOWWINDOW | SWP_NOSIZE | SWP_NOMOVE);
+            SetWindowPos(c->data->hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_SHOWWINDOW | SWP_NOSIZE | SWP_NOMOVE | SWP_NOREDRAW);
+            SetWindowPos(c->data->hwnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_SHOWWINDOW | SWP_NOSIZE | SWP_NOMOVE | SWP_NOREDRAW);
         }
         else
         {
-            SetWindowPos(c->data->hwnd, HWND_BOTTOM, 0, 0, 0, 0, SWP_SHOWWINDOW | SWP_NOSIZE | SWP_NOMOVE);
+            SetWindowPos(c->data->hwnd, HWND_BOTTOM, 0, 0, 0, 0, SWP_SHOWWINDOW | SWP_NOSIZE | SWP_NOMOVE | SWP_NOREDRAW);
         }
         numberOfClients++;
         c = c->previous;
@@ -917,7 +917,7 @@ void calc_new_sizes_for_workspace(Workspace *workspace) {
     else
     {
       masterWidth = (screenWidth / 2) - gapWidth - (gapWidth / 2) + workspace->masterOffset;
-      tileWidth = (screenWidth / 2) - gapWidth - (gapWidth / 2) + workspace->masterOffset;
+      tileWidth = (screenWidth / 2) - gapWidth - (gapWidth / 2) - workspace->masterOffset;
       allWidth = (screenWidth / 2) - gapWidth;
     }
 
@@ -980,7 +980,7 @@ void deckLayout_apply_to_workspace(Workspace *workspace)
     else
     {
         masterWidth = (screenWidth / 2) - gapWidth - (gapWidth / 2) + workspace->masterOffset;
-        secondaryWidth = (screenWidth / 2) - gapWidth - (gapWidth / 2) + workspace->masterOffset;
+        secondaryWidth = (screenWidth / 2) - gapWidth - (gapWidth / 2) - workspace->masterOffset;
     }
 
     int allHeight = screenHeight - barHeight - (gapWidth * 2);
@@ -1239,8 +1239,8 @@ void arrange_workspace(Workspace *workspace)
 
 void apply_workspace_to_monitor_with_window_focus(Workspace *workspace, Monitor *monitor) {
 
-    apply_workspace_to_monitor(workspace, monitor);
     focus_workspace_selected_window(workspace);
+    apply_workspace_to_monitor(workspace, monitor);
 }
 
 void apply_workspace_to_monitor(Workspace *workspace, Monitor *monitor) {
@@ -1467,6 +1467,11 @@ void swap_selected_monitor_to_layout(Layout *layout)
     Workspace *workspace = selectedMonitor->workspace;
     workspace->layout = layout;
     arrange_workspace(workspace);
+    if(workspace->monitor->bar)
+    {
+        bar_render_selected_window_description(workspace->monitor->bar);
+        bar_trigger_paint(workspace->monitor->bar);
+    }
 }
 
 void swap_selected_monitor_to_monacle_layout(void)
