@@ -469,9 +469,17 @@ void CALLBACK HandleWinEvent(
                 SetForegroundWindow(hwnd);
             }
         }
-        if (event == EVENT_OBJECT_SHOW || event == EVENT_SYSTEM_MOVESIZEEND || event == EVENT_OBJECT_LOCATIONCHANGE)
+        if (event == EVENT_OBJECT_SHOW || event == EVENT_SYSTEM_MOVESIZEEND)
         {
             register_window(hwnd);
+        }
+        else if (event == EVENT_OBJECT_LOCATIONCHANGE)
+        {
+            Client* client = find_client_in_workspaces_by_hwnd(hwnd);
+            if(!client)
+            {
+                register_window(hwnd);
+            }
         }
         else if (event == EVENT_OBJECT_DESTROY)
         {
@@ -595,6 +603,7 @@ BOOL remove_client_from_workspace(Workspace *workspace, Client *client) {
         workspace->clients = NULL;
         client->next = NULL;
         client->previous = NULL;
+        client->workspace = NULL;
         return TRUE;
     }
 
@@ -608,6 +617,7 @@ BOOL remove_client_from_workspace(Workspace *workspace, Client *client) {
         workspace->clients = client->next;
         client->next = NULL;
         client->previous = NULL;
+        client->workspace = NULL;
         return TRUE;
     }
 
@@ -621,6 +631,7 @@ BOOL remove_client_from_workspace(Workspace *workspace, Client *client) {
         client->next->previous = client->previous;
         client->next = NULL;
         client->previous = NULL;
+        client->workspace = NULL;
         return TRUE;
     }
 
@@ -633,6 +644,7 @@ BOOL remove_client_from_workspace(Workspace *workspace, Client *client) {
         client->previous->next = NULL;
         client->next = NULL;
         client->previous = NULL;
+        client->workspace = NULL;
         return TRUE;
     }
 
