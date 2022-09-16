@@ -126,7 +126,6 @@ struct Workspace
     WindowFilter windowFilter;
     HWND barButtonHwnd;
     WCHAR *tag;
-    int numberOfClients;
     Button **buttons;
     int numberOfButtons;
     int masterOffset;
@@ -188,17 +187,17 @@ static BOOL CALLBACK enum_windows_callback(HWND hWnd, LPARAM lparam);
 
 static void add_client_to_workspace(Workspace *workspace, Client *client);
 static void register_window(HWND hwnd);
-static void arrange_clients_in_workspace(Workspace *workspace);
 static void arrange_clients_in_selected_workspace(void);
 static void calc_new_sizes_for_workspace(Workspace *workspace);
 static BOOL remove_client_from_workspace(Workspace *workspace, Client *client);
 static void arrange_workspace(Workspace *workspace);
+static void arrange_workspace2(Workspace *workspace, HDWP hdwp);
 static void associate_workspace_to_monitor(Workspace *workspace, Monitor *monitor);
 static void remove_client(HWND hwnd);
 static void swap_selected_monitor_to(Workspace *workspace);
 static void select_next_window(void);
-static void apply_workspace_to_monitor_with_window_focus(Workspace *workspace, Monitor *monitor);
-static void apply_workspace_to_monitor(Workspace *workspace, Monitor *monitor);
+static void apply_workspace_to_monitor_with_window_focus(Workspace *workspace, Monitor *monitor, HDWP hdwp);
+static void apply_workspace_to_monitor(Workspace *workspace, Monitor *monitor, HDWP hdwp);
 static void select_monitor(Monitor *monitor);
 static void focus_workspace_selected_window(Workspace *workspace);
 static void remove_client_From_workspace_and_arrange(Workspace *workspace, Client *client);
@@ -248,7 +247,7 @@ static void free_client(Client *client);
 static void button_set_selected(Button *button, BOOL value);
 static void workspace_set_number_of_clients(Workspace *workspace, int value);
 static void button_set_has_clients(Button *button, BOOL value);
-static void client_move_to_location_on_screen(Client *client);
+static void client_move_to_location_on_screen(Client *client, HDWP hdwp);
 static void swap_selected_monitor_to_monacle_layout(void);
 static void swap_selected_monitor_to_deck_layout(void);
 static void swap_selected_monitor_to_tile_layout(void);
@@ -270,7 +269,6 @@ int numberOfBars;
 HFONT font;
 
 COLORREF barBackgroundColor = 0x282828;
-/* COLORREF barSelectedBackgroundColor = RGB(69, 133, 136);// 0x3c3836; */
 COLORREF barSelectedBackgroundColor = RGB(84, 133, 36);// 0x3c3836;
 COLORREF buttonSelectedTextColor = RGB(204, 36, 29);
 COLORREF buttonWithWindowsTextColor = RGB(255, 255, 247);
@@ -480,6 +478,10 @@ void CALLBACK HandleWinEvent(
             {
                 register_window(hwnd);
             }
+            else
+            {
+                arrange_workspace(client->workspace);
+            }
         }
         else if (event == EVENT_OBJECT_DESTROY)
         {
@@ -651,45 +653,30 @@ BOOL remove_client_from_workspace(Workspace *workspace, Client *client) {
     return FALSE;
 }
 
-//workspace_arrange_clients
-void arrange_clients_in_workspace(Workspace *workspace) {
+void arrange_clients_in_workspace(Workspace *workspace, HDWP hdwp)
+{
     Client *c = workspace->clients;
     Client *lastClient = NULL;
-    int numberOfClients = 0;
     while(c)
     {
         if(!c->next)
         {
             lastClient = c;
         }
-        numberOfClients++;
         c = c->next;
     }
 
+    //Doing this in reverse so first client gets added last and show on top.
+    //(I have no clue how to get ZOrder work)
     c = lastClient;
     while(c)
     {
-        if(c->data->isDirty)
-        {
-            client_move_to_location_on_screen(c);
-            ShowWindow(c->data->hwnd, SW_RESTORE);
-        }
-        if(c->isVisible)
-        {
-            SetWindowPos(c->data->hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_SHOWWINDOW | SWP_NOSIZE | SWP_NOMOVE | SWP_NOREDRAW);
-            SetWindowPos(c->data->hwnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_SHOWWINDOW | SWP_NOSIZE | SWP_NOMOVE | SWP_NOREDRAW);
-        }
-        else
-        {
-            SetWindowPos(c->data->hwnd, HWND_BOTTOM, 0, 0, 0, 0, SWP_SHOWWINDOW | SWP_NOSIZE | SWP_NOMOVE | SWP_NOREDRAW);
-        }
-        numberOfClients++;
+        client_move_to_location_on_screen(c, hdwp);
         c = c->previous;
     }
-    workspace_set_number_of_clients(workspace, numberOfClients);
 }
 
-void client_move_to_location_on_screen(Client *client)
+void client_move_to_location_on_screen(Client *client, HDWP hdwp)
 {
     RECT wrect;
     RECT xrect;
@@ -706,12 +693,19 @@ void client_move_to_location_on_screen(Client *client)
     long targetLeft = client->data->x - leftBorderWidth;
     long targetWidth = client->data->w + leftBorderWidth + rightBorderWidth;
 
-    MoveWindow(client->data->hwnd, targetLeft, targetTop, targetWidth, targetHeight, FALSE);
+    DeferWindowPos(
+        hdwp,
+        client->data->hwnd,
+        NULL,
+        targetLeft,
+        targetTop,
+        targetWidth,
+        targetHeight,
+        SWP_SHOWWINDOW);
 }
 
 void workspace_set_number_of_clients(Workspace* workspace, int value)
 {
-    workspace->numberOfClients = value;
     for(int i = 0; i < workspace->numberOfButtons; i++)
     {
         BOOL hasClients = value > 0;
@@ -782,7 +776,6 @@ void deckLayout_move_client_next(Client *client)
 
     Client *c = client->workspace->clients->next;
     ClientData *topOfDeckData = c->data;
-    int numberOfClients = 0;
     while(c)
     {
         if(c->next)
@@ -793,7 +786,6 @@ void deckLayout_move_client_next(Client *client)
         {
             c->data = topOfDeckData;
         }
-        numberOfClients++;
         c = c->next;
     }
 
@@ -869,7 +861,6 @@ void monacleLayout_select_next_client(Workspace *workspace)
 
     Client *c = workspace->clients;
     ClientData *topOfDeckData = c->data;
-    int numberOfClients = 0;
     while(c)
     {
         if(c->next)
@@ -880,7 +871,6 @@ void monacleLayout_select_next_client(Workspace *workspace)
         {
             c->data = topOfDeckData;
         }
-        numberOfClients++;
         c = c->next;
     }
 
@@ -1067,6 +1057,8 @@ int get_number_of_workspace_clients(Workspace *workspace)
       c = c->next;
     }
 
+    workspace_set_number_of_clients(workspace, numberOfClients);
+
     return numberOfClients;
 }
 
@@ -1209,8 +1201,13 @@ void monitor_set_workspace(Monitor *monitor, Workspace *workspace)
         return;
     }
 
-    apply_workspace_to_monitor_with_window_focus(workspace, monitor);
-    apply_workspace_to_monitor(selectedMonitorCurrentWorkspace, currentMonitor);
+    int workspaceNumberOfClients = get_number_of_workspace_clients(workspace);
+    int selectedMonitorCurrentWorkspaceNumberOfClients = get_number_of_workspace_clients(selectedMonitorCurrentWorkspace);
+
+    HDWP hdwp = BeginDeferWindowPos(workspaceNumberOfClients + selectedMonitorCurrentWorkspaceNumberOfClients);
+    apply_workspace_to_monitor_with_window_focus(workspace, monitor, hdwp);
+    apply_workspace_to_monitor(selectedMonitorCurrentWorkspace, currentMonitor, hdwp);
+    EndDeferWindowPos(hdwp);
 }
 
 void button_set_has_clients(Button *button, BOOL value)
@@ -1247,19 +1244,28 @@ void button_press_handle(Button *button)
 
 void arrange_workspace(Workspace *workspace)
 {
+    int numberOfWorkspaceClients = get_number_of_workspace_clients(workspace);
+    HDWP hdwp = BeginDeferWindowPos(numberOfWorkspaceClients);
+    arrange_workspace2(workspace, hdwp);
+    EndDeferWindowPos(hdwp);
+}
+
+void arrange_workspace2(Workspace *workspace, HDWP hdwp)
+{
     workspace->layout->apply_to_workspace(workspace);
-    arrange_clients_in_workspace(workspace);
+    arrange_clients_in_workspace(workspace, hdwp);
 }
 
-void apply_workspace_to_monitor_with_window_focus(Workspace *workspace, Monitor *monitor) {
-
+void apply_workspace_to_monitor_with_window_focus(Workspace *workspace, Monitor *monitor, HDWP hdwp)
+{
     focus_workspace_selected_window(workspace);
-    apply_workspace_to_monitor(workspace, monitor);
+    apply_workspace_to_monitor(workspace, monitor, hdwp);
 }
 
-void apply_workspace_to_monitor(Workspace *workspace, Monitor *monitor) {
+void apply_workspace_to_monitor(Workspace *workspace, Monitor *monitor, HDWP hdwp)
+{
     associate_workspace_to_monitor(workspace, monitor);
-    arrange_workspace(workspace);
+    arrange_workspace2(workspace, hdwp);
     if(!monitor->isHidden)
     {
         bar_render_selected_window_description(monitor->bar);
