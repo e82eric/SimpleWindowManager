@@ -100,13 +100,6 @@ int numberOfBars;
 
 HFONT font;
 
-/* COLORREF barBackgroundColor = 0x282828; */
-/* COLORREF barSelectedBackgroundColor = RGB(84, 133, 36);// 0x3c3836; */
-/* COLORREF buttonSelectedTextColor = RGB(204, 36, 29); */
-/* COLORREF buttonWithWindowsTextColor = RGB(255, 255, 247); */
-/* COLORREF buttonWithoutWindowsTextColor = 0x504945; */
-/* COLORREF barTextColor =RGB(235, 219, 178); // RGB(168, 153, 132); */
-
 Layout deckLayout = {
     .select_next_window = deckLayout_select_next_window,
     .move_client_to_master = tileLayout_move_client_to_master,
