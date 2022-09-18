@@ -197,6 +197,7 @@ void swap_selected_monitor_to_tile_layout(void);
 /* Everything below is what Config.c must implement */
 Workspace** create_workspaces(int* outSize);
 KeyBinding** create_keybindings(int* outSize, Workspace** workspaces);
+BOOL should_use_old_move_logic(Client* client);
 HFONT initalize_font();
 
 extern long barHeight;

@@ -508,15 +508,33 @@ void client_move_to_location_on_screen(Client *client, HDWP hdwp)
         targetLeft = hiddenWindowMonitor->xOffset;
     }
 
-    DeferWindowPos(
-        hdwp,
-        client->data->hwnd,
-        NULL,
-        targetLeft,
-        targetTop,
-        targetWidth,
-        targetHeight,
-        SWP_NOREDRAW);
+    BOOL useOldMoveLogic = should_use_old_move_logic(client);
+    if(useOldMoveLogic)
+    {
+        MoveWindow(client->data->hwnd, targetLeft, targetTop, targetWidth, targetHeight, FALSE);
+        ShowWindow(client->data->hwnd, SW_RESTORE);
+        if(client->isVisible)
+        {
+            SetWindowPos(client->data->hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_SHOWWINDOW | SWP_NOSIZE | SWP_NOMOVE);
+            SetWindowPos(client->data->hwnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_SHOWWINDOW | SWP_NOSIZE | SWP_NOMOVE);
+        }
+        else
+        {
+            SetWindowPos(client->data->hwnd, HWND_BOTTOM, 0, 0, 0, 0, SWP_SHOWWINDOW | SWP_NOSIZE | SWP_NOMOVE);
+        }
+    }
+    else
+    {
+        DeferWindowPos(
+            hdwp,
+            client->data->hwnd,
+            NULL,
+            targetLeft,
+            targetTop,
+            targetWidth,
+            targetHeight,
+            SWP_NOREDRAW);
+    }
 }
 
 void workspace_set_number_of_clients(Workspace* workspace, int value)

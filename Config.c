@@ -25,7 +25,11 @@ HFONT initalize_font()
 
 BOOL chrome_workspace_filter(Client *client)
 {
-    if(wcsstr(client->data->processImageName, L"chrome.exe") || wcsstr(client->data->processImageName, L"brave.exe") || wcsstr(client->data->processImageName, L"firefox.exe"))
+    if(
+        wcsstr(client->data->processImageName, L"chrome.exe") ||
+        wcsstr(client->data->processImageName, L"brave.exe") ||
+        wcsstr(client->data->processImageName, L"firefox.exe") ||
+        wcsstr(client->data->processImageName, L"msedge.exe"))
     {
         if(wcsstr(client->data->className, L"Chrome_WidgetWin_2"))
         {
@@ -62,6 +66,10 @@ BOOL rider_workspace_filter(Client *client)
         return TRUE;
     }
     if(wcsstr(client->data->className, L"CASCADIA_HOSTING_WINDOW_CLASS"))
+    {
+        return TRUE;
+    }
+    if(wcsstr(client->data->processImageName, L"Code.exe"))
     {
         return TRUE;
     }
@@ -104,6 +112,23 @@ BOOL paint_workspace_filter(Client *client)
     return FALSE;
 }
 
+BOOL teams_workspace(Client *client)
+{
+    if(wcsstr(client->data->title, L"toolbar"))
+    {
+        return FALSE;
+    }
+    if(wcsstr(client->data->title, L"Microsoft Teams Notification"))
+    {
+        return FALSE;
+    }
+    if(wcsstr(client->data->processImageName, L"Teams.exe"))
+    {
+        return TRUE;
+    }
+    return FALSE;
+}
+
 BOOL null_filter(Client *client)
 {
     UNREFERENCED_PARAMETER(client);
@@ -129,7 +154,7 @@ Workspace** create_workspaces(int* outSize)
     workspaces[2] = workspace_create(L"Rider", rider_workspace_filter, &riderTag, &monacleLayout, numberOfBars);
     workspaces[3] = workspace_create(L"ArchVm", archvm_workspace_filter, &archTag, &tileLayout, numberOfBars);
     workspaces[4] = workspace_create(L"Windows10Vm", windowsvm_workspace_filter, &windows10Tag, &tileLayout, numberOfBars);
-    workspaces[5] = workspace_create(L"6", null_filter, &mediaTag, &tileLayout, numberOfBars);
+    workspaces[5] = workspace_create(L"6", teams_workspace, &mediaTag, &tileLayout, numberOfBars);
     workspaces[6] = workspace_create(L"7", null_filter, L"7", &tileLayout, numberOfBars);
     workspaces[7] = workspace_create(L"8", virtualboxmanager_workspace_filter, L"8", &tileLayout, numberOfBars);
     workspaces[8] = workspace_create(L"9", paint_workspace_filter, &paintTag, &tileLayout, numberOfBars);
@@ -196,4 +221,13 @@ KeyBinding** create_keybindings(int* outSize, Workspace** workspaces)
 
     *outSize = *numberOfKeyBindings;
     return keyBindings;
+}
+
+BOOL should_use_old_move_logic(Client* client)
+{
+    if(wcsstr(client->data->processImageName, L"Teams.exe"))
+    {
+        return TRUE;
+    }
+    return FALSE;
 }
