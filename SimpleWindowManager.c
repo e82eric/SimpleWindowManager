@@ -17,6 +17,7 @@
 #include <windowsx.h>
 #include <netlistmgr.h>
 #include <dwmapi.h>
+#include "SimpleWindowManagerLib.h"
 #pragma comment(lib, "user32.lib")
 #pragma comment(lib, "Oleacc.lib")
 #pragma comment(lib, "Gdi32.lib")
@@ -32,153 +33,10 @@ DEFINE_GUID(IID_IAudioEndpointVolume, 0x5cdf2c82, 0x841e, 0x4546, 0x97, 0x22, 0x
 DEFINE_GUID(CLSID_NetworkListManager, 0xdcb00c01, 0x570f, 0x4a9b, 0x8d,0x69, 0x19,0x9f,0xdb,0xa5,0x72,0x3b);
 DEFINE_GUID(IID_INetworkListManager, 0xdcb00000, 0x570f, 0x4a9b, 0x8d,0x69, 0x19,0x9f,0xdb,0xa5,0x72,0x3b);
 
-#define VK_A 0x41
-#define VK_B 0x42
-#define VK_C 0x43
-#define VK_D 0x44
-#define VK_E 0x45
-#define VK_F 0x46
-#define VK_G 0x47
-#define VK_H 0x48
-#define VK_I 0x49
-#define VK_J 0x4A
-#define VK_K 0x4B
-#define VK_L 0x4C
-#define VK_M 0x4D
-#define VK_N 0x4E
-#define VK_O 0x4F
-#define VK_P 0x50
-#define VK_Q 0x51
-#define VK_R 0x52
-#define VK_S 0x53
-#define VK_T 0x54
-#define VK_U 0x55
-#define VK_V 0x56
-#define VK_W 0x57
-#define VK_X 0x58
-#define VK_Y 0x59
-#define VK_Z 0x5A
-
-#define VK_0 0x30
-#define VK_1 0x31
-#define VK_2 0x32
-#define VK_3 0x33
-#define VK_4 0x34
-#define VK_5 0x35
-#define VK_6 0x36
-#define VK_7 0x37
-#define VK_8 0x38
-#define VK_9 0x39
-
 DWORD g_main_tid = 0;
 HHOOK g_kb_hook = 0;
 
 HWINEVENTHOOK g_win_hook;
-
-typedef struct Layout Layout;
-typedef struct Monitor Monitor;
-typedef struct Workspace Workspace;
-typedef struct Client Client;
-typedef struct Bar Bar;
-typedef struct Button Button;
-typedef struct ClientData ClientData;
-typedef struct KeyBinding KeyBinding;
-
-struct Client
-{
-    BOOL isVisible;
-    ClientData *data;
-    Client *next;
-    Client *previous;
-    Workspace *workspace;
-};
-
-struct ClientData
-{
-    int x, y, w, h;
-    BOOL isDirty;
-    HWND hwnd;
-    DWORD processId;
-    TCHAR *processImageName;
-    TCHAR *className;
-    TCHAR *title;
-    BOOL isElevated;
-};
-
-typedef BOOL (*WindowFilter)(Client *client);
-
-struct Layout
-{
-    TCHAR *tag;
-    void (*select_next_window) (Workspace *workspace);
-    void (*move_client_to_master) (Client *client);
-    void (*move_client_next) (Client *client);
-    void (*apply_to_workspace) (Workspace *workspace);
-    Layout *next;
-};
-
-struct Workspace
-{
-    TCHAR* name;
-    Client *clients;
-    Monitor *monitor;
-    Client *selected;
-    WindowFilter windowFilter;
-    HWND barButtonHwnd;
-    WCHAR *tag;
-    Button **buttons;
-    int numberOfButtons;
-    int masterOffset;
-    Layout *layout;
-};
-
-struct Monitor
-{
-    int xOffset;
-    int h;
-    int w;
-    Workspace *workspace;
-    BOOL isHidden;
-    HWND barHwnd;
-    BOOL selected;
-    Bar *bar;
-    Monitor *next;
-};
-
-struct Button
-{
-    HWND hwnd;
-    Workspace *workspace;
-    Bar *bar;
-    RECT *rect;
-    BOOL isSelected;
-    BOOL hasClients;
-};
-
-struct Bar
-{
-    HWND hwnd;
-    Monitor *monitor;
-    int numberOfButtons;
-    Button **buttons;
-    RECT *selectedWindowDescRect;
-    RECT *timesRect;
-    TCHAR *windowContextText;
-    int windowContextTextLen;
-    TCHAR *environmentContextText;
-    int environmentContextTextLen;
-};
-
-struct KeyBinding
-{
-    int modifiers;
-    unsigned int key;
-    void (*action) (void);
-    void (*workspaceAction) (Workspace *);
-    Workspace *workspaceArg;
-    void (*cmdAction) (TCHAR*);
-    TCHAR *cmdArg;
-};
 
 static Monitor *selectedMonitor = NULL;
 static Monitor *hiddenWindowMonitor = NULL;
@@ -188,15 +46,11 @@ static BOOL CALLBACK enum_windows_callback(HWND hWnd, LPARAM lparam);
 
 static void add_client_to_workspace(Workspace *workspace, Client *client);
 static void register_window(HWND hwnd);
-static void arrange_clients_in_selected_workspace(void);
-static void calc_new_sizes_for_workspace(Workspace *workspace);
 static BOOL remove_client_from_workspace(Workspace *workspace, Client *client);
 static void arrange_workspace(Workspace *workspace);
 static void arrange_workspace2(Workspace *workspace, HDWP hdwp);
 static void associate_workspace_to_monitor(Workspace *workspace, Monitor *monitor);
 static void remove_client(HWND hwnd);
-static void swap_selected_monitor_to(Workspace *workspace);
-static void select_next_window(void);
 static void apply_workspace_to_monitor_with_window_focus(Workspace *workspace, Monitor *monitor, HDWP hdwp);
 static void apply_workspace_to_monitor(Workspace *workspace, Monitor *monitor, HDWP hdwp);
 static void select_monitor(Monitor *monitor);
@@ -206,52 +60,29 @@ static void move_selected_window_to_workspace(Workspace *workspace);
 static Workspace *find_workspace_by_filter(HWND hwnd);
 static void run_bar_window(Bar *bar, WNDCLASSEX *barWindowClass);
 static void swap_selected_monitor_to_layout(Layout *layout);
-static void toggle_selected_monitor_layout(void);
 static Client* client_from_hwnd(HWND hwnd);
 static BOOL is_root_window(HWND hwnd);
-static void move_focused_window_to_workspace(Workspace *workspace);
 static Client* find_client_in_workspaces_by_hwnd(HWND hwnd);
 static Client* find_client_in_workspace_by_hwnd(Workspace *workspace, HWND hwnd);
-static void close_focused_window(void);
-static void kill_focused_window(void);
-static void move_client_next(Client *client);
-static void move_focused_client_next(void);
 static void button_press_handle(Button *button);
 static void bar_apply_workspace_change(Bar *bar, Workspace *previousWorkspace, Workspace *newWorkspace);
 static void monitor_set_workspace(Monitor *monitor, Workspace *workspace);
-static void monitor_select_next(void);
 static void print_cpu_perfect(void);
 static void bar_render_selected_window_description(Bar *bar);
 static void bar_render_times(Bar *bar);
 static void button_redraw(Button *button);
 static void bar_trigger_paint(Bar *bar);
 static void workspace_increase_master_width(Workspace *workspace);
-static void workspace_increase_master_width_selected_monitor(void);
 static void workspace_decrease_master_width(Workspace *workspace);
-static void workspace_decrease_master_width_selected_monitor(void);
-static void deckLayout_move_client_next(Client *client);
-static void deckLayout_select_next_window(Workspace *workspace);
-static void deckLayout_apply_to_workspace(Workspace *workspace);
-static void stackBasedLayout_select_next_window(Workspace *workspace);
-static void noop_move_client_to_master(Client *client);
-static void calc_new_sizes_for_monacle_workspace(Workspace *workspace);
-static void monacleLayout_select_next_client(Workspace *workspace);
-static void tileLayout_move_client_to_master(Client *client);
 static int get_number_of_workspace_clients(Workspace *workspace);
 static int get_cpu_usage(void);
 static int get_memory_percent(void);
-static void start_launcher(TCHAR *cmdArgs);
-static void start_scratch_not_elevated(TCHAR *cmdArgs);
-static void move_focused_window_to_master(void);
 static void spawn(void *func);
 static void free_client(Client *client);
 static void button_set_selected(Button *button, BOOL value);
 static void workspace_set_number_of_clients(Workspace *workspace, int value);
 static void button_set_has_clients(Button *button, BOOL value);
 static void client_move_to_location_on_screen(Client *client, HDWP hdwp);
-static void swap_selected_monitor_to_monacle_layout(void);
-static void swap_selected_monitor_to_deck_layout(void);
-static void swap_selected_monitor_to_tile_layout(void);
 static int run (void);
 
 static IAudioEndpointVolume *audioEndpointVolume;
@@ -269,15 +100,12 @@ int numberOfBars;
 
 HFONT font;
 
-COLORREF barBackgroundColor = 0x282828;
-COLORREF barSelectedBackgroundColor = RGB(84, 133, 36);// 0x3c3836;
-COLORREF buttonSelectedTextColor = RGB(204, 36, 29);
-COLORREF buttonWithWindowsTextColor = RGB(255, 255, 247);
-COLORREF buttonWithoutWindowsTextColor = 0x504945;
-COLORREF barTextColor =RGB(235, 219, 178); // RGB(168, 153, 132);
-
-long barHeight = 29;
-long gapWidth = 13;
+/* COLORREF barBackgroundColor = 0x282828; */
+/* COLORREF barSelectedBackgroundColor = RGB(84, 133, 36);// 0x3c3836; */
+/* COLORREF buttonSelectedTextColor = RGB(204, 36, 29); */
+/* COLORREF buttonWithWindowsTextColor = RGB(255, 255, 247); */
+/* COLORREF buttonWithoutWindowsTextColor = 0x504945; */
+/* COLORREF barTextColor =RGB(235, 219, 178); // RGB(168, 153, 132); */
 
 Layout deckLayout = {
     .select_next_window = deckLayout_select_next_window,
@@ -312,18 +140,6 @@ static TCHAR *cmdScratchCmd = L"cmd /k";
 static TCHAR *launcherCommand = L"cmd /c for /f \"delims=\" %i in ('fd -t f -g \"*{.lnk,.exe}\" \"%USERPROFILE\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\" \"C:\\ProgramData\\Microsoft\\Windows\\Start Menu\" \"C:\\Users\\eric\\AppData\\Local\\Microsoft\\WindowsApps\" ^| fzf --bind=\"ctrl-c:execute(echo {} | clip)\"') do start \" \" \"%i\"";
 static TCHAR *allFilesCommand = L"cmd /c set /p \"pth=Enter Path: \" && for /f \"delims=\" %i in ('fd . -t f %^pth% ^| fzf --bind=\"ctrl-c:execute(echo {} | clip)\"') do start \" \" \"%i\"";
 static TCHAR *processListCommand = L"/c tasklist /nh | sort | fzf -e --bind=\"ctrl-k:execute(for /f \\\"tokens=2\\\" %f in ({}) do taskkill /f /pid %f)+reload(tasklist /nh | sort)\" --bind=\"ctrl-r:reload(tasklist /nh | sort)\" --header \"ctrl-k Kill Pid\" --reverse";
-
-enum Modifiers
-{
-    LShift = 0x1,
-    RShift = 0x2,
-    LAlt = 0x4,
-    RAlt = 0x8,
-    LWin = 0x10,
-    RWin = 0x20,
-    RCtl = 0x40,
-    LCtl = 0x80
-};
 
 int numberOfKeyBindings;
 KeyBinding **keyBindings;
@@ -907,7 +723,8 @@ void workspace_decrease_master_width_selected_monitor(void)
 }
 
 //tiledlayout_apply_to_workspace
-void calc_new_sizes_for_workspace(Workspace *workspace) {
+void calc_new_sizes_for_workspace(Workspace *workspace)
+{
     int screenWidth = workspace->monitor->w;
     int screenHeight = workspace->monitor->h;
 
@@ -1392,7 +1209,8 @@ void kill_focused_window(void)
     }
 }
 
-void deckLayout_select_next_window(Workspace *workspace) {
+void deckLayout_select_next_window(Workspace *workspace)
+{
     Client *currentSelectedClient = workspace->selected;
 
     if(!workspace->clients)
@@ -1907,93 +1725,6 @@ void run_bar_window(Bar *bar, WNDCLASSEX *barWindowClass)
         (TIMERPROC) NULL);
 }
 
-BOOL chrome_workspace_filter(Client *client)
-{
-    if(wcsstr(client->data->processImageName, L"chrome.exe") || wcsstr(client->data->processImageName, L"brave.exe") || wcsstr(client->data->processImageName, L"firefox.exe"))
-    {
-        if(wcsstr(client->data->className, L"Chrome_WidgetWin_2"))
-        {
-            return FALSE;
-        }
-        if(
-                wcsstr(client->data->className, L"MozillaDropShadowWindowClass")
-                /* || wcsstr(client->data->className, L"MozillaHiddenWindowClass") */
-                || wcsstr(client->data->className, L"MozillaDialogClass")
-                /* || wcsstr(client->data->className, L"MozillaTempWindowClass") */
-                /* || wcsstr(client->data->className, L"MozillaTransitionWindowClass") */
-            )
-        {
-            return FALSE;
-        }
-        return TRUE;
-    }
-    return FALSE;
-}
-
-BOOL terminal_workspace_filter(Client *client)
-{
-    if(wcsstr(client->data->processImageName, L"WindowsTerminal.exe"))
-    {
-        return TRUE;
-    }
-    return FALSE;
-}
-
-BOOL rider_workspace_filter(Client *client)
-{
-    if(wcsstr(client->data->processImageName, L"rider64.exe"))
-    {
-        return TRUE;
-    }
-    if(wcsstr(client->data->className, L"CASCADIA_HOSTING_WINDOW_CLASS"))
-    {
-        return TRUE;
-    }
-    return FALSE;
-}
-
-BOOL archvm_workspace_filter(Client *client)
-{
-    if(wcsstr(client->data->title, L"ArchSoClose"))
-    {
-        return TRUE;
-    }
-    return FALSE;
-}
-
-BOOL virtualboxmanager_workspace_filter(Client *client)
-{
-    if(wcsstr(client->data->title, L"Oracle VM VirtualBox Manager"))
-    {
-        return TRUE;
-    }
-    return FALSE;
-}
-
-BOOL windowsvm_workspace_filter(Client *client)
-{
-    if(wcsstr(client->data->title, L"NewWindows10"))
-    {
-        return TRUE;
-    }
-    return FALSE;
-}
-
-BOOL paint_workspace_filter(Client *client)
-{
-    if(wcsstr(client->data->className, L"MSPaintApp"))
-    {
-        return TRUE;
-    }
-    return FALSE;
-}
-
-BOOL null_filter(Client *client)
-{
-    UNREFERENCED_PARAMETER(client);
-    return FALSE;
-}
-
 Workspace* workspace_create(TCHAR *name, WindowFilter windowFilter, WCHAR* tag, Layout *layout, int numberOfButtons)
 {
     Button ** buttons = (Button **) calloc(numberOfButtons, sizeof(Button *));
@@ -2127,11 +1858,12 @@ int run (void)
     HINSTANCE moduleHandle = GetModuleHandle(NULL);
     g_main_tid = GetCurrentThreadId ();
 
-    HDC hdc = GetDC(NULL);
-    long lfHeight;
-    lfHeight = -MulDiv(14, GetDeviceCaps(hdc, LOGPIXELSY), 72);
-    font = CreateFontW(lfHeight, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, TEXT("Hack Regular Nerd Font Complete"));
-    DeleteDC(hdc);
+    font = initalize_font();
+    /* HDC hdc = GetDC(NULL); */
+    /* long lfHeight; */
+    /* lfHeight = -MulDiv(14, GetDeviceCaps(hdc, LOGPIXELSY), 72); */
+    /* font = CreateFontW(lfHeight, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, TEXT("Hack Regular Nerd Font Complete")); */
+    /* DeleteDC(hdc); */
 
     g_kb_hook = SetWindowsHookEx(WH_KEYBOARD_LL, &key_bindings, moduleHandle, 0);
     if (g_kb_hook == NULL)
@@ -2182,26 +1914,8 @@ int run (void)
 
     numberOfDisplayMonitors = 2;
     numberOfBars = numberOfDisplayMonitors;
-    numberOfWorkspaces = 9;
-    workspaces = calloc(numberOfWorkspaces, sizeof(Workspace *));
 
-    WCHAR chromeTag = { 0xfa9e };
-    WCHAR terminalTag = { 0xf120 };
-    WCHAR riderTag = { 0xf668 };
-    WCHAR archTag = { 0xf303 };
-    WCHAR windows10Tag = { 0xe70f };
-    WCHAR mediaTag = { 0xf447 };
-    WCHAR paintTag = { 0xf77b };
-
-    workspaces[0] = workspace_create(L"Chrome", chrome_workspace_filter, &chromeTag, &tileLayout, numberOfBars);
-    workspaces[1] = workspace_create(L"Terminal", terminal_workspace_filter, &terminalTag, &deckLayout, numberOfBars);
-    workspaces[2] = workspace_create(L"Rider", rider_workspace_filter, &riderTag, &monacleLayout, numberOfBars);
-    workspaces[3] = workspace_create(L"ArchVm", archvm_workspace_filter, &archTag, &tileLayout, numberOfBars);
-    workspaces[4] = workspace_create(L"Windows10Vm", windowsvm_workspace_filter, &windows10Tag, &tileLayout, numberOfBars);
-    workspaces[5] = workspace_create(L"6", null_filter, &mediaTag, &tileLayout, numberOfBars);
-    workspaces[6] = workspace_create(L"7", null_filter, L"7", &tileLayout, numberOfBars);
-    workspaces[7] = workspace_create(L"8", virtualboxmanager_workspace_filter, L"8", &tileLayout, numberOfBars);
-    workspaces[8] = workspace_create(L"9", paint_workspace_filter, &paintTag, &tileLayout, numberOfBars);
+    workspaces = create_workspaces(&numberOfWorkspaces);
 
     numberOfMonitors = numberOfWorkspaces;
     monitors = calloc(numberOfMonitors, sizeof(Monitor*));
@@ -2218,52 +1932,7 @@ int run (void)
     hiddenWindowMonitor = calloc(1, sizeof(Monitor));
     calclulate_monitor(hiddenWindowMonitor, numberOfMonitors);
 
-    numberOfKeyBindings = 39;
-    keyBindings = calloc(numberOfKeyBindings, sizeof(KeyBinding*));
-    keyBindings[0] = keybinding_create_no_args(LAlt, VK_J, select_next_window);
-    keyBindings[1] = keybinding_create_no_args(LAlt, VK_OEM_COMMA, monitor_select_next);
-    keyBindings[2] = keybinding_create_cmd_args(LShift | LAlt, VK_P, start_launcher, launcherCommand);
-    keyBindings[3] = keybinding_create_cmd_args(LAlt, VK_P, start_scratch_not_elevated, launcherCommand);
-    keyBindings[4] = keybinding_create_cmd_args(LAlt, VK_K, start_launcher, processListCommand);
-    keyBindings[5] = keybinding_create_no_args(LAlt, VK_SPACE, toggle_selected_monitor_layout);
-    keyBindings[6] = keybinding_create_no_args(LAlt, VK_N, arrange_clients_in_selected_workspace);
-    keyBindings[7] = keybinding_create_no_args(LAlt, VK_L, workspace_increase_master_width_selected_monitor);
-    keyBindings[8] = keybinding_create_no_args(LAlt, VK_H, workspace_decrease_master_width_selected_monitor);
-    keyBindings[9] = keybinding_create_no_args(LAlt, VK_RETURN, move_focused_window_to_master);
-
-    keyBindings[10] = keybinding_create_workspace_arg(LAlt, VK_1, swap_selected_monitor_to, workspaces[0]);
-    keyBindings[11] = keybinding_create_workspace_arg(LAlt, VK_2, swap_selected_monitor_to, workspaces[1]);
-    keyBindings[12] = keybinding_create_workspace_arg(LAlt, VK_3, swap_selected_monitor_to, workspaces[2]);
-    keyBindings[13] = keybinding_create_workspace_arg(LAlt, VK_4, swap_selected_monitor_to, workspaces[3]);
-    keyBindings[14] = keybinding_create_workspace_arg(LAlt, VK_5, swap_selected_monitor_to, workspaces[4]);
-    keyBindings[15] = keybinding_create_workspace_arg(LAlt, VK_6, swap_selected_monitor_to, workspaces[5]);
-    keyBindings[16] = keybinding_create_workspace_arg(LAlt, VK_7, swap_selected_monitor_to, workspaces[6]);
-    keyBindings[17] = keybinding_create_workspace_arg(LAlt, VK_8, swap_selected_monitor_to, workspaces[7]);
-    keyBindings[18] = keybinding_create_workspace_arg(LAlt, VK_9, swap_selected_monitor_to, workspaces[8]);
-
-    keyBindings[19] = keybinding_create_no_args(LShift | LAlt, VK_J, move_focused_client_next);
-
-    keyBindings[20] = keybinding_create_workspace_arg(LShift | LAlt, VK_1, move_focused_window_to_workspace, workspaces[0]);
-    keyBindings[21] = keybinding_create_workspace_arg(LShift | LAlt, VK_2, move_focused_window_to_workspace, workspaces[1]);
-    keyBindings[22] = keybinding_create_workspace_arg(LShift | LAlt, VK_3, move_focused_window_to_workspace, workspaces[2]);
-    keyBindings[23] = keybinding_create_workspace_arg(LShift | LAlt, VK_4, move_focused_window_to_workspace, workspaces[3]);
-    keyBindings[24] = keybinding_create_workspace_arg(LShift | LAlt, VK_5, move_focused_window_to_workspace, workspaces[4]);
-    keyBindings[25] = keybinding_create_workspace_arg(LShift | LAlt, VK_6, move_focused_window_to_workspace, workspaces[5]);
-    keyBindings[26] = keybinding_create_workspace_arg(LShift | LAlt, VK_7, move_focused_window_to_workspace, workspaces[6]);
-    keyBindings[27] = keybinding_create_workspace_arg(LShift | LAlt, VK_8, move_focused_window_to_workspace, workspaces[7]);
-    keyBindings[28] = keybinding_create_workspace_arg(LShift | LAlt, VK_9, move_focused_window_to_workspace, workspaces[8]);
-
-    keyBindings[29] = keybinding_create_no_args(LShift | LAlt, VK_C, close_focused_window);
-    keyBindings[30] = keybinding_create_no_args(LShift | LAlt, VK_C, kill_focused_window);
-    keyBindings[31] = keybinding_create_cmd_args(LAlt, VK_S, start_scratch_not_elevated, allFilesCommand);
-    keyBindings[32] = keybinding_create_cmd_args(LShift | LAlt, VK_S, start_launcher, allFilesCommand);
-    keyBindings[33] = keybinding_create_cmd_args(LWin, VK_1, start_scratch_not_elevated, cmdScratchCmd);
-    keyBindings[34] = keybinding_create_cmd_args(LShift | LWin, VK_1, start_launcher, cmdScratchCmd);
-    keyBindings[35] = keybinding_create_no_args(LAlt, VK_V, taskbar_toggle);
-
-    keyBindings[36] = keybinding_create_no_args(LAlt, VK_M, swap_selected_monitor_to_monacle_layout);
-    keyBindings[37] = keybinding_create_no_args(LAlt, VK_D, swap_selected_monitor_to_deck_layout);
-    keyBindings[38] = keybinding_create_no_args(LAlt, VK_T, swap_selected_monitor_to_tile_layout);
+    keyBindings = create_keybindings(&numberOfKeyBindings, workspaces);
 
     int barTop = 0;
     int barBottom = barHeight;
