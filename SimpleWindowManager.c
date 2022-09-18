@@ -801,6 +801,24 @@ void calc_new_sizes_for_workspace(Workspace *workspace)
 //tiledlayout_apply_to_workspace
 void deckLayout_apply_to_workspace(Workspace *workspace)
 {
+    //if we are switching to deck layout.  We want to make sure that selected window is either the master or top of secondary stack
+    if(workspace->selected && workspace->clients)
+    {
+        if(workspace->clients->next)
+        {
+            //if selected is already master or top of secondary stack we don't need to do anything
+            //otherwise move selected window to top of secondary stack and select it
+            if(workspace->selected != workspace->clients &&
+               workspace->selected != workspace->clients->next)
+            {
+                ClientData *temp = workspace->selected->data;
+                workspace->selected->data = workspace->clients->next->data;
+                workspace->clients->next->data = temp;
+                workspace->selected = workspace->clients->next;
+            }
+        }
+    }
+
     int screenWidth = workspace->monitor->w;
     int screenHeight = workspace->monitor->h;
 
@@ -854,9 +872,13 @@ void deckLayout_apply_to_workspace(Workspace *workspace)
 //monacleLayout_apply_to_workspace
 void calc_new_sizes_for_monacle_workspace(Workspace *workspace)
 {
+    //if we are switching to this layout we want to make sure that the selected window is the top of the stack
     if(workspace->selected)
     {
-        tileLayout_move_client_to_master(workspace->selected);
+        ClientData *temp = workspace->selected->data;
+        workspace->selected->data = workspace->clients->data;
+        workspace->clients->data = temp;
+        workspace->selected = workspace->clients;
     }
 
     int screenWidth = workspace->monitor->w;
