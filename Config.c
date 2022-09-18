@@ -1,7 +1,7 @@
 #include <windows.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include "SimpleWindowManagerLib.h"
+#include "SimpleWindowManager.h"
 
 long barHeight = 29;
 long gapWidth = 13;

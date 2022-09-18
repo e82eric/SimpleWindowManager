@@ -17,7 +17,7 @@
 #include <windowsx.h>
 #include <netlistmgr.h>
 #include <dwmapi.h>
-#include "SimpleWindowManagerLib.h"
+#include "SimpleWindowManager.h"
 #pragma comment(lib, "user32.lib")
 #pragma comment(lib, "Oleacc.lib")
 #pragma comment(lib, "Gdi32.lib")
