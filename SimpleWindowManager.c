@@ -181,6 +181,7 @@ struct KeyBinding
 };
 
 static Monitor *selectedMonitor = NULL;
+static Monitor *hiddenWindowMonitor = NULL;
 
 static void apply_sizes(Client *client, int w, int h, int x, int y);
 static BOOL CALLBACK enum_windows_callback(HWND hWnd, LPARAM lparam);
@@ -693,6 +694,11 @@ void client_move_to_location_on_screen(Client *client, HDWP hdwp)
     long targetLeft = client->data->x - leftBorderWidth;
     long targetWidth = client->data->w + leftBorderWidth + rightBorderWidth;
 
+    if(!client->isVisible)
+    {
+        targetLeft = hiddenWindowMonitor->xOffset;
+    }
+
     DeferWindowPos(
         hdwp,
         client->data->hwnd,
@@ -701,7 +707,7 @@ void client_move_to_location_on_screen(Client *client, HDWP hdwp)
         targetTop,
         targetWidth,
         targetHeight,
-        SWP_SHOWWINDOW);
+        SWP_NOREDRAW);
 }
 
 void workspace_set_number_of_clients(Workspace* workspace, int value)
@@ -2208,6 +2214,9 @@ int run (void)
             monitors[i - 1]->next = monitors[i];
         }
     }
+
+    hiddenWindowMonitor = calloc(1, sizeof(Monitor));
+    calclulate_monitor(hiddenWindowMonitor, numberOfMonitors);
 
     numberOfKeyBindings = 39;
     keyBindings = calloc(numberOfKeyBindings, sizeof(KeyBinding*));
