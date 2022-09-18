@@ -854,6 +854,11 @@ void deckLayout_apply_to_workspace(Workspace *workspace)
 //monacleLayout_apply_to_workspace
 void calc_new_sizes_for_monacle_workspace(Workspace *workspace)
 {
+    if(workspace->selected)
+    {
+        tileLayout_move_client_to_master(workspace->selected);
+    }
+
     int screenWidth = workspace->monitor->w;
     int screenHeight = workspace->monitor->h;
 
