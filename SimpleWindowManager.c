@@ -305,6 +305,11 @@ void CALLBACK HandleWinEvent(
             {
                 client->workspace->selected = client;
                 select_monitor(client->workspace->monitor);
+                SetWindowPos(borderWindowHwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_SHOWWINDOW | SWP_NOSIZE | SWP_NOMOVE);
+            }
+            else
+            {
+                SetWindowPos(borderWindowHwnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_SHOWWINDOW | SWP_NOSIZE | SWP_NOMOVE);
             }
         }
     }
