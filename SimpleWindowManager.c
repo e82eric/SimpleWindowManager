@@ -99,6 +99,7 @@ Bar **bars;
 int numberOfBars;
 
 HFONT font;
+HWND borderWindowHwnd;
 
 Layout deckLayout = {
     .select_next_window = deckLayout_select_next_window,
@@ -463,6 +464,22 @@ BOOL remove_client_from_workspace(Workspace *workspace, Client *client) {
     return FALSE;
 }
 
+void border_window_update(void)
+{
+    if(selectedMonitor)
+    {
+        if(selectedMonitor->workspace->selected)
+        {
+            ClientData *selectedClientData = selectedMonitor->workspace->selected->data;
+            MoveWindow(borderWindowHwnd, selectedClientData->x, selectedClientData->y, selectedClientData->w, selectedClientData->h, TRUE);
+        }
+        else
+        {
+            RedrawWindow(borderWindowHwnd, NULL, NULL, RDW_ERASE | RDW_INVALIDATE);
+        }
+    }
+}
+
 void arrange_clients_in_workspace(Workspace *workspace, HDWP hdwp)
 {
     Client *c = workspace->clients;
@@ -484,6 +501,8 @@ void arrange_clients_in_workspace(Workspace *workspace, HDWP hdwp)
         client_move_to_location_on_screen(c, hdwp);
         c = c->previous;
     }
+
+    border_window_update();
 }
 
 void client_move_to_location_on_screen(Client *client, HDWP hdwp)
@@ -1093,8 +1112,9 @@ void button_redraw(Button *button)
         InvalidateRect(
           button->hwnd,
           NULL,
-          FALSE
+          TRUE
         );
+        UpdateWindow(button->hwnd);
     }
 }
 
@@ -1115,6 +1135,7 @@ void arrange_workspace2(Workspace *workspace, HDWP hdwp)
 {
     workspace->layout->apply_to_workspace(workspace);
     arrange_clients_in_workspace(workspace, hdwp);
+
 }
 
 void apply_workspace_to_monitor_with_window_focus(Workspace *workspace, Monitor *monitor, HDWP hdwp)
@@ -1211,6 +1232,7 @@ void bar_trigger_paint(Bar *bar)
       NULL,
       FALSE
     );
+    UpdateWindow(bar->hwnd);
 }
 
 void move_focused_window_to_workspace(Workspace *workspace)
@@ -1303,6 +1325,7 @@ void select_next_window(void)
     Workspace *workspace = selectedMonitor->workspace;
     workspace->layout->select_next_window(workspace);
     focus_workspace_selected_window(workspace);
+    
 }
 
 void focus_workspace_selected_window(Workspace *workspace) {
@@ -1320,6 +1343,8 @@ void focus_workspace_selected_window(Workspace *workspace) {
         bar_render_selected_window_description(workspace->monitor->bar);
         bar_trigger_paint(workspace->monitor->bar);
     }
+
+    border_window_update();
 }
 
 void move_selected_window_to_workspace(Workspace *workspace) {
@@ -1591,6 +1616,42 @@ LRESULT CALLBACK WorkspaceButtonProc(
     return 0;
 }
 
+void PaintBorderWindow(HWND hWnd)
+{
+    if(selectedMonitor->workspace->selected)
+    {
+        PAINTSTRUCT ps;
+        HDC hDC = BeginPaint(hWnd, &ps);
+        HPEN selectPen = CreatePen(PS_SOLID, 6, RGB(250, 189, 47));
+        HPEN hpenOld = SelectObject(hDC, selectPen);
+        HBRUSH hbrushOld = (HBRUSH)(SelectObject(hDC, GetStockObject(NULL_BRUSH)));
+        SetDCPenColor(hDC, RGB(255, 0, 0));
+
+        RECT rcWindow;
+        GetClientRect(hWnd, &rcWindow);
+        Rectangle(hDC, rcWindow.left, rcWindow.top, rcWindow.right, rcWindow.bottom);
+        SelectObject(hDC, hpenOld);
+        SelectObject(hDC, hbrushOld);
+        EndPaint(hWnd, &ps);
+    }
+}
+
+static LRESULT WindowProc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
+{
+    switch(msg)
+    {
+        case WM_PAINT:
+        {
+            PaintBorderWindow(h);
+        } break;
+
+        default:
+            return DefWindowProc(h, msg, wp, lp);
+    }
+
+    return 0;
+}
+
 LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 {
     HDC hdc;
@@ -1723,6 +1784,32 @@ WNDCLASSEX* bar_register_window_class(void)
     return wc;
 }
 
+WNDCLASSEX* register_border_window_class(void)
+{
+    WNDCLASSEX *wc    = malloc(sizeof(WNDCLASSEX));
+    wc->cbSize        = sizeof(WNDCLASSEX);
+    wc->style         = CS_DBLCLKS | CS_OWNDC | CS_HREDRAW | CS_VREDRAW;
+    wc->lpfnWndProc   = WindowProc;
+    wc->cbClsExtra    = 0;
+    wc->cbWndExtra    = 0;
+    wc->hIcon         = LoadIcon(NULL, IDI_APPLICATION);
+    wc->hInstance     = GetModuleHandle(0);
+    wc->hCursor       = LoadCursor(NULL, IDC_ARROW);
+    wc->hbrBackground = (HBRUSH)GetStockObject(BLACK_BRUSH);
+    wc->lpszMenuName  = NULL;
+    wc->lpszClassName = L"SimpleWindowBorderWindowClass";
+    wc->hIconSm       = LoadIcon(NULL, IDI_APPLICATION);
+
+    if(!RegisterClassEx(wc))
+    {
+        MessageBox(NULL, L"Window Registration Failed!", L"Error!",
+            MB_ICONEXCLAMATION | MB_OK);
+        return NULL;
+    }
+
+    return wc;
+}
+
 void run_bar_window(Bar *bar, WNDCLASSEX *barWindowClass)
 {
     HWND hwnd = CreateWindowEx(
@@ -1761,6 +1848,34 @@ void run_bar_window(Bar *bar, WNDCLASSEX *barWindowClass)
         0,
         1000,
         (TIMERPROC) NULL);
+}
+
+void run_border_window(WNDCLASSEX *windowClass)
+{
+    HWND hwnd = CreateWindowEx(
+        WS_EX_PALETTEWINDOW,
+        windowClass->lpszClassName,
+        L"SimpleWM Border",
+        WS_POPUP,
+        6,
+        37,
+        1275,
+        1393,
+        NULL,
+        NULL,
+        GetModuleHandle(0),
+        NULL);
+    borderWindowHwnd = hwnd;
+
+    if(hwnd == NULL)
+    {
+        MessageBox(NULL, L"Window Creation Failed!", L"Error!",
+            MB_ICONEXCLAMATION | MB_OK);
+    }
+
+    SetWindowLong(hwnd, GWL_EXSTYLE , GetWindowLong(hwnd, GWL_EXSTYLE) | WS_EX_LAYERED);
+    SetLayeredWindowAttributes(hwnd, RGB(0, 0, 0), 0, LWA_COLORKEY);
+    ShowWindow(hwnd, SW_SHOW);
 }
 
 Workspace* workspace_create(TCHAR *name, WindowFilter windowFilter, WCHAR* tag, Layout *layout, int numberOfButtons)
@@ -1897,11 +2012,6 @@ int run (void)
     g_main_tid = GetCurrentThreadId ();
 
     font = initalize_font();
-    /* HDC hdc = GetDC(NULL); */
-    /* long lfHeight; */
-    /* lfHeight = -MulDiv(14, GetDeviceCaps(hdc, LOGPIXELSY), 72); */
-    /* font = CreateFontW(lfHeight, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, TEXT("Hack Regular Nerd Font Complete")); */
-    /* DeleteDC(hdc); */
 
     g_kb_hook = SetWindowsHookEx(WH_KEYBOARD_LL, &key_bindings, moduleHandle, 0);
     if (g_kb_hook == NULL)
@@ -2099,6 +2209,9 @@ int run (void)
       CoUninitialize();
       return 1;
     }
+
+    WNDCLASSEX* borderWindowClass = register_border_window_class();
+    run_border_window(borderWindowClass);
 
     MSG msg;
     while (GetMessage(&msg, NULL, 0, 0))
