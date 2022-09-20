@@ -76,33 +76,6 @@ BOOL rider_workspace_filter(Client *client)
     return FALSE;
 }
 
-BOOL archvm_workspace_filter(Client *client)
-{
-    if(wcsstr(client->data->title, L"ArchSoClose"))
-    {
-        return TRUE;
-    }
-    return FALSE;
-}
-
-BOOL virtualboxmanager_workspace_filter(Client *client)
-{
-    if(wcsstr(client->data->title, L"Oracle VM VirtualBox Manager"))
-    {
-        return TRUE;
-    }
-    return FALSE;
-}
-
-BOOL windowsvm_workspace_filter(Client *client)
-{
-    if(wcsstr(client->data->title, L"NewWindows10"))
-    {
-        return TRUE;
-    }
-    return FALSE;
-}
-
 BOOL paint_workspace_filter(Client *client)
 {
     if(wcsstr(client->data->className, L"MSPaintApp"))
@@ -140,10 +113,6 @@ Workspace** create_workspaces(int* outSize)
     WCHAR chromeTag = { 0xfa9e };
     WCHAR terminalTag = { 0xf120 };
     WCHAR riderTag = { 0xf668 };
-    WCHAR archTag = { 0xf303 };
-    WCHAR windows10Tag = { 0xe70f };
-    WCHAR mediaTag = { 0xf447 };
-    WCHAR paintTag = { 0xf77b };
 
     int* numberOfWorkspaces = malloc(sizeof(int));
     *numberOfWorkspaces = 9;
@@ -152,12 +121,12 @@ Workspace** create_workspaces(int* outSize)
     workspaces[0] = workspace_create(L"Chrome", chrome_workspace_filter, &chromeTag, &tileLayout, numberOfBars);
     workspaces[1] = workspace_create(L"Terminal", terminal_workspace_filter, &terminalTag, &deckLayout, numberOfBars);
     workspaces[2] = workspace_create(L"Rider", rider_workspace_filter, &riderTag, &monacleLayout, numberOfBars);
-    workspaces[3] = workspace_create(L"ArchVm", archvm_workspace_filter, &archTag, &tileLayout, numberOfBars);
-    workspaces[4] = workspace_create(L"Windows10Vm", windowsvm_workspace_filter, &windows10Tag, &tileLayout, numberOfBars);
-    workspaces[5] = workspace_create(L"6", teams_workspace, &mediaTag, &tileLayout, numberOfBars);
+    workspaces[3] = workspace_create(L"4", null_filter, L"4", &tileLayout, numberOfBars);
+    workspaces[4] = workspace_create(L"5", null_filter, L"5", &tileLayout, numberOfBars);
+    workspaces[5] = workspace_create(L"6", null_filter, L"6", &tileLayout, numberOfBars);
     workspaces[6] = workspace_create(L"7", null_filter, L"7", &tileLayout, numberOfBars);
-    workspaces[7] = workspace_create(L"8", virtualboxmanager_workspace_filter, L"8", &tileLayout, numberOfBars);
-    workspaces[8] = workspace_create(L"9", paint_workspace_filter, &paintTag, &tileLayout, numberOfBars);
+    workspaces[7] = workspace_create(L"8", null_filter, L"8", &tileLayout, numberOfBars);
+    workspaces[8] = workspace_create(L"9", null_filter, L"9", &tileLayout, numberOfBars);
 
     *outSize = *numberOfWorkspaces;
     return workspaces;
