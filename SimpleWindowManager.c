@@ -2065,6 +2065,20 @@ void quit(void)
 
 int run (void)
 {
+    HANDLE hMutex;
+    hMutex = CreateMutex(NULL, TRUE, TEXT("SimpleWindowManagerSingleInstanceLock"));
+    if (GetLastError() == ERROR_ALREADY_EXISTS)
+    {
+        MessageBox(
+          NULL,
+          L"SimpleWindowManager is already running",
+          L"SimpleWindowManager",
+          MB_OK
+        );
+         CloseHandle(hMutex);
+         return 0;
+    }
+
     SetProcessDPIAware();
     HINSTANCE moduleHandle = GetModuleHandle(NULL);
     g_main_tid = GetCurrentThreadId ();
@@ -2285,6 +2299,8 @@ int run (void)
         TranslateMessage(&msg);
         DispatchMessage(&msg);
     };
+
+    CloseHandle(hMutex);
 
     IMMDeviceEnumerator_Release(mmdevice);
     IMMDevice_Release(mmdevice);
