@@ -1414,11 +1414,12 @@ void bar_render_selected_window_description(Bar *bar)
 {
     if(bar->monitor->workspace->selected)
     {
+        int numberOfWorkspaceClients = get_number_of_workspace_clients(bar->monitor->workspace);
         LPCWSTR processShortFileName = PathFindFileName(bar->monitor->workspace->selected->data->processImageName);
 
         TCHAR displayStr[MAX_PATH];
-        int displayStrLen = swprintf(displayStr, MAX_PATH, L"[%ls] : %ls (%d) (IsAdmin: %d)",
-            bar->monitor->workspace->layout->tag, processShortFileName, bar->monitor->workspace->selected->data->processId, bar->monitor->workspace->selected->data->isElevated);
+        int displayStrLen = swprintf(displayStr, MAX_PATH, L"[%ls:%d] : %ls (%d) (IsAdmin: %d)",
+            bar->monitor->workspace->layout->tag, numberOfWorkspaceClients, processShortFileName, bar->monitor->workspace->selected->data->processId, bar->monitor->workspace->selected->data->isElevated);
         if(bar->windowContextText)
         {
             free(bar->windowContextText);
