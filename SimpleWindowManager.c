@@ -108,6 +108,7 @@ Layout deckLayout = {
     .select_previous_window = deckLayout_select_next_window,
     .move_client_to_master = tileLayout_move_client_to_master,
     .move_client_next = deckLayout_move_client_next,
+    .move_client_previous = deckLayout_move_client_previous,
     .apply_to_workspace = deckLayout_apply_to_workspace,
     .next = NULL,
     .tag = L"D"
@@ -117,7 +118,8 @@ Layout monacleLayout = {
     .select_next_window = monacleLayout_select_next_client,
     .select_previous_window = monacleLayout_select_previous_client,
     .move_client_to_master = noop_move_client_to_master,
-    .move_client_next = move_client_next,
+    .move_client_next = monacleLayout_move_client_next,
+    .move_client_previous = monacleLayout_move_client_previous,
     .apply_to_workspace = calc_new_sizes_for_monacle_workspace,
     .next = &deckLayout,
     .tag = L"M"
@@ -128,6 +130,7 @@ Layout tileLayout = {
     .select_previous_window = stackBasedLayout_select_previous_window,
     .move_client_to_master = tileLayout_move_client_to_master,
     .move_client_next = move_client_next,
+    .move_client_previous = move_client_previous,
     .apply_to_workspace = calc_new_sizes_for_workspace,
     .next = &monacleLayout,
     .tag = L"T"
@@ -613,6 +616,16 @@ void move_focused_client_next(void)
     }
 }
 
+void move_focused_client_previous(void)
+{
+    HWND foregroundHwnd = GetForegroundWindow();
+    Client* existingClient = find_client_in_workspaces_by_hwnd(foregroundHwnd);
+    if(existingClient)
+    {
+        existingClient->workspace->layout->move_client_previous(existingClient->workspace->selected);
+    }
+}
+
 void noop_move_client_to_master(Client *client)
 {
     UNREFERENCED_PARAMETER(client);
@@ -680,6 +693,52 @@ void deckLayout_move_client_next(Client *client)
     arrange_workspace(client->workspace);
 }
 
+void deckLayout_move_client_previous(Client *client)
+{
+    if(!client->workspace->clients)
+    {
+        //Exit no clients
+        return;
+    }
+
+    if(client->workspace->clients == client && !client->next)
+    {
+        //Exit there is only one window
+        return;
+    }
+
+    if(!client->previous)
+    {
+        //Exit we are in the master position
+        return;
+    }
+
+    if(!client->previous->previous && !client->next)
+    {
+        //Exit there isn't another secondary to move to
+        return;
+    }
+
+    Client *c = client->workspace->lastClient;
+    ClientData *bottomOfDeckData = c->data;
+    while(c->previous)
+    {
+        if(c->previous->previous)
+        {
+            c->data = c->previous->data;
+        }
+        else
+        {
+            c->data = bottomOfDeckData;
+        }
+        c = c->previous;
+    }
+
+    client->workspace->selected = client->workspace->clients->next;
+    focus_workspace_selected_window(client->workspace);
+    arrange_workspace(client->workspace);
+}
+
 //workspace_move_client_to_next_position
 void move_client_next(Client *client)
 {
@@ -731,6 +790,57 @@ void move_client_next(Client *client)
     arrange_workspace(client->workspace);
 }
 
+//workspace_move_client_to_next_position
+void move_client_previous(Client *client)
+{
+    if(client->workspace->clients)
+    {
+        //Exit no clients
+    }
+
+    if(client->workspace->clients == client && !client->next)
+    {
+        //Exit there is only one client
+        return;
+    }
+
+    if(client->previous)
+    {
+        ClientData *temp = client->data;
+        client->data = client->previous->data;
+        client->previous->data = temp;
+        client->workspace->selected = client->previous;
+    }
+    else
+    {
+        Client *c = client->workspace->lastClient;
+        ClientData *nextClientData = NULL;
+        while(c)
+        {
+            if(!nextClientData)
+            {
+                nextClientData = c->data;
+            }
+            else if(c->previous)
+            {
+                ClientData *temp = c->data;
+                c->data = nextClientData;
+                nextClientData = temp;
+            }
+            else
+            {
+                ClientData *temp = c->data;
+                c->data = nextClientData;
+                client->workspace->lastClient->data = temp;
+            }
+            c = c->previous;
+        }
+        client->workspace->selected = client->workspace->lastClient;
+    }
+
+    arrange_workspace(client->workspace);
+}
+
 void monacleLayout_select_next_client(Workspace *workspace)
 {
     if(!workspace->clients)
@@ -762,6 +872,16 @@ void monacleLayout_select_next_client(Workspace *workspace)
 
     workspace->selected = workspace->clients;
     arrange_workspace(workspace);
+}
+
+void monacleLayout_move_client_next(Client *client)
+{
+    monacleLayout_select_next_client(client->workspace);
+}
+
+void monacleLayout_move_client_previous(Client *client)
+{
+    monacleLayout_select_previous_client(client->workspace);
 }
 
 void monacleLayout_select_previous_client(Workspace *workspace)
