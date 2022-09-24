@@ -155,6 +155,7 @@ struct KeyBinding
     Workspace *workspaceArg;
     void (*cmdAction) (TCHAR*);
     TCHAR *cmdArg;
+    KeyBinding *next;
 };
 
 extern Layout deckLayout;
@@ -181,9 +182,9 @@ void calc_new_sizes_for_monacle_workspace(Workspace *workspace);
 void calc_new_sizes_for_workspace(Workspace *workspace);
 Workspace* workspace_create(TCHAR *name, WindowFilter windowFilter, WCHAR* tag, Layout *layout, int numberOfButtons);
 
-KeyBinding* keybinding_create_no_args(int modifiers, unsigned int key, void (*action) (void));
-KeyBinding* keybinding_create_cmd_args(int modifiers, unsigned int key, void (*action) (TCHAR*), TCHAR *cmdArg);
-KeyBinding* keybinding_create_workspace_arg(int modifiers, unsigned int key, void (*action) (Workspace*), Workspace *arg);
+void keybinding_create_no_args(int modifiers, unsigned int key, void (*action) (void));
+void keybinding_create_cmd_args(int modifiers, unsigned int key, void (*action) (TCHAR*), TCHAR *cmdArg);
+void keybinding_create_workspace_arg(int modifiers, unsigned int key, void (*action) (Workspace*), Workspace *arg);
 
 void select_next_window(void);
 void select_previous_window(void);
@@ -211,7 +212,7 @@ void quit(void);
 
 /* Everything below is what Config.c must implement */
 Workspace** create_workspaces(int* outSize);
-KeyBinding** create_keybindings(int* outSize, Workspace** workspaces);
+void create_keybindings(Workspace** workspaces);
 BOOL should_use_old_move_logic(Client* client);
 HFONT initalize_font();
 

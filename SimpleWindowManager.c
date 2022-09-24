@@ -143,8 +143,7 @@ static TCHAR *launcherCommand = L"cmd /c for /f \"delims=\" %i in ('fd -t f -g \
 static TCHAR *allFilesCommand = L"cmd /c set /p \"pth=Enter Path: \" && for /f \"delims=\" %i in ('fd . -t f %^pth% ^| fzf --bind=\"ctrl-c:execute(echo {} | clip)\"') do start \" \" \"%i\"";
 static TCHAR *processListCommand = L"/c tasklist /nh | sort | fzf -e --bind=\"ctrl-k:execute(for /f \\\"tokens=2\\\" %f in ({}) do taskkill /f /pid %f)+reload(tasklist /nh | sort)\" --bind=\"ctrl-r:reload(tasklist /nh | sort)\" --header \"ctrl-k Kill Pid\" --reverse";
 
-int numberOfKeyBindings;
-KeyBinding **keyBindings;
+KeyBinding *headKeyBinding;
 
 static BOOL CALLBACK enum_windows_callback(HWND hwnd, LPARAM lparam)
 {
@@ -196,9 +195,10 @@ LRESULT CALLBACK key_bindings(int code, WPARAM w, LPARAM l)
     PKBDLLHOOKSTRUCT p = (PKBDLLHOOKSTRUCT)l;
     if (code ==0 && (w == WM_KEYDOWN || w == WM_SYSKEYDOWN))
     {
-        for(int i = 0; i < numberOfKeyBindings; i++)
+        KeyBinding *keyBinding = headKeyBinding;
+        while(keyBinding)
         {
-            if(p->vkCode == keyBindings[i]->key)
+            if(p->vkCode == keyBinding->key)
             {
                 int modifiersPressed = 0;
                 if(GetKeyState(VK_LSHIFT) & 0x8000)
@@ -230,23 +230,24 @@ LRESULT CALLBACK key_bindings(int code, WPARAM w, LPARAM l)
                     modifiersPressed |= RWin;
                 }
 
-                if(keyBindings[i]->modifiers == modifiersPressed)
+                if(keyBinding->modifiers == modifiersPressed)
                 {
-                    if(keyBindings[i]->action)
+                    if(keyBinding->action)
                     {
-                        keyBindings[i]->action();
+                        keyBinding->action();
                     }
-                    else if(keyBindings[i]->cmdAction)
+                    else if(keyBinding->cmdAction)
                     {
-                        keyBindings[i]->cmdAction(keyBindings[i]->cmdArg);
+                        keyBinding->cmdAction(keyBinding->cmdArg);
                     }
-                    else if(keyBindings[i]->workspaceAction)
+                    else if(keyBinding->workspaceAction)
                     {
-                        keyBindings[i]->workspaceAction(keyBindings[i]->workspaceArg);
+                        keyBinding->workspaceAction(keyBinding->workspaceArg);
                     }
                     return 1;
                 }
             }
+            keyBinding = keyBinding->next;
         }
     }
 
@@ -2120,33 +2121,50 @@ Workspace* workspace_create(TCHAR *name, WindowFilter windowFilter, WCHAR* tag, 
     return result;
 }
 
-KeyBinding* keybinding_create_no_args(int modifiers, unsigned int key, void (*action) (void))
+void keybinding_add_to_list(KeyBinding *binding)
+{
+    if(!headKeyBinding)
+    {
+        headKeyBinding = binding;
+    }
+    else
+    {
+        KeyBinding *current = headKeyBinding;
+        while(current->next)
+        {
+            current = current->next;
+        }
+        current->next = binding;
+    }
+}
+
+void keybinding_create_no_args(int modifiers, unsigned int key, void (*action) (void))
 {
     KeyBinding *result = calloc(1, sizeof(KeyBinding));
     result->modifiers = modifiers;
     result->key = key;
     result->action = action;
-    return result;
+    keybinding_add_to_list(result);
 }
 
-KeyBinding* keybinding_create_cmd_args(int modifiers, unsigned int key, void (*action) (TCHAR*), TCHAR *cmdArg)
+void keybinding_create_cmd_args(int modifiers, unsigned int key, void (*action) (TCHAR*), TCHAR *cmdArg)
 {
     KeyBinding *result = calloc(1, sizeof(KeyBinding));
     result->modifiers = modifiers;
     result->key = key;
     result->cmdAction = action;
     result->cmdArg = cmdArg;
-    return result;
+    keybinding_add_to_list(result);
 }
 
-KeyBinding* keybinding_create_workspace_arg(int modifiers, unsigned int key, void (*action) (Workspace*), Workspace *arg)
+void keybinding_create_workspace_arg(int modifiers, unsigned int key, void (*action) (Workspace*), Workspace *arg)
 {
     KeyBinding *result = calloc(1, sizeof(KeyBinding));
     result->modifiers = modifiers;
     result->key = key;
     result->workspaceAction = action;
     result->workspaceArg = arg;
-    return result;
+    keybinding_add_to_list(result);
 }
 
 void start_process(TCHAR *processExe, TCHAR *cmdArgs, DWORD creationFlags)
@@ -2357,7 +2375,7 @@ int run (void)
     hiddenWindowMonitor = calloc(1, sizeof(Monitor));
     calclulate_monitor(hiddenWindowMonitor, numberOfMonitors);
 
-    keyBindings = create_keybindings(&numberOfKeyBindings, workspaces);
+    create_keybindings(workspaces);
 
     int barTop = 0;
     int barBottom = barHeight;
