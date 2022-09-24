@@ -478,7 +478,34 @@ void border_window_update(void)
         if(selectedMonitor->workspace->selected)
         {
             ClientData *selectedClientData = selectedMonitor->workspace->selected->data;
-            MoveWindow(borderWindowHwnd, selectedClientData->x, selectedClientData->y, selectedClientData->w, selectedClientData->h, TRUE);
+
+            RECT currentPosition;
+            GetWindowRect(borderWindowHwnd, &currentPosition);
+
+            int targetLeft = selectedClientData->x - 4;
+            int targetTop = selectedClientData->y - 4;
+            int targetRight = selectedClientData->w + 8;
+            int targetBottom = selectedClientData->h + 8;
+
+            DWORD positionFlags;
+            if(targetLeft != currentPosition.left || targetTop != currentPosition.top ||
+                targetRight != currentPosition.right || targetBottom != currentPosition.bottom)
+            {
+                positionFlags = SWP_SHOWWINDOW;
+            }
+            else
+            {
+                positionFlags = SWP_NOREDRAW;
+            }
+
+            SetWindowPos(
+                borderWindowHwnd,
+                HWND_BOTTOM,
+                targetLeft,
+                targetTop,
+                targetRight,
+                targetBottom,
+                positionFlags);
         }
         else
         {
@@ -1873,6 +1900,7 @@ void run_border_window(WNDCLASSEX *windowClass)
         NULL,
         GetModuleHandle(0),
         NULL);
+
     borderWindowHwnd = hwnd;
 
     if(hwnd == NULL)
@@ -1881,8 +1909,6 @@ void run_border_window(WNDCLASSEX *windowClass)
             MB_ICONEXCLAMATION | MB_OK);
     }
 
-    SetWindowLong(hwnd, GWL_EXSTYLE , GetWindowLong(hwnd, GWL_EXSTYLE) | WS_EX_LAYERED);
-    SetLayeredWindowAttributes(hwnd, RGB(0, 0, 0), 0, LWA_COLORKEY);
     ShowWindow(hwnd, SW_SHOW);
 }
 
