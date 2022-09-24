@@ -282,7 +282,7 @@ void CALLBACK HandleWinEvent(
         {
             register_window(hwnd);
         }
-        else if (event == EVENT_OBJECT_LOCATIONCHANGE)
+        else if (event == EVENT_OBJECT_LOCATIONCHANGE || event == EVENT_SYSTEM_MINIMIZEEND)
         {
             Client* client = find_client_in_workspaces_by_hwnd(hwnd);
             if(!client)
@@ -292,8 +292,10 @@ void CALLBACK HandleWinEvent(
             else
             {
                 arrange_workspace(client->workspace);
+                ShowWindow(hwnd, SW_RESTORE);
             }
         }
+
         else if (event == EVENT_OBJECT_DESTROY)
         {
             remove_client(hwnd);
@@ -2035,6 +2037,14 @@ int run (void)
 
     g_win_hook = SetWinEventHook(
         EVENT_OBJECT_LOCATIONCHANGE, EVENT_OBJECT_LOCATIONCHANGE,
+        NULL,
+        HandleWinEvent,
+        0,
+        0,
+        WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
+
+    g_win_hook = SetWinEventHook(
+        EVENT_SYSTEM_MINIMIZEEND, EVENT_SYSTEM_MINIMIZEEND,
         NULL,
         HandleWinEvent,
         0,
