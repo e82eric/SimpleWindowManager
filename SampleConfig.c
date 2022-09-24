@@ -140,7 +140,7 @@ TCHAR *processListCommand = L"/c tasklist /nh | sort | fzf -e --bind=\"ctrl-k:ex
 KeyBinding** create_keybindings(int* outSize, Workspace** workspaces)
 {
     int* numberOfKeyBindings = malloc(sizeof(int));
-    *numberOfKeyBindings = 39;
+    *numberOfKeyBindings = 40;
 
     KeyBinding** keyBindings = calloc(*numberOfKeyBindings, sizeof(KeyBinding*));
     keyBindings[0] = keybinding_create_no_args(LAlt, VK_J, select_next_window);
@@ -187,6 +187,8 @@ KeyBinding** create_keybindings(int* outSize, Workspace** workspaces)
     keyBindings[36] = keybinding_create_no_args(LAlt, VK_M, swap_selected_monitor_to_monacle_layout);
     keyBindings[37] = keybinding_create_no_args(LAlt, VK_D, swap_selected_monitor_to_deck_layout);
     keyBindings[38] = keybinding_create_no_args(LAlt, VK_T, swap_selected_monitor_to_tile_layout);
+
+    keyBindings[39] = keybinding_create_no_args(LAlt, VK_F9, quit);
 
     *outSize = *numberOfKeyBindings;
     return keyBindings;

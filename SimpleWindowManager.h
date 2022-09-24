@@ -195,6 +195,7 @@ void move_focused_client_next(void);
 void swap_selected_monitor_to_deck_layout(void);
 void swap_selected_monitor_to_monacle_layout(void);
 void swap_selected_monitor_to_tile_layout(void);
+void quit(void);
 
 /* Everything below is what Config.c must implement */
 Workspace** create_workspaces(int* outSize);

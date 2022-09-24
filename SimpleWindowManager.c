@@ -2031,6 +2031,11 @@ void start_app_non_elevated(TCHAR *processExe)
     start_not_elevated(processExe, NULL, CREATE_NEW_CONSOLE);
 }
 
+void quit(void)
+{
+    ExitProcess(0);
+}
+
 int run (void)
 {
     SetProcessDPIAware();
