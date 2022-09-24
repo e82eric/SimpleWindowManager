@@ -1926,7 +1926,40 @@ KeyBinding* keybinding_create_workspace_arg(int modifiers, unsigned int key, voi
     return result;
 }
 
-void start_scratch_not_elevated(TCHAR *cmdArgs)
+void start_process(TCHAR *processExe, TCHAR *cmdArgs, DWORD creationFlags)
+{
+    STARTUPINFO si = { 0 };
+    si.dwFlags = STARTF_USEPOSITION |  STARTF_USESIZE | STARTF_USESHOWWINDOW;
+    si.dwX= 200;
+    si.dwY = 100;
+    si.dwXSize = 2000;
+    si.dwYSize = 1200;
+    si.wShowWindow = SW_HIDE;
+    si.lpTitle = L"SimpleWindowManager Scratch";
+
+    PROCESS_INFORMATION pi = { 0 };
+
+    if( !CreateProcess(
+        processExe,
+        cmdArgs,
+        NULL,
+        NULL,
+        FALSE,
+        creationFlags,
+        NULL,
+        NULL,
+        &si,
+        &pi)
+    ) 
+    {
+        return;
+    }
+
+    CloseHandle( pi.hProcess );
+    CloseHandle( pi.hThread );
+}
+
+void start_not_elevated(TCHAR *processExe, TCHAR *cmdArgs, DWORD creationFlags)
 {
     HWND hwnd = GetShellWindow();
 
@@ -1935,8 +1968,7 @@ void start_scratch_not_elevated(TCHAR *cmdArgs)
     DWORD pid;
     GetWindowThreadProcessId(hwnd, &pid);
 
-    HANDLE process =
-        OpenProcess(PROCESS_CREATE_PROCESS, FALSE, pid);
+    HANDLE process = OpenProcess(PROCESS_CREATE_PROCESS, FALSE, pid);
 
     STARTUPINFOEX siex;
     ZeroMemory(&siex, sizeof(siex));
@@ -1963,12 +1995,12 @@ void start_scratch_not_elevated(TCHAR *cmdArgs)
     PROCESS_INFORMATION pi;
 
     CreateProcessW(
-        cmdLineExe,
+        processExe,
         cmdArgs,
         NULL,
         NULL,
         FALSE,
-        CREATE_NEW_CONSOLE | EXTENDED_STARTUPINFO_PRESENT,
+        creationFlags | EXTENDED_STARTUPINFO_PRESENT,
         NULL,
         NULL,
         &siex.StartupInfo,
@@ -1979,37 +2011,24 @@ void start_scratch_not_elevated(TCHAR *cmdArgs)
     CloseHandle(process);
 }
 
+void start_scratch_not_elevated(TCHAR *cmdArgs)
+{
+    start_not_elevated(cmdLineExe, cmdArgs, CREATE_NEW_CONSOLE);
+}
+
 void start_launcher(TCHAR *cmdArgs)
 {
-    STARTUPINFO si = { 0 };
-    si.dwFlags = STARTF_USEPOSITION |  STARTF_USESIZE | STARTF_USESHOWWINDOW;
-    si.dwX= 200;
-    si.dwY = 100;
-    si.dwXSize = 2000;
-    si.dwYSize = 1200;
-    si.wShowWindow = SW_HIDE;
-    si.lpTitle = L"SimpleWindowManager Scratch";
+    start_process(cmdLineExe, cmdArgs, CREATE_NEW_CONSOLE);
+}
 
-    PROCESS_INFORMATION pi = { 0 };
+void start_app(TCHAR *processExe)
+{
+    start_process(processExe, NULL, NORMAL_PRIORITY_CLASS);
+}
 
-    if( !CreateProcess(
-        cmdLineExe,
-        cmdArgs,
-        NULL,
-        NULL,
-        FALSE,
-        CREATE_NEW_CONSOLE,
-        NULL,
-        NULL,
-        &si,
-        &pi)
-    ) 
-    {
-        return;
-    }
-
-    CloseHandle( pi.hProcess );
-    CloseHandle( pi.hThread );
+void start_app_non_elevated(TCHAR *processExe)
+{
+    start_not_elevated(processExe, NULL, CREATE_NEW_CONSOLE);
 }
 
 int run (void)

@@ -179,6 +179,8 @@ void select_next_window(void);
 void monitor_select_next(void);
 void start_launcher(TCHAR *cmdArgs);
 void start_scratch_not_elevated(TCHAR *cmdArgs);
+void start_app(TCHAR *processExe);
+void start_app_non_elevated(TCHAR *processExe);
 void toggle_selected_monitor_layout(void);
 void arrange_clients_in_selected_workspace(void);
 void workspace_increase_master_width_selected_monitor(void);
