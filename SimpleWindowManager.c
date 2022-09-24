@@ -80,10 +80,10 @@ static int get_memory_percent(void);
 static void spawn(void *func);
 static void free_client(Client *client);
 static void button_set_selected(Button *button, BOOL value);
-static void workspace_set_number_of_clients(Workspace *workspace, int value);
 static void button_set_has_clients(Button *button, BOOL value);
 static void client_move_to_location_on_screen(Client *client, HDWP hdwp);
 static int run (void);
+static int workspace_update_client_counts(Workspace *workspace);
 
 static IAudioEndpointVolume *audioEndpointVolume;
 static INetworkListManager *networkListManager;
@@ -103,6 +103,9 @@ HWND borderWindowHwnd;
 
 Layout deckLayout = {
     .select_next_window = deckLayout_select_next_window,
+    //using the same function for next and previous since there will only be 2 windows to swicth between.
+    //It will always be moving between the 2
+    .select_previous_window = deckLayout_select_next_window,
     .move_client_to_master = tileLayout_move_client_to_master,
     .move_client_next = deckLayout_move_client_next,
     .apply_to_workspace = deckLayout_apply_to_workspace,
@@ -112,6 +115,7 @@ Layout deckLayout = {
 
 Layout monacleLayout = {
     .select_next_window = monacleLayout_select_next_client,
+    .select_previous_window = monacleLayout_select_previous_client,
     .move_client_to_master = noop_move_client_to_master,
     .move_client_next = move_client_next,
     .apply_to_workspace = calc_new_sizes_for_monacle_workspace,
@@ -121,6 +125,7 @@ Layout monacleLayout = {
 
 Layout tileLayout = {
     .select_next_window = stackBasedLayout_select_next_window,
+    .select_previous_window = stackBasedLayout_select_previous_window,
     .move_client_to_master = tileLayout_move_client_to_master,
     .move_client_next = move_client_next,
     .apply_to_workspace = calc_new_sizes_for_workspace,
@@ -396,6 +401,8 @@ void add_client_to_workspace(Workspace *workspace, Client *client)
     }
     workspace->selected = client;
     workspace->clients = client;
+
+    workspace_update_client_counts(workspace);
 }
 
 //windowManager_remove_window
@@ -409,14 +416,18 @@ void remove_client(HWND hwnd) {
 }
 
 //workspaceController_remove_client
-void remove_client_From_workspace_and_arrange(Workspace *workspace, Client *client) {
-    if(remove_client_from_workspace(workspace, client)) {
+void remove_client_From_workspace_and_arrange(Workspace *workspace, Client *client)
+{
+    if(remove_client_from_workspace(workspace, client))
+    {
         arrange_workspace(workspace);
     }
 }
 
 //workspace_remove_client
-BOOL remove_client_from_workspace(Workspace *workspace, Client *client) {
+BOOL remove_client_from_workspace(Workspace *workspace, Client *client)
+{
+    BOOL result = FALSE;
     if(!client->previous && !client->next)
     {
         workspace->selected = NULL;
@@ -424,10 +435,9 @@ BOOL remove_client_from_workspace(Workspace *workspace, Client *client) {
         client->next = NULL;
         client->previous = NULL;
         client->workspace = NULL;
-        return TRUE;
+        result = TRUE;
     }
-
-    if(!client->previous && client->next)
+    else if(!client->previous && client->next)
     {
         if(client->workspace->selected == client)
         {
@@ -438,10 +448,9 @@ BOOL remove_client_from_workspace(Workspace *workspace, Client *client) {
         client->next = NULL;
         client->previous = NULL;
         client->workspace = NULL;
-        return TRUE;
+        result = TRUE;
     }
-
-    if(client->previous && client->next)
+    else if(client->previous && client->next)
     {
         if(client->workspace->selected == client)
         {
@@ -452,10 +461,9 @@ BOOL remove_client_from_workspace(Workspace *workspace, Client *client) {
         client->next = NULL;
         client->previous = NULL;
         client->workspace = NULL;
-        return TRUE;
+        result = TRUE;
     }
-
-    if(client->previous && !client->next)
+    else if(client->previous && !client->next)
     {
         if(client->workspace->selected == client)
         {
@@ -465,10 +473,11 @@ BOOL remove_client_from_workspace(Workspace *workspace, Client *client) {
         client->next = NULL;
         client->previous = NULL;
         client->workspace = NULL;
-        return TRUE;
+        result = TRUE;
     }
 
-    return FALSE;
+    workspace_update_client_counts(workspace);
+    return result;
 }
 
 void border_window_update(void)
@@ -586,16 +595,7 @@ void client_move_to_location_on_screen(Client *client, HDWP hdwp)
             targetTop,
             targetWidth,
             targetHeight,
-            SWP_NOREDRAW);
-    }
-}
-
-void workspace_set_number_of_clients(Workspace* workspace, int value)
-{
-    for(int i = 0; i < workspace->numberOfButtons; i++)
-    {
-        BOOL hasClients = value > 0;
-        button_set_has_clients(workspace->buttons[i], hasClients);
+            SWP_SHOWWINDOW);
     }
 }
 
@@ -758,6 +758,39 @@ void monacleLayout_select_next_client(Workspace *workspace)
             c->data = topOfDeckData;
         }
         c = c->next;
+    }
+
+    workspace->selected = workspace->clients;
+    arrange_workspace(workspace);
+}
+
+void monacleLayout_select_previous_client(Workspace *workspace)
+{
+    if(!workspace->clients)
+    {
+        //Exit no clients
+        return;
+    }
+
+    if(!workspace->clients->next)
+    {
+        //Exit there is only one window
+        return;
+    }
+
+    Client *c = workspace->lastClient;
+    ClientData *lastClientData = c->data;
+    while(c)
+    {
+        if(c->previous)
+        {
+            c->data = c->previous->data;
+        }
+        else
+        {
+            c->data = lastClientData;
+        }
+        c = c->previous;
     }
 
     workspace->selected = workspace->clients;
@@ -964,14 +997,28 @@ void calc_new_sizes_for_monacle_workspace(Workspace *workspace)
 //workspace_get_number_of_clients
 int get_number_of_workspace_clients(Workspace *workspace)
 {
+    return workspace->numberOfClients;
+}
+
+int workspace_update_client_counts(Workspace *workspace)
+{
     int numberOfClients = 0;
     Client *c  = workspace->clients;
     while(c) {
       numberOfClients++;
+      if(!c->next)
+      {
+          workspace->lastClient = c;
+      }
       c = c->next;
     }
 
-    workspace_set_number_of_clients(workspace, numberOfClients);
+    workspace->numberOfClients = numberOfClients;
+    for(int i = 0; i < workspace->numberOfButtons; i++)
+    {
+        BOOL hasClients = numberOfClients > 0;
+        button_set_has_clients(workspace->buttons[i], hasClients);
+    }
 
     return numberOfClients;
 }
@@ -1206,7 +1253,8 @@ void associate_workspace_to_monitor(Workspace *workspace, Monitor *monitor) {
     monitor->workspace = workspace;
 }
 
-void calclulate_monitor(Monitor *monitor, int monitorNumber) {
+void calclulate_monitor(Monitor *monitor, int monitorNumber)
+{
     int screenWidth = GetSystemMetrics(SM_CXSCREEN);
     int screenHeight = GetSystemMetrics(SM_CYSCREEN);
 
@@ -1354,12 +1402,40 @@ void stackBasedLayout_select_next_window(Workspace *workspace)
     }
 }
 
+void stackBasedLayout_select_previous_window(Workspace *workspace)
+{
+    Client *currentSelectedClient = workspace->selected;
+
+    if(!workspace->clients)
+    {
+        return;
+    }
+    else if(!currentSelectedClient)
+    {
+        workspace->selected = workspace->clients;
+    }
+    else if(currentSelectedClient->previous)
+    {
+        workspace->selected = currentSelectedClient->previous;
+    }
+    else
+    {
+        workspace->selected = workspace->lastClient;
+    }
+}
+
 void select_next_window(void)
 {
     Workspace *workspace = selectedMonitor->workspace;
     workspace->layout->select_next_window(workspace);
     focus_workspace_selected_window(workspace);
-    
+}
+
+void select_previous_window(void)
+{
+    Workspace *workspace = selectedMonitor->workspace;
+    workspace->layout->select_previous_window(workspace);
+    focus_workspace_selected_window(workspace);
 }
 
 void focus_workspace_selected_window(Workspace *workspace) {
@@ -1909,7 +1985,7 @@ void run_border_window(WNDCLASSEX *windowClass)
             MB_ICONEXCLAMATION | MB_OK);
     }
 
-    ShowWindow(hwnd, SW_SHOW);
+    /* ShowWindow(hwnd, SW_SHOW); */
 }
 
 Workspace* workspace_create(TCHAR *name, WindowFilter windowFilter, WCHAR* tag, Layout *layout, int numberOfButtons)
@@ -2147,7 +2223,8 @@ int run (void)
 
     numberOfMonitors = numberOfWorkspaces;
     monitors = calloc(numberOfMonitors, sizeof(Monitor*));
-    for(int i = 0; i < numberOfMonitors; i++) {
+    for(int i = 0; i < numberOfMonitors; i++)
+    {
         Monitor *monitor = calloc(1, sizeof(Monitor));
         monitors[i] = monitor;
         calclulate_monitor(monitor, i + 1);

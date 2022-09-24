@@ -72,6 +72,8 @@ struct Workspace
     int numberOfButtons;
     int masterOffset;
     Layout *layout;
+    Client *lastClient;
+    int numberOfClients;
 };
 
 struct Client
@@ -112,6 +114,7 @@ struct Layout
 {
     TCHAR *tag;
     void (*select_next_window) (Workspace *workspace);
+    void (*select_previous_window) (Workspace *workspace);
     void (*move_client_to_master) (Client *client);
     void (*move_client_next) (Client *client);
     void (*apply_to_workspace) (Workspace *workspace);
@@ -161,10 +164,12 @@ extern int numberOfBars;
 
 void deckLayout_select_next_window(Workspace *workspace);
 void stackBasedLayout_select_next_window(Workspace *workspace);
+void stackBasedLayout_select_previous_window(Workspace *workspace);
 void tileLayout_move_client_to_master(Client *client);
 void deckLayout_move_client_next(Client *client);
 void deckLayout_apply_to_workspace(Workspace *workspace);
 void monacleLayout_select_next_client(Workspace *workspace);
+void monacleLayout_select_previous_client(Workspace *workspace);
 void noop_move_client_to_master(Client *client);
 void move_client_next(Client *client);
 void calc_new_sizes_for_monacle_workspace(Workspace *workspace);
@@ -176,6 +181,7 @@ KeyBinding* keybinding_create_cmd_args(int modifiers, unsigned int key, void (*a
 KeyBinding* keybinding_create_workspace_arg(int modifiers, unsigned int key, void (*action) (Workspace*), Workspace *arg);
 
 void select_next_window(void);
+void select_previous_window(void);
 void monitor_select_next(void);
 void start_launcher(TCHAR *cmdArgs);
 void start_scratch_not_elevated(TCHAR *cmdArgs);
