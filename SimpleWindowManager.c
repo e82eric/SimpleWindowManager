@@ -517,6 +517,14 @@ void border_window_update(void)
         else
         {
             RedrawWindow(borderWindowHwnd, NULL, NULL, RDW_ERASE | RDW_INVALIDATE);
+            SetWindowPos(
+                borderWindowHwnd,
+                HWND_BOTTOM,
+                0,
+                0,
+                0,
+                0,
+                SWP_HIDEWINDOW);
         }
     }
 }
