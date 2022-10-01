@@ -601,7 +601,7 @@ void client_move_to_location_on_screen(Client *client, HDWP hdwp)
             targetTop,
             targetWidth,
             targetHeight,
-            SWP_SHOWWINDOW);
+            SWP_NOREDRAW);
     }
 }
 
@@ -1474,6 +1474,12 @@ void kill_focused_window(void)
     }
 }
 
+void redraw_focused_window(void)
+{
+    HWND foregroundHwnd = GetForegroundWindow();
+    RedrawWindow(foregroundHwnd, NULL, NULL, RDW_ERASE | RDW_INVALIDATE);
+}
+
 void deckLayout_select_next_window(Workspace *workspace)
 {
     Client *currentSelectedClient = workspace->selected;
@@ -1484,6 +1490,11 @@ void deckLayout_select_next_window(Workspace *workspace)
     }
     else if(!currentSelectedClient)
     {
+        workspace->selected = workspace->clients;
+    }
+    else if(!currentSelectedClient->previous && !currentSelectedClient->next)
+    {
+        //there is only a master don't do anything
         workspace->selected = workspace->clients;
     }
     else if(!currentSelectedClient->previous && currentSelectedClient->next)
@@ -1874,6 +1885,11 @@ static LRESULT WindowProc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
 {
     switch(msg)
     {
+        case WM_WINDOWPOSCHANGING:
+        {
+            WINDOWPOS* windowPos = (WINDOWPOS*)lp;
+            windowPos->hwndInsertAfter = HWND_BOTTOM;
+        }
         case WM_PAINT:
         {
             PaintBorderWindow(h);

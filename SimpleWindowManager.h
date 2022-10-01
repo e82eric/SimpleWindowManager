@@ -186,6 +186,7 @@ void keybinding_create_no_args(int modifiers, unsigned int key, void (*action) (
 void keybinding_create_cmd_args(int modifiers, unsigned int key, void (*action) (TCHAR*), TCHAR *cmdArg);
 void keybinding_create_workspace_arg(int modifiers, unsigned int key, void (*action) (Workspace*), Workspace *arg);
 
+void redraw_focused_window(void);
 void select_next_window(void);
 void select_previous_window(void);
 void monitor_select_next(void);

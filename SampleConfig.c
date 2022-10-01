@@ -183,6 +183,7 @@ void create_keybindings(Workspace** workspaces)
     keybinding_create_no_args(LAlt, VK_M, swap_selected_monitor_to_monacle_layout);
     keybinding_create_no_args(LAlt, VK_D, swap_selected_monitor_to_deck_layout);
     keybinding_create_no_args(LAlt, VK_T, swap_selected_monitor_to_tile_layout);
+    keybinding_create_no_args(LAlt, VK_R, redraw_focused_window);
 
     keybinding_create_no_args(LAlt, VK_F9, quit);
 }
