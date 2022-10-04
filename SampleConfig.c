@@ -91,6 +91,14 @@ BOOL teams_workspace(Client *client)
     {
         return FALSE;
     }
+    if(wcsstr(client->data->title, L"Toolbar"))
+    {
+        return FALSE;
+    }
+    if(wcsstr(client->data->title, L"appSharingToolbar"))
+    {
+        return FALSE;
+    }
     if(wcsstr(client->data->title, L"Microsoft Teams Notification"))
     {
         return FALSE;

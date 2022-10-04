@@ -1039,7 +1039,7 @@ void deckLayout_apply_to_workspace(Workspace *workspace)
     int secondaryWidth;
     if(numberOfClients == 1)
     {
-        masterWidth = screenWidth - gapWidth;
+        masterWidth = screenWidth - (gapWidth * 2);
         secondaryWidth = 0;
     }
     else
@@ -1409,6 +1409,10 @@ void monitor_select_next(void)
 void select_monitor(Monitor *monitor)
 {
     if(monitor->isHidden)
+    {
+        return;
+    }
+    if(selectedMonitor == monitor)
     {
         return;
     }
