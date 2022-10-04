@@ -1232,7 +1232,8 @@ Client* find_client_in_workspace_by_hwnd(Workspace *workspace, HWND hwnd)
     return NULL;
 }
 
-void register_window(HWND hwnd) {
+void register_window(HWND hwnd)
+{
     BOOL isRootWindow = is_root_window(hwnd);
     if(!isRootWindow)
     {
