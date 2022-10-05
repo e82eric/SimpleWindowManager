@@ -54,6 +54,7 @@ static void remove_client(HWND hwnd);
 static void apply_workspace_to_monitor_with_window_focus(Workspace *workspace, Monitor *monitor, HDWP hdwp);
 static void apply_workspace_to_monitor(Workspace *workspace, Monitor *monitor, HDWP hdwp);
 static void select_monitor(Monitor *monitor);
+static void select_monitor2(Monitor *monitor);
 static void focus_workspace_selected_window(Workspace *workspace);
 static void remove_client_From_workspace_and_arrange(Workspace *workspace, Client *client);
 static void move_selected_window_to_workspace(Workspace *workspace);
@@ -291,7 +292,15 @@ void CALLBACK HandleWinEvent(
         {
             register_window(hwnd);
         }
-        else if (event == EVENT_OBJECT_LOCATIONCHANGE || event == EVENT_SYSTEM_MINIMIZEEND)
+        else if(event == EVENT_SYSTEM_MINIMIZESTART)
+        {
+            Client* client = find_client_in_workspaces_by_hwnd(hwnd);
+            if(client)
+            {
+                ShowWindow(hwnd, SW_RESTORE);
+            }
+        }
+        else if(event == EVENT_OBJECT_LOCATIONCHANGE)
         {
             Client* client = find_client_in_workspaces_by_hwnd(hwnd);
             if(!client)
@@ -301,7 +310,6 @@ void CALLBACK HandleWinEvent(
             else
             {
                 arrange_workspace(client->workspace);
-                ShowWindow(hwnd, SW_RESTORE);
             }
         }
         else if (event == EVENT_OBJECT_DESTROY)
@@ -313,8 +321,11 @@ void CALLBACK HandleWinEvent(
             Client* client = find_client_in_workspaces_by_hwnd(hwnd);
             if(client)
             {
-                client->workspace->selected = client;
-                select_monitor(client->workspace->monitor);
+                if(selectedMonitor->workspace->selected != client)
+                {
+                    client->workspace->selected = client;
+                    select_monitor2(client->workspace->monitor);
+                }
             }
         }
     }
@@ -1340,7 +1351,6 @@ void arrange_workspace2(Workspace *workspace, HDWP hdwp)
 {
     workspace->layout->apply_to_workspace(workspace);
     arrange_clients_in_workspace(workspace, hdwp);
-
 }
 
 void apply_workspace_to_monitor_with_window_focus(Workspace *workspace, Monitor *monitor, HDWP hdwp)
@@ -1413,7 +1423,27 @@ void select_monitor(Monitor *monitor)
     {
         return;
     }
-    if(selectedMonitor == monitor)
+    for(int i = 0; i < numberOfMonitors; i++)
+    {
+        if(monitors[i]-> selected == TRUE && monitor != monitors[i])
+        {
+            monitors[i]->selected = FALSE;
+        }
+    }
+    monitor->selected = TRUE;
+    Monitor* previousSelectedMonitor = selectedMonitor;
+    selectedMonitor = monitor;
+    focus_workspace_selected_window(monitor->workspace);
+    bar_trigger_paint(monitor->bar);
+    if(previousSelectedMonitor)
+    {
+        bar_trigger_paint(previousSelectedMonitor->bar);
+    }
+}
+
+void select_monitor2(Monitor *monitor)
+{
+    if(monitor->isHidden)
     {
         return;
     }
@@ -1427,7 +1457,9 @@ void select_monitor(Monitor *monitor)
     monitor->selected = TRUE;
     Monitor* previousSelectedMonitor = selectedMonitor;
     selectedMonitor = monitor;
-    focus_workspace_selected_window(monitor->workspace);
+
+    border_window_update();
+    bar_render_selected_window_description(monitor->bar);
     bar_trigger_paint(monitor->bar);
     if(previousSelectedMonitor)
     {
@@ -1577,7 +1609,8 @@ void select_previous_window(void)
     focus_workspace_selected_window(workspace);
 }
 
-void focus_workspace_selected_window(Workspace *workspace) {
+void focus_workspace_selected_window(Workspace *workspace)
+{
     keybd_event(0, 0, 0, 0);
     if(workspace->clients)
     {
@@ -1596,7 +1629,8 @@ void focus_workspace_selected_window(Workspace *workspace) {
     border_window_update();
 }
 
-void move_selected_window_to_workspace(Workspace *workspace) {
+void move_selected_window_to_workspace(Workspace *workspace)
+{
     Workspace *selectedMonitorWorkspace = selectedMonitor->workspace;
     Client *selectedClient = selectedMonitorWorkspace->selected;
     Workspace *currentWorspace = selectedClient->workspace;
@@ -2346,7 +2380,7 @@ int run (void)
         WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
 
     g_win_hook = SetWinEventHook(
-        EVENT_SYSTEM_MINIMIZEEND, EVENT_SYSTEM_MINIMIZEEND,
+        EVENT_SYSTEM_MINIMIZESTART, EVENT_SYSTEM_MINIMIZESTART,
         NULL,
         HandleWinEvent,
         0,
