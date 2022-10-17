@@ -42,5 +42,7 @@ Move windows between workspaces
 
 https://user-images.githubusercontent.com/811029/196103144-62bddc4f-9f5c-4340-b5c7-4acb7d74180f.mp4
 
+Multiple Monitors
 
-https://user-images.githubusercontent.com/811029/195980439-5b39c66e-0065-4a34-b9c5-e616a341753a.mp4
+https://user-images.githubusercontent.com/811029/196115233-af8056eb-74b2-4d89-b336-377c0d2a4def.mp4
+
