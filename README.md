@@ -1,6 +1,28 @@
 # SimpleWindowManager
 
-Common Key Bindings
+## There are already two other tiling managers for Windows that are much better than this one.
+- Workspacer
+- Komorebi
+
+(Most features and concepts are copied from these or DWM or I3)
+
+## Overview
+My general feeling having tried to a bunch of different tiling managers for Microsoft Windows, is that trying to layout every window that gets created by Windows would be a endless battle against all of Windows's different intricasies.  So I created this window manager to target my specific workflow where 99% of the windows that I create come from a few different applications (browser, terminal, IDE, chat, email) and to create rules to manage those applications within workspaces and allow easy movement and navigation with common key bindings and to let any other windows that get created float.
+
+## Features
+- Workspaces
+  - Define up to 9 different workspaces along with rules about which windows will be managed by the workspace.  (Usually defined by the process name, window class, window title or any combination of those).  Windows matching these rules will automatically be layed out by the workspace in its current layout
+- Layouts
+  - Tile Layout
+  - Monacle
+  - Deck (hybrid of Tile and Monacle where the master position is fixed and the windows in the secondary position can be cycled through) 
+- Scratch Windows
+  - Simple short lived terminal application that mapped to key bindings.  (My 2 most common are fzf commands for launching applications and killing processes)
+
+## Some things to note
+- Workspace rules and definitions are set in Config.c
+
+## Key Bindings
 | Key Binding   | Action              |
 | ------------- | -------------       |
 | ALT+J         | Select Next Window  |
