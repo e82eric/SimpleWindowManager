@@ -42,37 +42,28 @@ My general feeling having tried to a bunch of different tiling managers for Micr
 
 Tile Layout
 
-https://user-images.githubusercontent.com/811029/196101803-4f1824ca-a77f-4306-a97d-73b2794822a7.mp4
-
-
-
-https://user-images.githubusercontent.com/811029/196355621-0d1949a3-f1d2-43c0-beb5-779be880aedc.mp4
-
-
-https://user-images.githubusercontent.com/811029/196353537-eb57a993-24aa-40d6-8d17-26221274cfd2.mp4
-
+https://user-images.githubusercontent.com/811029/196359396-70a04129-12e9-4ff3-8ef4-2f8f8a10c90a.mp4
 
 Monacle Layout
 
-https://user-images.githubusercontent.com/811029/196101840-a48820c8-f158-4788-a513-70bb665927ed.mp4
+https://user-images.githubusercontent.com/811029/196359466-7dc2b2d1-75a7-4eb8-8fd7-f9d18356ecd9.mp4
 
 Deck Layout
 
-https://user-images.githubusercontent.com/811029/196101869-2a506130-ea4a-4159-85f0-5cbfe259f3f0.mp4
+https://user-images.githubusercontent.com/811029/196359506-d070da87-9949-45de-a045-3a8254fdd4c0.mp4
 
 Multiple Workspaces
 
-https://user-images.githubusercontent.com/811029/196101917-733c3f70-f0f7-414d-a44e-b5c73642843b.mp4
+https://user-images.githubusercontent.com/811029/196359562-a419c46f-ecd6-43f6-9deb-5f10eb2f231d.mp4
 
 Scratch Windows
 
-https://user-images.githubusercontent.com/811029/196101958-6297be42-c870-4269-b4fd-d58743276d25.mp4
+https://user-images.githubusercontent.com/811029/196359594-922ecd56-64d2-4d48-9a32-f8fac95cf837.mp4
 
 Move windows between workspaces
 
-https://user-images.githubusercontent.com/811029/196103144-62bddc4f-9f5c-4340-b5c7-4acb7d74180f.mp4
+https://user-images.githubusercontent.com/811029/196359630-66a98674-c604-4a3a-959c-f85b0aed9d8c.mp4
 
 Multiple Monitors
 
-https://user-images.githubusercontent.com/811029/196115233-af8056eb-74b2-4d89-b336-377c0d2a4def.mp4
-
+https://user-images.githubusercontent.com/811029/196359680-c7d45b94-3edc-409f-97f8-715abe833925.mp4
