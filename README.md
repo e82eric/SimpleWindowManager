@@ -31,7 +31,7 @@ My general feeling having tried to a bunch of different tiling managers for Micr
 | ALT+Shift+J   | Move window to next postion |
 | ALT+Shift+K   | Move window to previous position |
 | ALT+L         | Increase width of master window |
-| ALT+N         | Decrease width of master window |
+| ALT+H         | Decrease width of master window |
 | ALT+T         | Switch to tile layout |
 | ALT+D         | Switch to deck layout |
 | ALT+M         | Switch to monacle layout |
