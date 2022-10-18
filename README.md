@@ -35,10 +35,12 @@ My general feeling having tried to a bunch of different tiling managers for Micr
 | ALT+T         | Switch to tile layout |
 | ALT+D         | Switch to deck layout |
 | ALT+M         | Switch to monacle layout |
+| ALT+Space     | Toggle next layout |
 | ALT+Shirt+C   | Close selected Window |
 | ALT+,         | Select next monitor |
 | ALT+[1-9] | Select workspace by number|
 | ALT+Shift+[1-9] | Move selected window to workspace by number |
+| ALT+V         | Toggle Windows Taskbar |
 
 Tile Layout
 
