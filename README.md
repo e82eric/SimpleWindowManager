@@ -71,7 +71,7 @@ Multiple Monitors
 https://user-images.githubusercontent.com/811029/196359680-c7d45b94-3edc-409f-97f8-715abe833925.mp4
 
 ## Build
-* Copy the SampleConfig.c file to Config.c and make any cusotmizations
+* Copy the SampleConfig.c file to Config.c and make customizations to Config.c
 * Make sure visual studio c++ build tools are installed (this shouldn't require a full VS install)
 * Run setvcvars.bat (the path in the batch is hard coded to the VS install directory and may need to be updated)
 * Run build.cmd
