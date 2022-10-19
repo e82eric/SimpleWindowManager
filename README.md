@@ -78,5 +78,8 @@ https://user-images.githubusercontent.com/811029/196359680-c7d45b94-3edc-409f-97
 
 ## Configuration
 * Defining workspaces:
-** Specifying a workspace: https://github.com/e82eric/SimpleWindowManager/blob/main/SampleConfig.c#L129
-** Providing a filter function: https://github.com/e82eric/SimpleWindowManager/blob/main/SampleConfig.c#L26
+  * Specifying workspaces: https://github.com/e82eric/SimpleWindowManager/blob/main/SampleConfig.c#L129
+  * Providing a filter function: https://github.com/e82eric/SimpleWindowManager/blob/main/SampleConfig.c#L26
+* Key Bindings 
+  * Simple key binding mapped to function with no args: https://github.com/e82eric/SimpleWindowManager/blob/main/SampleConfig.c#L196
+  * Key binding mapped to function with single argument: https://github.com/e82eric/SimpleWindowManager/blob/main/SampleConfig.c#L188
