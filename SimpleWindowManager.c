@@ -146,6 +146,53 @@ static TCHAR *processListCommand = L"/c tasklist /nh | sort | fzf -e --bind=\"ct
 
 KeyBinding *headKeyBinding;
 
+enum WindowRoutingMode
+{
+    FilteredAndRoutedToWorkspace = 0x1,
+    FilteredCurrentWorkspace = 0x2,
+    NotFilteredCurrentWorkspace = 0x4,
+};
+
+enum WindowRoutingMode currentWindowRoutingMode = FilteredAndRoutedToWorkspace;
+
+void toggle_create_window_in_current_workspace(void)
+{
+    if(currentWindowRoutingMode != FilteredCurrentWorkspace)
+    {
+        currentWindowRoutingMode = FilteredCurrentWorkspace;
+    }
+    else
+    {
+        currentWindowRoutingMode = FilteredAndRoutedToWorkspace;
+    }
+    for(int i = 0; i < numberOfMonitors; i++)
+    {
+        if(!monitors[i]->isHidden)
+        {
+            bar_render_selected_window_description(monitors[i]->bar);
+        }
+    }
+}
+
+void toggle_ignore_workspace_filters(void)
+{
+    if(currentWindowRoutingMode != NotFilteredCurrentWorkspace)
+    {
+        currentWindowRoutingMode = NotFilteredCurrentWorkspace;
+    }
+    else
+    {
+        currentWindowRoutingMode = FilteredAndRoutedToWorkspace;
+    }
+    for(int i = 0; i < numberOfMonitors; i++)
+    {
+        if(!monitors[i]->isHidden)
+        {
+            bar_render_selected_window_description(monitors[i]->bar);
+        }
+    }
+}
+
 static BOOL CALLBACK enum_windows_callback(HWND hwnd, LPARAM lparam)
 {
     UNREFERENCED_PARAMETER(lparam);
@@ -1253,17 +1300,33 @@ void register_window(HWND hwnd)
 
     Client *client = client_from_hwnd(hwnd);
 
+
     Workspace *workspaceFoundByFilter = NULL;
     Workspace *workspace = NULL;
-    for(int i = 0; i < numberOfWorkspaces; i++)
-    {
-        Workspace *currentWorkspace = workspaces[i];
-        BOOL filterResult = currentWorkspace->windowFilter(client);
 
-        if(filterResult)
+    if(currentWindowRoutingMode == NotFilteredCurrentWorkspace)
+    {
+        workspaceFoundByFilter = selectedMonitor->workspace;
+    }
+    else
+    {
+        for(int i = 0; i < numberOfWorkspaces; i++)
         {
-            workspaceFoundByFilter = currentWorkspace;
-            break;
+            Workspace *currentWorkspace = workspaces[i];
+            BOOL filterResult = currentWorkspace->windowFilter(client);
+
+            if(filterResult)
+            {
+                if(currentWindowRoutingMode == FilteredCurrentWorkspace)
+                {
+                    workspaceFoundByFilter = selectedMonitor->workspace;
+                }
+                else
+                {
+                    workspaceFoundByFilter = currentWorkspace;
+                }
+                break;
+            }
         }
     }
 
@@ -1688,6 +1751,23 @@ void arrange_clients_in_selected_workspace(void)
 
 void bar_render_selected_window_description(Bar *bar)
 {
+    TCHAR* windowRoutingMode;
+    switch(currentWindowRoutingMode)
+    {
+        case FilteredAndRoutedToWorkspace:
+            windowRoutingMode = L"Normal";
+            break;
+        case FilteredCurrentWorkspace:
+            windowRoutingMode = L"FilteredCurrentWorkspace";
+            break;
+        case NotFilteredCurrentWorkspace:
+            windowRoutingMode = L"NotFilteredCurrentWorkspace";
+            break;
+        default:
+            L"UNKNOWN";
+            break;
+    }
+
     if(bar->monitor->workspace->selected)
     {
         int numberOfWorkspaceClients = get_number_of_workspace_clients(bar->monitor->workspace);

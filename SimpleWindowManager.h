@@ -209,6 +209,8 @@ void move_focused_client_previous(void);
 void swap_selected_monitor_to_deck_layout(void);
 void swap_selected_monitor_to_monacle_layout(void);
 void swap_selected_monitor_to_tile_layout(void);
+void toggle_create_window_in_current_workspace(void);
+void toggle_ignore_workspace_filters(void);
 void quit(void);
 
 /* Everything below is what Config.c must implement */
