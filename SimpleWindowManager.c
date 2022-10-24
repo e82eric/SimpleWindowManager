@@ -83,6 +83,12 @@ static void free_client(Client *client);
 static void button_set_selected(Button *button, BOOL value);
 static void button_set_has_clients(Button *button, BOOL value);
 static void client_move_to_location_on_screen(Client *client, HDWP hdwp);
+static void client_move_from_unminimized_to_minimized(Client *client);
+static void client_move_from_minimized_to_unminimized(Client *client);
+static void workspace_add_minimized_client(Workspace *workspace, Client *client);
+static void workspace_add_unminimized_client(Workspace *workspace, Client *client);
+static void workspace_remove_minimized_client(Workspace *workspace, Client *client);
+static void workspace_remove_unminimized_client(Workspace *workspace, Client *client);
 static int run (void);
 static int workspace_update_client_counts(Workspace *workspace);
 
@@ -154,6 +160,7 @@ enum WindowRoutingMode
 };
 
 enum WindowRoutingMode currentWindowRoutingMode = FilteredAndRoutedToWorkspace;
+int scratchWindowsScreenPadding = 250;
 
 void toggle_create_window_in_current_workspace(void)
 {
@@ -190,6 +197,31 @@ void toggle_ignore_workspace_filters(void)
         {
             bar_render_selected_window_description(monitors[i]->bar);
         }
+    }
+}
+
+void client_stop_managing(void)
+{
+    Client *client = selectedMonitor->workspace->selected;
+    if(client)
+    {
+        remove_client_from_workspace(client->workspace, client);
+        free_client(client);
+        int workspaceNumberOfClients = get_number_of_workspace_clients(client->workspace);
+        HDWP hdwp = BeginDeferWindowPos(workspaceNumberOfClients + 1);
+        arrange_workspace2(client->workspace, hdwp);
+
+        DeferWindowPos(
+            hdwp,
+            client->data->hwnd,
+            HWND_NOTOPMOST,
+            selectedMonitor->xOffset + scratchWindowsScreenPadding,
+            scratchWindowsScreenPadding,
+            selectedMonitor->w - (scratchWindowsScreenPadding * 2),
+            selectedMonitor->h - (scratchWindowsScreenPadding * 2),
+            SWP_SHOWWINDOW);
+        EndDeferWindowPos(hdwp);
+        SetForegroundWindow(client->data->hwnd);
     }
 }
 
@@ -335,7 +367,7 @@ void CALLBACK HandleWinEvent(
                 SetForegroundWindow(hwnd);
             }
         }
-        if (event == EVENT_OBJECT_SHOW || event == EVENT_SYSTEM_MOVESIZEEND)
+        if (event == EVENT_OBJECT_SHOW)
         {
             register_window(hwnd);
         }
@@ -344,7 +376,8 @@ void CALLBACK HandleWinEvent(
             Client* client = find_client_in_workspaces_by_hwnd(hwnd);
             if(client)
             {
-                ShowWindow(hwnd, SW_RESTORE);
+                client_move_from_unminimized_to_minimized(client);
+                /* ShowWindow(hwnd, SW_RESTORE); */
             }
         }
         else if(event == EVENT_OBJECT_LOCATIONCHANGE)
@@ -352,11 +385,32 @@ void CALLBACK HandleWinEvent(
             Client* client = find_client_in_workspaces_by_hwnd(hwnd);
             if(!client)
             {
-                register_window(hwnd);
+                /* register_window(hwnd); */
             }
             else
             {
-                arrange_workspace(client->workspace);
+                BOOL isMinimized = IsIconic(hwnd);
+                if(client->data->isMinimized)
+                {
+                    if(!isMinimized)
+                    {
+                        client_move_from_minimized_to_unminimized(client);
+                    }
+                }
+                else
+                {
+                    if(isMinimized)
+                    {
+                        client_move_from_unminimized_to_minimized(client);
+                    }
+                    else
+                    {
+                        HDWP hdwp = BeginDeferWindowPos(1);
+                        client_move_to_location_on_screen(client, hdwp);
+                        EndDeferWindowPos(hdwp);
+                        /* arrange_workspace(client->workspace); */
+                    }
+                }
             }
         }
         else if (event == EVENT_OBJECT_DESTROY)
@@ -430,6 +484,7 @@ Client* client_from_hwnd(HWND hwnd)
 
     TCHAR className[256] = {0};
     GetClassName(hwnd, className, sizeof(className)/sizeof(TCHAR));
+    BOOL isMinimized = IsIconic(hwnd);
 
     ClientData *clientData = calloc(1, sizeof(ClientData));
     clientData->hwnd = hwnd;
@@ -438,6 +493,7 @@ Client* client_from_hwnd(HWND hwnd)
     clientData->processImageName = _wcsdup(processImageFileName);
     clientData->title = _wcsdup(title);
     clientData->isElevated = isElevated;
+    clientData->isMinimized = isMinimized;
 
     Client *c;
     c = calloc(1, sizeof(Client));
@@ -446,19 +502,84 @@ Client* client_from_hwnd(HWND hwnd)
     return c;
 }
 
+void clients_add_as_first_node(Client *client)
+{
+    client->previous = NULL;
+    client->next = NULL;
+}
+
+void clients_add_as_root_node(Client *currentRootNode, Client *client)
+{
+    client->previous = NULL;
+    client->next = currentRootNode;
+    currentRootNode->previous = client;
+}
+
+void workspace_add_minimized_client(Workspace *workspace, Client *client)
+{
+    if(workspace->minimizedClients)
+    {
+        clients_add_as_root_node(workspace->minimizedClients, client);
+    }
+    else
+    {
+        clients_add_as_first_node(client);
+    }
+    workspace->minimizedClients = client;
+}
+
+void workspace_add_unminimized_client(Workspace *workspace, Client *client)
+{
+    if(workspace->clients)
+    {
+        clients_add_as_root_node(workspace->clients, client);
+    }
+    else
+    {
+        clients_add_as_first_node(client);
+    }
+    workspace->clients = client;
+    workspace->selected = client;
+}
+
 //workspace_add_client
 void add_client_to_workspace(Workspace *workspace, Client *client)
 {
     client->workspace = workspace;
-    if(workspace->clients)
+    if(client->data->isMinimized)
     {
-        client->next = workspace->clients;
-        client->next->previous = client;
+        workspace_add_minimized_client(workspace, client);
     }
-    workspace->selected = client;
-    workspace->clients = client;
+    else
+    {
+        workspace_add_unminimized_client(workspace, client);
+    }
 
     workspace_update_client_counts(workspace);
+}
+
+void client_move_from_minimized_to_unminimized(Client *client)
+{
+    if(client->data->isMinimized)
+    {
+        workspace_remove_minimized_client(client->workspace, client);
+        workspace_add_unminimized_client(client->workspace, client);
+        client->data->isMinimized = FALSE;
+        workspace_update_client_counts(client->workspace);
+        arrange_workspace(client->workspace);
+    }
+}
+
+void client_move_from_unminimized_to_minimized(Client *client)
+{
+    if(!client->data->isMinimized)
+    {
+        workspace_remove_unminimized_client(client->workspace, client);
+        workspace_add_minimized_client(client->workspace, client);
+        client->data->isMinimized = TRUE;
+        workspace_update_client_counts(client->workspace);
+        arrange_workspace(client->workspace);
+    }
 }
 
 //windowManager_remove_window
@@ -467,6 +588,7 @@ void remove_client(HWND hwnd) {
     if(client)
     {
         remove_client_From_workspace_and_arrange(client->workspace, client);
+        focus_workspace_selected_window(client->workspace);
         free_client(client);
     }
 }
@@ -480,60 +602,112 @@ void remove_client_From_workspace_and_arrange(Workspace *workspace, Client *clie
     }
 }
 
-//workspace_remove_client
-BOOL remove_client_from_workspace(Workspace *workspace, Client *client)
+void clients_remove_root_node(Client *client)
 {
-    BOOL result = FALSE;
-    if(!client->previous && !client->next)
+    if(client->next)
     {
-        workspace->selected = NULL;
-        workspace->clients = NULL;
-        client->next = NULL;
-        client->previous = NULL;
-        client->workspace = NULL;
-        result = TRUE;
-    }
-    else if(!client->previous && client->next)
-    {
-        if(client->workspace->selected == client)
-        {
-            client->workspace->selected = client->next;
-        }
         client->next->previous = NULL;
-        workspace->clients = client->next;
-        client->next = NULL;
-        client->previous = NULL;
-        client->workspace = NULL;
-        result = TRUE;
     }
-    else if(client->previous && client->next)
+}
+
+void clients_remove_surrounded_node(Client *client)
+{
+    client->previous->next = client->next;
+    client->next->previous = client->previous;
+}
+
+void clients_remove_end_node(Client *client)
+{
+    if(client->previous)
     {
-        if(client->workspace->selected == client)
+        client->previous->next = NULL;
+    }
+}
+
+void workspace_remove_minimized_client(Workspace *workspace, Client *client)
+{
+    if(client == workspace->minimizedClients)
+    {
+        if(client->next)
         {
-            client->workspace->selected = client->previous;
+            workspace->minimizedClients = client->next;
+            clients_remove_root_node(client);
+            workspace->selected = client->next;
         }
-        client->previous->next = client->next;
-        client->next->previous = client->previous;
-        client->next = NULL;
-        client->previous = NULL;
-        client->workspace = NULL;
-        result = TRUE;
+        else
+        {
+            workspace->minimizedClients = NULL;
+            workspace->selected = NULL;
+        }
+    }
+    else if(client->next && client->previous)
+    {
+        clients_remove_surrounded_node(client);
+        workspace->selected = client->previous;
     }
     else if(client->previous && !client->next)
     {
-        if(client->workspace->selected == client)
+        clients_remove_end_node(client);
+        workspace->selected = client->previous;
+    }
+    client->next = NULL;
+    client->previous = NULL;
+}
+
+void workspace_remove_unminimized_client(Workspace *workspace, Client *client)
+{
+    if(client == workspace->clients)
+    {
+        if(client->next)
         {
-            client->workspace->selected = client->previous;
+            workspace->clients = client->next;
+            clients_remove_root_node(client);
+            workspace->selected = client->next;
         }
-        client->previous->next = NULL;
-        client->next = NULL;
-        client->previous = NULL;
-        client->workspace = NULL;
-        result = TRUE;
+        else
+        {
+            workspace->clients = NULL;
+            workspace->lastClient= NULL;
+            workspace->selected = NULL;
+        }
+    }
+    else if(client->next && client->previous)
+    {
+        clients_remove_surrounded_node(client);
+        workspace->selected = client->previous;
+    }
+    else if(client == workspace->lastClient)
+    {
+        clients_remove_end_node(client);
+        if(client->previous)
+        {
+            workspace->lastClient = client->previous;
+            workspace->selected = client->previous;
+        }
+        else
+        {
+            //This really shouldn't happen
+            workspace->lastClient = NULL;
+        }
+    }
+    client->next = NULL;
+    client->previous = NULL;
+}
+//workspace_remove_client
+BOOL remove_client_from_workspace(Workspace *workspace, Client *client)
+{
+    if(client->data->isMinimized)
+    {
+        workspace_remove_minimized_client(workspace, client);
+    }
+    else
+    {
+        workspace_remove_unminimized_client(workspace, client);
     }
 
     workspace_update_client_counts(workspace);
-    return result;
+    //FIX THIS
+    return TRUE;
 }
 
 void border_window_update(void)
@@ -1185,13 +1359,17 @@ int workspace_update_client_counts(Workspace *workspace)
 {
     int numberOfClients = 0;
     Client *c  = workspace->clients;
-    while(c) {
-      numberOfClients++;
-      if(!c->next)
-      {
-          workspace->lastClient = c;
-      }
-      c = c->next;
+    while(c)
+    {
+        if(!c->data->isMinimized)
+        {
+            numberOfClients++;
+            if(!c->next)
+            {
+                workspace->lastClient = c;
+            }
+        }
+        c = c->next;
     }
 
     workspace->numberOfClients = numberOfClients;
@@ -1239,6 +1417,7 @@ void register_client_to_workspace(Workspace *workspace, Client *client)
     }
     add_client_to_workspace(workspace, client);
     arrange_workspace(workspace);
+    focus_workspace_selected_window(workspace);
 }
 
 //windowManager_assign_window_to_workspace
@@ -1287,6 +1466,15 @@ Client* find_client_in_workspace_by_hwnd(Workspace *workspace, HWND hwnd)
         }
         c = c->next;
     }
+    c = workspace->minimizedClients;
+    while(c)
+    {
+        if(c->data->hwnd == hwnd)
+        {
+            return c;
+        }
+        c = c->next;
+    }
     return NULL;
 }
 
@@ -1300,11 +1488,15 @@ void register_window(HWND hwnd)
 
     Client *client = client_from_hwnd(hwnd);
 
-
     Workspace *workspaceFoundByFilter = NULL;
     Workspace *workspace = NULL;
 
-    if(currentWindowRoutingMode == NotFilteredCurrentWorkspace)
+    BOOL alwaysExclude = should_always_exclude(client);
+
+    if(alwaysExclude)
+    {
+    }
+    else if(currentWindowRoutingMode == NotFilteredCurrentWorkspace)
     {
         workspaceFoundByFilter = selectedMonitor->workspace;
     }
@@ -1675,7 +1867,7 @@ void select_previous_window(void)
 void focus_workspace_selected_window(Workspace *workspace)
 {
     keybd_event(0, 0, 0, 0);
-    if(workspace->clients)
+    if(workspace->clients && workspace->selected)
     {
         HWND focusedHwnd = GetForegroundWindow();
         if(workspace->selected->data->hwnd != focusedHwnd)
@@ -1751,7 +1943,7 @@ void arrange_clients_in_selected_workspace(void)
 
 void bar_render_selected_window_description(Bar *bar)
 {
-    TCHAR* windowRoutingMode;
+    TCHAR* windowRoutingMode = L"UNKNOWN";
     switch(currentWindowRoutingMode)
     {
         case FilteredAndRoutedToWorkspace:
@@ -1763,9 +1955,6 @@ void bar_render_selected_window_description(Bar *bar)
         case NotFilteredCurrentWorkspace:
             windowRoutingMode = L"NotFilteredCurrentWorkspace";
             break;
-        default:
-            L"UNKNOWN";
-            break;
     }
 
     if(bar->monitor->workspace->selected)
@@ -1774,8 +1963,13 @@ void bar_render_selected_window_description(Bar *bar)
         LPCWSTR processShortFileName = PathFindFileName(bar->monitor->workspace->selected->data->processImageName);
 
         TCHAR displayStr[MAX_PATH];
-        int displayStrLen = swprintf(displayStr, MAX_PATH, L"[%ls:%d] : %ls (%d) (IsAdmin: %d)",
-            bar->monitor->workspace->layout->tag, numberOfWorkspaceClients, processShortFileName, bar->monitor->workspace->selected->data->processId, bar->monitor->workspace->selected->data->isElevated);
+        int displayStrLen = swprintf(displayStr, MAX_PATH, L"[%ls:%d] : %ls (%d) (IsAdmin: %d) (Mode: %ls)",
+            bar->monitor->workspace->layout->tag,
+            numberOfWorkspaceClients,
+            processShortFileName,
+            bar->monitor->workspace->selected->data->processId,
+            bar->monitor->workspace->selected->data->isElevated,
+            windowRoutingMode);
         if(bar->windowContextText)
         {
             free(bar->windowContextText);

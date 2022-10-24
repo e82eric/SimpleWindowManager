@@ -63,6 +63,7 @@ struct Workspace
 {
     TCHAR* name;
     Client *clients;
+    Client *minimizedClients;
     Monitor *monitor;
     Client *selected;
     WindowFilter windowFilter;
@@ -95,6 +96,7 @@ struct ClientData
     TCHAR *className;
     TCHAR *title;
     BOOL isElevated;
+    BOOL isMinimized;
 };
 
 struct Monitor
@@ -211,12 +213,14 @@ void swap_selected_monitor_to_monacle_layout(void);
 void swap_selected_monitor_to_tile_layout(void);
 void toggle_create_window_in_current_workspace(void);
 void toggle_ignore_workspace_filters(void);
+void client_stop_managing(void);
 void quit(void);
 
 /* Everything below is what Config.c must implement */
 Workspace** create_workspaces(int* outSize);
 void create_keybindings(Workspace** workspaces);
 BOOL should_use_old_move_logic(Client* client);
+BOOL should_always_exclude(Client* client);
 HFONT initalize_font();
 
 extern long barHeight;
