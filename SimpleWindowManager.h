@@ -167,6 +167,8 @@ extern Layout tileLayout;
 
 extern int numberOfBars;
 
+extern TCHAR *scratchWindowTitle;
+
 void deckLayout_select_next_window(Workspace *workspace);
 void stackBasedLayout_select_next_window(Workspace *workspace);
 void stackBasedLayout_select_previous_window(Workspace *workspace);

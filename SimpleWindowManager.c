@@ -789,8 +789,6 @@ void arrange_clients_in_workspace(Workspace *workspace, HDWP hdwp)
         client_move_to_location_on_screen(c, hdwp);
         c = c->previous;
     }
-
-    border_window_update();
 }
 
 void client_move_to_location_on_screen(Client *client, HDWP hdwp)
@@ -1485,6 +1483,37 @@ Client* find_client_in_workspace_by_hwnd(Workspace *workspace, HWND hwnd)
     return NULL;
 }
 
+void scratch_window_focus(void)
+{
+    HDWP hdwp = BeginDeferWindowPos(2);
+    DeferWindowPos(
+            hdwp,
+            scratchWindow->data->hwnd,
+            HWND_TOPMOST,
+            scratchWindow->data->x,
+            scratchWindow->data->y,
+            scratchWindow->data->w,
+            scratchWindow->data->h,
+            SWP_SHOWWINDOW);
+    DeferWindowPos(
+            hdwp,
+            borderWindowHwnd,
+            scratchWindow->data->hwnd,
+            scratchWindow->data->x - 4,
+            scratchWindow->data->y - 4,
+            scratchWindow->data->w + 8,
+            scratchWindow->data->h + 8,
+            SWP_SHOWWINDOW);
+    EndDeferWindowPos(hdwp);
+    ShowWindow(scratchWindow->data->hwnd, SW_RESTORE);
+    SetForegroundWindow(borderWindowHwnd);
+    SetForegroundWindow(scratchWindow->data->hwnd);
+    LONG lStyle = GetWindowLong(scratchWindow->data->hwnd, GWL_STYLE);
+    lStyle &= ~(WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_SYSMENU);
+    /* lStyle &= ~(WS_CAPTION | WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_SYSMENU); */
+    SetWindowLong(scratchWindow->data->hwnd, GWL_STYLE, lStyle);
+}
+
 void scratch_window_add(Client *client)
 {
     scratchWindow = client;
@@ -1496,32 +1525,7 @@ void scratch_window_add(Client *client)
     scratchWindow->data->w = selectedMonitor->w - (scratchWindowsScreenPadding * 2);
     scratchWindow->data->h = selectedMonitor->h - (scratchWindowsScreenPadding * 2);
 
-    HDWP hdwp = BeginDeferWindowPos(2);
-    DeferWindowPos(
-            hdwp,
-            client->data->hwnd,
-            HWND_TOPMOST,
-            scratchWindow->data->x,
-            scratchWindow->data->y,
-            scratchWindow->data->w,
-            scratchWindow->data->h,
-            SWP_SHOWWINDOW);
-    DeferWindowPos(
-            hdwp,
-            borderWindowHwnd,
-            HWND_TOPMOST,
-            scratchWindow->data->x - 4,
-            scratchWindow->data->y - 4,
-            scratchWindow->data->w + 8,
-            scratchWindow->data->h + 8,
-            SWP_SHOWWINDOW);
-    EndDeferWindowPos(hdwp);
-    ShowWindow(scratchWindow->data->hwnd, SW_RESTORE);
-    SetForegroundWindow(borderWindowHwnd);
-    SetForegroundWindow(scratchWindow->data->hwnd);
-    LONG lStyle = GetWindowLong(client->data->hwnd, GWL_STYLE);
-    lStyle &= ~(WS_CAPTION | WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_SYSMENU);
-    SetWindowLong(client->data->hwnd, GWL_STYLE, lStyle);
+    scratch_window_focus();
 }
 
 void scratch_window_remove()
@@ -1540,7 +1544,7 @@ void register_window(HWND hwnd)
 
     Client *client = client_from_hwnd(hwnd);
 
-    if(wcsstr(client->data->title, L"SimpleWindowManager Scratch"))
+    if(wcsstr(client->data->title, scratchWindowTitle))
     {
         scratch_window_add(client);
         return;
@@ -1596,8 +1600,10 @@ void register_window(HWND hwnd)
     }
 }
 
-void swap_selected_monitor_to(Workspace *workspace) {
+void swap_selected_monitor_to(Workspace *workspace)
+{
     monitor_set_workspace(selectedMonitor, workspace);
+    focus_workspace_selected_window(workspace);
 }
 
 void monitor_set_workspace(Monitor *monitor, Workspace *workspace)
@@ -1771,7 +1777,7 @@ void select_monitor2(Monitor *monitor)
     Monitor* previousSelectedMonitor = selectedMonitor;
     selectedMonitor = monitor;
 
-    border_window_update();
+    focus_workspace_selected_window(selectedMonitor->workspace);
     bar_render_selected_window_description(monitor->bar);
     bar_trigger_paint(monitor->bar);
     if(previousSelectedMonitor)
@@ -1925,6 +1931,12 @@ void select_previous_window(void)
 void focus_workspace_selected_window(Workspace *workspace)
 {
     keybd_event(0, 0, 0, 0);
+    if(scratchWindow)
+    {
+        scratch_window_focus();
+        return;
+    }
+
     if(workspace->clients && workspace->selected)
     {
         HWND focusedHwnd = GetForegroundWindow();
@@ -2234,7 +2246,7 @@ LRESULT CALLBACK WorkspaceButtonProc(
 
 void PaintBorderWindow(HWND hWnd)
 {
-    if(selectedMonitor->workspace->selected)
+    if(selectedMonitor->workspace->selected || scratchWindow)
     {
         PAINTSTRUCT ps;
         HDC hDC = BeginPaint(hWnd, &ps);
@@ -2568,7 +2580,7 @@ void start_process(TCHAR *processExe, TCHAR *cmdArgs, DWORD creationFlags)
     si.dwXSize = 2000;
     si.dwYSize = 1200;
     si.wShowWindow = SW_SHOW;
-    si.lpTitle = L"SimpleWindowManager Scratch";
+    si.lpTitle = scratchWindowTitle;
 
     PROCESS_INFORMATION pi = { 0 };
 
