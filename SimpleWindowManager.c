@@ -89,6 +89,8 @@ static void workspace_add_minimized_client(Workspace *workspace, Client *client)
 static void workspace_add_unminimized_client(Workspace *workspace, Client *client);
 static void workspace_remove_minimized_client(Workspace *workspace, Client *client);
 static void workspace_remove_unminimized_client(Workspace *workspace, Client *client);
+static void scratch_window_remove(void);
+static void scratch_window_add(Client *client);
 static int run (void);
 static int workspace_update_client_counts(Workspace *workspace);
 
@@ -151,6 +153,7 @@ static TCHAR *allFilesCommand = L"cmd /c set /p \"pth=Enter Path: \" && for /f \
 static TCHAR *processListCommand = L"/c tasklist /nh | sort | fzf -e --bind=\"ctrl-k:execute(for /f \\\"tokens=2\\\" %f in ({}) do taskkill /f /pid %f)+reload(tasklist /nh | sort)\" --bind=\"ctrl-r:reload(tasklist /nh | sort)\" --header \"ctrl-k Kill Pid\" --reverse";
 
 KeyBinding *headKeyBinding;
+Client *scratchWindow;
 
 enum WindowRoutingMode
 {
@@ -351,22 +354,6 @@ void CALLBACK HandleWinEvent(
 
     if (idChild == CHILDID_SELF && idObject == OBJID_WINDOW && hwnd)
     {
-        if (event == EVENT_OBJECT_CREATE)
-        {
-            TCHAR title[256];
-            GetWindowTextW(
-              hwnd,
-              title,
-              sizeof(title)/sizeof(TCHAR)
-            );
-            if(wcsstr(title, L"SimpleWindowManager Scratch"))
-            {
-                MoveWindow(hwnd, selectedMonitor->xOffset + 200, 200, selectedMonitor->w - 500, selectedMonitor->h - 500, FALSE);
-                ShowWindow(hwnd, SW_SHOW);
-                SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_SHOWWINDOW | SWP_NOSIZE | SWP_NOMOVE);
-                SetForegroundWindow(hwnd);
-            }
-        }
         if (event == EVENT_OBJECT_SHOW)
         {
             register_window(hwnd);
@@ -382,7 +369,16 @@ void CALLBACK HandleWinEvent(
         }
         else if(event == EVENT_OBJECT_LOCATIONCHANGE)
         {
-            Client* client = find_client_in_workspaces_by_hwnd(hwnd);
+            Client *client = NULL;
+            if(scratchWindow && hwnd == scratchWindow->data->hwnd)
+            {
+                client = scratchWindow;
+            }
+            else
+            {
+                client = find_client_in_workspaces_by_hwnd(hwnd);
+            }
+
             if(!client)
             {
                 /* register_window(hwnd); */
@@ -589,6 +585,17 @@ void remove_client(HWND hwnd) {
     {
         remove_client_From_workspace_and_arrange(client->workspace, client);
         focus_workspace_selected_window(client->workspace);
+    }
+    else if(scratchWindow && hwnd == scratchWindow->data->hwnd)
+    {
+        client = scratchWindow;
+        if(scratchWindow->data->isScratchWindow)
+        {
+            scratch_window_remove();
+        }
+    }
+    if(client)
+    {
         free_client(client);
     }
 }
@@ -1478,6 +1485,51 @@ Client* find_client_in_workspace_by_hwnd(Workspace *workspace, HWND hwnd)
     return NULL;
 }
 
+void scratch_window_add(Client *client)
+{
+    scratchWindow = client;
+    scratchWindow->isVisible = TRUE;
+
+    scratchWindow->data->isScratchWindow = TRUE;
+    scratchWindow->data->x = selectedMonitor->xOffset + scratchWindowsScreenPadding;
+    scratchWindow->data->y = scratchWindowsScreenPadding;
+    scratchWindow->data->w = selectedMonitor->w - (scratchWindowsScreenPadding * 2);
+    scratchWindow->data->h = selectedMonitor->h - (scratchWindowsScreenPadding * 2);
+
+    HDWP hdwp = BeginDeferWindowPos(2);
+    DeferWindowPos(
+            hdwp,
+            client->data->hwnd,
+            HWND_TOPMOST,
+            scratchWindow->data->x,
+            scratchWindow->data->y,
+            scratchWindow->data->w,
+            scratchWindow->data->h,
+            SWP_SHOWWINDOW);
+    DeferWindowPos(
+            hdwp,
+            borderWindowHwnd,
+            HWND_TOPMOST,
+            scratchWindow->data->x - 4,
+            scratchWindow->data->y - 4,
+            scratchWindow->data->w + 8,
+            scratchWindow->data->h + 8,
+            SWP_SHOWWINDOW);
+    EndDeferWindowPos(hdwp);
+    ShowWindow(scratchWindow->data->hwnd, SW_RESTORE);
+    SetForegroundWindow(borderWindowHwnd);
+    SetForegroundWindow(scratchWindow->data->hwnd);
+    LONG lStyle = GetWindowLong(client->data->hwnd, GWL_STYLE);
+    lStyle &= ~(WS_CAPTION | WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_SYSMENU);
+    SetWindowLong(client->data->hwnd, GWL_STYLE, lStyle);
+}
+
+void scratch_window_remove()
+{
+    scratchWindow = NULL;
+    focus_workspace_selected_window(selectedMonitor->workspace);
+}
+
 void register_window(HWND hwnd)
 {
     BOOL isRootWindow = is_root_window(hwnd);
@@ -1487,6 +1539,12 @@ void register_window(HWND hwnd)
     }
 
     Client *client = client_from_hwnd(hwnd);
+
+    if(wcsstr(client->data->title, L"SimpleWindowManager Scratch"))
+    {
+        scratch_window_add(client);
+        return;
+    }
 
     Workspace *workspaceFoundByFilter = NULL;
     Workspace *workspace = NULL;
@@ -2200,8 +2258,11 @@ static LRESULT WindowProc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
     {
         case WM_WINDOWPOSCHANGING:
         {
-            WINDOWPOS* windowPos = (WINDOWPOS*)lp;
-            windowPos->hwndInsertAfter = HWND_BOTTOM;
+            if(!scratchWindow)
+            {
+                WINDOWPOS* windowPos = (WINDOWPOS*)lp;
+                windowPos->hwndInsertAfter = HWND_BOTTOM;
+            }
         }
         case WM_PAINT:
         {
@@ -2506,7 +2567,7 @@ void start_process(TCHAR *processExe, TCHAR *cmdArgs, DWORD creationFlags)
     si.dwY = 100;
     si.dwXSize = 2000;
     si.dwYSize = 1200;
-    si.wShowWindow = SW_HIDE;
+    si.wShowWindow = SW_SHOW;
     si.lpTitle = L"SimpleWindowManager Scratch";
 
     PROCESS_INFORMATION pi = { 0 };
@@ -2636,14 +2697,6 @@ int run (void)
         fprintf (stderr, "SetWindowsHookEx WH_KEYBOARD_LL [%p] failed with error %d\n", moduleHandle, GetLastError ());
         return 0;
     };
-
-    g_win_hook = SetWinEventHook(
-        EVENT_OBJECT_CREATE, EVENT_OBJECT_CREATE,
-        NULL,
-        HandleWinEvent,
-        0,
-        0,
-        WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
 
     g_win_hook = SetWinEventHook(
         EVENT_OBJECT_LOCATIONCHANGE, EVENT_OBJECT_LOCATIONCHANGE,

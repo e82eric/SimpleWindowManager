@@ -97,6 +97,7 @@ struct ClientData
     TCHAR *title;
     BOOL isElevated;
     BOOL isMinimized;
+    BOOL isScratchWindow;
 };
 
 struct Monitor
