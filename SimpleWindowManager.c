@@ -343,6 +343,7 @@ void move_focused_window_to_master(void)
     Client *client = find_client_in_workspaces_by_hwnd(focusedHwnd);
     client->workspace->layout->move_client_to_master(client);
     arrange_workspace(client->workspace);
+    focus_workspace_selected_window(client->workspace);
 }
 
 void CALLBACK HandleWinEvent(
@@ -563,6 +564,7 @@ void client_move_from_minimized_to_unminimized(Client *client)
         client->data->isMinimized = FALSE;
         workspace_update_client_counts(client->workspace);
         arrange_workspace(client->workspace);
+        focus_workspace_selected_window(client->workspace);
     }
 }
 
@@ -575,6 +577,7 @@ void client_move_from_unminimized_to_minimized(Client *client)
         client->data->isMinimized = TRUE;
         workspace_update_client_counts(client->workspace);
         arrange_workspace(client->workspace);
+        focus_workspace_selected_window(client->workspace);
     }
 }
 
@@ -606,6 +609,7 @@ void remove_client_From_workspace_and_arrange(Workspace *workspace, Client *clie
     if(remove_client_from_workspace(workspace, client))
     {
         arrange_workspace(workspace);
+        focus_workspace_selected_window(workspace);
     }
 }
 
@@ -884,6 +888,7 @@ void tileLayout_move_client_to_master(Client *client)
     client->workspace->clients->data = temp;
     client->workspace->selected = client->workspace->clients;
     arrange_workspace(client->workspace);
+    focus_workspace_selected_window(client->workspace);
 }
 
 //workspace_move_client_to_next_position
@@ -929,8 +934,8 @@ void deckLayout_move_client_next(Client *client)
     }
 
     client->workspace->selected = client->workspace->clients->next;
-    focus_workspace_selected_window(client->workspace);
     arrange_workspace(client->workspace);
+    focus_workspace_selected_window(client->workspace);
 }
 
 void deckLayout_move_client_previous(Client *client)
@@ -975,8 +980,8 @@ void deckLayout_move_client_previous(Client *client)
     }
 
     client->workspace->selected = client->workspace->clients->next;
-    focus_workspace_selected_window(client->workspace);
     arrange_workspace(client->workspace);
+    focus_workspace_selected_window(client->workspace);
 }
 
 //workspace_move_client_to_next_position
@@ -1028,6 +1033,7 @@ void move_client_next(Client *client)
     }
 
     arrange_workspace(client->workspace);
+    focus_workspace_selected_window(client->workspace);
 }
 
 //workspace_move_client_to_next_position
@@ -1079,6 +1085,7 @@ void move_client_previous(Client *client)
     }
 
     arrange_workspace(client->workspace);
+    focus_workspace_selected_window(client->workspace);
 }
 
 void monacleLayout_select_next_client(Workspace *workspace)
@@ -1112,6 +1119,7 @@ void monacleLayout_select_next_client(Workspace *workspace)
 
     workspace->selected = workspace->clients;
     arrange_workspace(workspace);
+    focus_workspace_selected_window(workspace);
 }
 
 void monacleLayout_move_client_next(Client *client)
@@ -1155,6 +1163,7 @@ void monacleLayout_select_previous_client(Workspace *workspace)
 
     workspace->selected = workspace->clients;
     arrange_workspace(workspace);
+    focus_workspace_selected_window(workspace);
 }
 
 void workspace_increase_master_width_selected_monitor(void)
@@ -1166,12 +1175,14 @@ void workspace_increase_master_width(Workspace *workspace)
 {
     workspace->masterOffset = workspace->masterOffset + 20;
     arrange_workspace(workspace);
+    focus_workspace_selected_window(workspace);
 }
 
 void workspace_decrease_master_width(Workspace *workspace)
 {
     workspace->masterOffset = workspace->masterOffset - 20;
     arrange_workspace(workspace);
+    focus_workspace_selected_window(workspace);
 }
 
 void workspace_decrease_master_width_selected_monitor(void)
@@ -1418,6 +1429,7 @@ void register_client_to_workspace(Workspace *workspace, Client *client)
     {
         free_client(client);
         arrange_workspace(workspace);
+        focus_workspace_selected_window(workspace);
         return;
     }
     add_client_to_workspace(workspace, client);
@@ -1656,6 +1668,7 @@ void button_redraw(Button *button)
 void button_press_handle(Button *button)
 {
     monitor_set_workspace(button->bar->monitor, button->workspace);
+    focus_workspace_selected_window(button->workspace);
 }
 
 void arrange_workspace(Workspace *workspace)
@@ -1674,8 +1687,8 @@ void arrange_workspace2(Workspace *workspace, HDWP hdwp)
 
 void apply_workspace_to_monitor_with_window_focus(Workspace *workspace, Monitor *monitor, HDWP hdwp)
 {
-    focus_workspace_selected_window(workspace);
     apply_workspace_to_monitor(workspace, monitor, hdwp);
+    focus_workspace_selected_window(workspace);
 }
 
 void apply_workspace_to_monitor(Workspace *workspace, Monitor *monitor, HDWP hdwp)
@@ -1987,6 +2000,7 @@ void swap_selected_monitor_to_layout(Layout *layout)
         bar_render_selected_window_description(workspace->monitor->bar);
         bar_trigger_paint(workspace->monitor->bar);
     }
+    focus_workspace_selected_window(workspace);
 }
 
 void swap_selected_monitor_to_monacle_layout(void)
@@ -2009,6 +2023,7 @@ void arrange_clients_in_selected_workspace(void)
 {
     selectedMonitor->workspace->masterOffset = 0;
     arrange_workspace(selectedMonitor->workspace);
+    focus_workspace_selected_window(selectedMonitor->workspace);
 }
 
 void bar_render_selected_window_description(Bar *bar)
