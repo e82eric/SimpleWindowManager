@@ -169,22 +169,6 @@ extern int numberOfBars;
 
 extern TCHAR *scratchWindowTitle;
 
-void deckLayout_select_next_window(Workspace *workspace);
-void stackBasedLayout_select_next_window(Workspace *workspace);
-void stackBasedLayout_select_previous_window(Workspace *workspace);
-void tileLayout_move_client_to_master(Client *client);
-void deckLayout_move_client_next(Client *client);
-void deckLayout_move_client_previous(Client *client);
-void deckLayout_apply_to_workspace(Workspace *workspace);
-void monacleLayout_select_next_client(Workspace *workspace);
-void monacleLayout_select_previous_client(Workspace *workspace);
-void monacleLayout_move_client_next(Client *client);
-void monacleLayout_move_client_previous(Client *client);
-void noop_move_client_to_master(Client *client);
-void move_client_next(Client *client);
-void move_client_previous(Client *client);
-void calc_new_sizes_for_monacle_workspace(Workspace *workspace);
-void calc_new_sizes_for_workspace(Workspace *workspace);
 Workspace* workspace_create(TCHAR *name, WindowFilter windowFilter, WCHAR* tag, Layout *layout, int numberOfButtons);
 
 void keybinding_create_no_args(int modifiers, unsigned int key, void (*action) (void));
