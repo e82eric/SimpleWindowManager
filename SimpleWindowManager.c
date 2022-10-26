@@ -2701,53 +2701,6 @@ int run (void)
 
     font = initalize_font();
 
-    g_kb_hook = SetWindowsHookEx(WH_KEYBOARD_LL, &handle_key_press, moduleHandle, 0);
-    if (g_kb_hook == NULL)
-    {
-        fprintf (stderr, "SetWindowsHookEx WH_KEYBOARD_LL [%p] failed with error %d\n", moduleHandle, GetLastError ());
-        return 0;
-    };
-
-    g_win_hook = SetWinEventHook(
-        EVENT_OBJECT_LOCATIONCHANGE, EVENT_OBJECT_LOCATIONCHANGE,
-        NULL,
-        handle_windows_event,
-        0,
-        0,
-        WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
-
-    g_win_hook = SetWinEventHook(
-        EVENT_SYSTEM_MINIMIZESTART, EVENT_SYSTEM_MINIMIZESTART,
-        NULL,
-        handle_windows_event,
-        0,
-        0,
-        WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
-
-    g_win_hook = SetWinEventHook(
-        EVENT_OBJECT_DESTROY, EVENT_OBJECT_SHOW,
-        NULL,
-        handle_windows_event,
-        0,
-        0,
-        WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
-
-    g_win_hook = SetWinEventHook(
-        EVENT_SYSTEM_MOVESIZEEND, EVENT_SYSTEM_MOVESIZEEND,
-        NULL,
-        handle_windows_event,
-        0,
-        0,
-        WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
-
-    g_win_hook = SetWinEventHook(
-        EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_FOREGROUND,
-        NULL,
-        handle_windows_event,
-        0,
-        0,
-        WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
-
     numberOfDisplayMonitors = 2;
     numberOfBars = numberOfDisplayMonitors;
 
@@ -2835,7 +2788,6 @@ int run (void)
         associate_workspace_to_monitor(workspaces[i], monitors[i]);
     }
 
-    EnumWindows(enum_windows_callback, 0);
 
     for(int i = 0; i < numberOfBars; i++)
     {
@@ -2878,7 +2830,7 @@ int run (void)
     IMMDevice* mmdevice = NULL;
     hr = IMMDeviceEnumerator_GetDefaultAudioEndpoint(dev_enumerator,
       eRender,
-      eMultimedia,//eConsole,
+      eMultimedia,
       &mmdevice);
     if (FAILED(hr)) {
       IMMDeviceEnumerator_Release(mmdevice);
@@ -2900,7 +2852,58 @@ int run (void)
     }
 
     WNDCLASSEX* borderWindowClass = register_border_window_class();
+
+    EnumWindows(enum_windows_callback, 0);
     run_border_window(borderWindowClass);
+
+    g_kb_hook = SetWindowsHookEx(WH_KEYBOARD_LL, &handle_key_press, moduleHandle, 0);
+    if (g_kb_hook == NULL)
+    {
+        fprintf (stderr, "SetWindowsHookEx WH_KEYBOARD_LL [%p] failed with error %d\n", moduleHandle, GetLastError ());
+        return 0;
+    };
+
+    g_win_hook = SetWinEventHook(
+        EVENT_OBJECT_LOCATIONCHANGE, EVENT_OBJECT_LOCATIONCHANGE,
+        NULL,
+        handle_windows_event,
+        0,
+        0,
+        WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
+
+    g_win_hook = SetWinEventHook(
+        EVENT_SYSTEM_MINIMIZESTART, EVENT_SYSTEM_MINIMIZESTART,
+        NULL,
+        handle_windows_event,
+        0,
+        0,
+        WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
+
+    g_win_hook = SetWinEventHook(
+        EVENT_OBJECT_DESTROY, EVENT_OBJECT_SHOW,
+        NULL,
+        handle_windows_event,
+        0,
+        0,
+        WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
+
+    g_win_hook = SetWinEventHook(
+        EVENT_SYSTEM_MOVESIZEEND, EVENT_SYSTEM_MOVESIZEEND,
+        NULL,
+        handle_windows_event,
+        0,
+        0,
+        WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
+
+    g_win_hook = SetWinEventHook(
+        EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_FOREGROUND,
+        NULL,
+        handle_windows_event,
+        0,
+        0,
+        WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
+
+    workspace_focus_selected_window(selectedMonitor->workspace);
 
     MSG msg;
     while (GetMessage(&msg, NULL, 0, 0))
