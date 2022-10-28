@@ -208,6 +208,7 @@ Workspace** create_workspaces(int* outSize);
 void create_keybindings(Workspace** workspaces);
 BOOL should_use_old_move_logic(Client* client);
 BOOL should_always_exclude(Client* client);
+BOOL is_float_window(Client *client, LONG_PTR styles, LONG_PTR exStyles);
 HFONT initalize_font();
 
 extern long barHeight;

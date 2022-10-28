@@ -38,16 +38,15 @@ HHOOK g_kb_hook = 0;
 
 HWINEVENTHOOK g_win_hook;
 
-static Monitor *selectedMonitor = NULL;
-static Monitor *hiddenWindowMonitor = NULL;
-
-static void apply_sizes(Client *client, int w, int h, int x, int y);
 static BOOL CALLBACK enum_windows_callback(HWND hWnd, LPARAM lparam);
 
-void deckLayout_select_next_window(Workspace *workspace);
-void stackBasedLayout_select_next_window(Workspace *workspace);
-void stackBasedLayout_select_previous_window(Workspace *workspace);
+void tileLayout_select_next_window(Workspace *workspace);
+void tileLayout_select_previous_window(Workspace *workspace);
 void tileLayout_move_client_to_master(Client *client);
+void tilelayout_move_client_next(Client *client);
+void tilelayout_move_client_previous(Client *client);
+void tilelayout_calulate_and_apply_client_sizes(Workspace *workspace);
+void deckLayout_select_next_window(Workspace *workspace);
 void deckLayout_move_client_next(Client *client);
 void deckLayout_move_client_previous(Client *client);
 void deckLayout_apply_to_workspace(Workspace *workspace);
@@ -55,17 +54,13 @@ void monacleLayout_select_next_client(Workspace *workspace);
 void monacleLayout_select_previous_client(Workspace *workspace);
 void monacleLayout_move_client_next(Client *client);
 void monacleLayout_move_client_previous(Client *client);
+void monacleLayout_calculate_and_apply_client_sizes(Workspace *workspace);
 
 void noop_move_client_to_master(Client *client);
-void move_client_next(Client *client);
-void move_client_previous(Client *client);
-void calc_new_sizes_for_monacle_workspace(Workspace *workspace);
-void calc_new_sizes_for_workspace(Workspace *workspace);
 
-static void windowManager_add_window_if_not_filtered(HWND hwnd);
 static void windowMnaager_remove_client_if_found_by_hwnd(HWND hwnd);
-static void windowManager_move_selected_window_to_workspace(Workspace *workspace);
 static void windowManager_move_workspace_to_monitor(Monitor *monitor, Workspace *workspace);
+static Workspace* windowManager_find_client_workspace_using_filters(Client *client);
 static Client* windowManager_find_client_in_workspaces_by_hwnd(HWND hwnd);
 static void worksapce_add_client(Workspace *workspace, Client *client);
 static BOOL workspace_remove_client(Workspace *workspace, Client *client);
@@ -86,6 +81,7 @@ static Client* clientFactory_create_from_hwnd(HWND hwnd);
 static void client_move_to_location_on_screen(Client *client, HDWP hdwp);
 static void client_move_from_unminimized_to_minimized(Client *client);
 static void client_move_from_minimized_to_unminimized(Client *client);
+static void client_set_screen_coordinates(Client *client, int w, int h, int x, int y);
 static void free_client(Client *client);
 static void scratch_window_remove(void);
 static void scratch_window_add(Client *client);
@@ -102,13 +98,23 @@ static void monitor_select(Monitor *monitor);
 static void monitor_set_layout(Layout *layout);
 static void monitor_set_workspace(Workspace *workspace, Monitor *monitor, HDWP hdwp);
 static void associate_workspace_to_monitor(Workspace *workspace, Monitor *monitor);
-static BOOL is_root_window(HWND hwnd);
+static BOOL is_root_window(HWND hwnd, LONG styles, LONG exStyles);
 static int get_cpu_usage(void);
 static int get_memory_percent(void);
 static int run (void);
 
+enum WindowRoutingMode
+{
+    FilteredAndRoutedToWorkspace = 0x1,
+    FilteredCurrentWorkspace = 0x2,
+    NotFilteredCurrentWorkspace = 0x4,
+};
+
 static IAudioEndpointVolume *audioEndpointVolume;
 static INetworkListManager *networkListManager;
+
+static Monitor *selectedMonitor = NULL;
+static Monitor *hiddenWindowMonitor = NULL;
 
 int numberOfWorkspaces;
 static Workspace **workspaces;
@@ -142,18 +148,18 @@ Layout monacleLayout = {
     .move_client_to_master = noop_move_client_to_master,
     .move_client_next = monacleLayout_move_client_next,
     .move_client_previous = monacleLayout_move_client_previous,
-    .apply_to_workspace = calc_new_sizes_for_monacle_workspace,
+    .apply_to_workspace = monacleLayout_calculate_and_apply_client_sizes,
     .next = &deckLayout,
     .tag = L"M"
 };
 
 Layout tileLayout = {
-    .select_next_window = stackBasedLayout_select_next_window,
-    .select_previous_window = stackBasedLayout_select_previous_window,
+    .select_next_window = tileLayout_select_next_window,
+    .select_previous_window = tileLayout_select_previous_window,
     .move_client_to_master = tileLayout_move_client_to_master,
-    .move_client_next = move_client_next,
-    .move_client_previous = move_client_previous,
-    .apply_to_workspace = calc_new_sizes_for_workspace,
+    .move_client_next = tilelayout_move_client_next,
+    .move_client_previous = tilelayout_move_client_previous,
+    .apply_to_workspace = tilelayout_calulate_and_apply_client_sizes,
     .next = &monacleLayout,
     .tag = L"T"
 };
@@ -168,15 +174,28 @@ static TCHAR *processListCommand = L"/c tasklist /nh | sort | fzf -e --bind=\"ct
 KeyBinding *headKeyBinding;
 Client *scratchWindow;
 
-enum WindowRoutingMode
-{
-    FilteredAndRoutedToWorkspace = 0x1,
-    FilteredCurrentWorkspace = 0x2,
-    NotFilteredCurrentWorkspace = 0x4,
-};
-
 enum WindowRoutingMode currentWindowRoutingMode = FilteredAndRoutedToWorkspace;
 int scratchWindowsScreenPadding = 250;
+
+void move_focused_client_next(void)
+{
+    HWND foregroundHwnd = GetForegroundWindow();
+    Client* existingClient = windowManager_find_client_in_workspaces_by_hwnd(foregroundHwnd);
+    if(existingClient)
+    {
+        existingClient->workspace->layout->move_client_next(existingClient);
+    }
+}
+
+void move_focused_client_previous(void)
+{
+    HWND foregroundHwnd = GetForegroundWindow();
+    Client* existingClient = windowManager_find_client_in_workspaces_by_hwnd(foregroundHwnd);
+    if(existingClient)
+    {
+        existingClient->workspace->layout->move_client_previous(existingClient->workspace->selected);
+    }
+}
 
 void toggle_create_window_in_current_workspace(void)
 {
@@ -216,39 +235,52 @@ void toggle_ignore_workspace_filters(void)
     }
 }
 
-void client_stop_managing(void)
-{
-    Client *client = selectedMonitor->workspace->selected;
-    if(client)
-    {
-        workspace_remove_client(client->workspace, client);
-        free_client(client);
-        int workspaceNumberOfClients = workspace_get_number_of_clients(client->workspace);
-        HDWP hdwp = BeginDeferWindowPos(workspaceNumberOfClients + 1);
-        workspace_arrange_windows_with_defer_handle(client->workspace, hdwp);
-
-        DeferWindowPos(
-            hdwp,
-            client->data->hwnd,
-            HWND_NOTOPMOST,
-            selectedMonitor->xOffset + scratchWindowsScreenPadding,
-            scratchWindowsScreenPadding,
-            selectedMonitor->w - (scratchWindowsScreenPadding * 2),
-            selectedMonitor->h - (scratchWindowsScreenPadding * 2),
-            SWP_SHOWWINDOW);
-        EndDeferWindowPos(hdwp);
-        SetForegroundWindow(client->data->hwnd);
-    }
-}
-
 static BOOL CALLBACK enum_windows_callback(HWND hwnd, LPARAM lparam)
 {
     UNREFERENCED_PARAMETER(lparam);
-    windowManager_add_window_if_not_filtered(hwnd);
+
+    LONG styles = GetWindowLong(hwnd, GWL_STYLE);
+    LONG exStyles = GetWindowLong(hwnd, GWL_EXSTYLE);
+    BOOL isRootWindow = is_root_window(hwnd, styles, exStyles);
+    if(!isRootWindow)
+    {
+        return TRUE;
+    }
+
+    Client *client = clientFactory_create_from_hwnd(hwnd);
+    if(is_float_window(client, styles, exStyles))
+    {
+        free_client(client);
+        return TRUE;
+    }
+    Workspace *workspace = windowManager_find_client_workspace_using_filters(client);
+    if(workspace)
+    {
+        worksapce_add_client(workspace, client);
+    }
+    else
+    {
+        free_client(client);
+    }
+
     return TRUE;
 }
 
-BOOL is_root_window(HWND hwnd)
+BOOL is_alt_tab_window(HWND hwnd)
+{
+    // Start at the root owner
+    HWND hwndWalk = GetAncestor(hwnd, GA_ROOTOWNER);
+    // See if we are the last active visible popup
+    HWND hwndTry;
+    while ((hwndTry = GetLastActivePopup(hwndWalk)) != hwndTry)
+    {
+        if (IsWindowVisible(hwndTry)) break;
+        hwndWalk = hwndTry;
+    }
+    return hwndWalk == hwnd;
+}
+
+BOOL is_root_window(HWND hwnd, LONG styles, LONG exStyles)
 {
     BOOL isWindowVisible = IsWindowVisible(hwnd);
 
@@ -257,28 +289,26 @@ BOOL is_root_window(HWND hwnd)
         return FALSE;
     }
 
-    LONG_PTR windowLongPtr = GetWindowLongPtr(hwnd, GWL_STYLE);
-    LONG_PTR exWindowLongPtr = GetWindowLongPtr(hwnd, GWL_EXSTYLE);
-
-    if(exWindowLongPtr & WS_EX_NOACTIVATE)
+    if(exStyles & WS_EX_NOACTIVATE)
     {
         return FALSE;
     }
-    else
-    {
-    }
 
-    if(windowLongPtr & WS_CHILD)
+    if(styles & WS_CHILD)
     {
         return FALSE;
-    }
-    else
-    {
     }
 
     HWND parentHwnd = GetParent(hwnd);
 
-    if(windowLongPtr & WS_POPUP && !(windowLongPtr & WS_CLIPCHILDREN) || parentHwnd)
+    if(parentHwnd)
+    {
+        return FALSE;
+    }
+
+    BOOL isAltTabWindow = is_alt_tab_window(hwnd);
+
+    if(!isAltTabWindow)
     {
         return FALSE;
     }
@@ -374,9 +404,70 @@ void CALLBACK handle_windows_event(
 
     if (idChild == CHILDID_SELF && idObject == OBJID_WINDOW && hwnd)
     {
+        LONG styles = GetWindowLong(hwnd, GWL_STYLE);
+        LONG exStyles = GetWindowLong(hwnd, GWL_EXSTYLE);
+
+        BOOL isRootWindow = is_root_window(hwnd, styles, exStyles);
+        BOOL isToolWindow = exStyles & WS_EX_TOOLWINDOW;
+
+        if(!isRootWindow)
+        {
+            Client* client = windowManager_find_client_in_workspaces_by_hwnd(hwnd);
+            if(client)
+            {
+                workspace_remove_client_and_arrange(client->workspace, client);
+                workspace_focus_selected_window(client->workspace);
+                free_client(client);
+                return;
+            }
+        }
         if (event == EVENT_OBJECT_SHOW)
         {
-            windowManager_add_window_if_not_filtered(hwnd);
+            if(!isRootWindow)
+            {
+                return;
+            }
+
+            Client *existingClient = windowManager_find_client_in_workspaces_by_hwnd(hwnd);
+            if(existingClient)
+            {
+                workspace_arrange_windows(existingClient->workspace);
+                workspace_focus_selected_window(existingClient->workspace);
+                return;
+            }
+
+            Client *client = clientFactory_create_from_hwnd(hwnd);
+            if(wcsstr(client->data->title, scratchWindowTitle))
+            {
+                scratch_window_add(client);
+                return;
+            }
+
+            if(is_float_window(client, styles, exStyles))
+            {
+                if(!isToolWindow)
+                {
+                    SetForegroundWindow(hwnd);
+                }
+                free_client(client);
+                return;
+            }
+
+            Workspace *workspace = windowManager_find_client_workspace_using_filters(client);
+            if(workspace)
+            {
+                worksapce_add_client(workspace, client);
+                workspace_arrange_windows(workspace);
+                workspace_focus_selected_window(workspace);
+            }
+            else
+            {
+                if(!isToolWindow)
+                {
+                    SetForegroundWindow(hwnd);
+                }
+                free_client(client);
+            }
         }
         else if(event == EVENT_SYSTEM_MINIMIZESTART)
         {
@@ -419,7 +510,6 @@ void CALLBACK handle_windows_event(
                         HDWP hdwp = BeginDeferWindowPos(1);
                         client_move_to_location_on_screen(client, hdwp);
                         EndDeferWindowPos(hdwp);
-                        /* workspace_arrange_windows(client->workspace); */
                     }
                 }
             }
@@ -441,6 +531,66 @@ void CALLBACK handle_windows_event(
             }
         }
     }
+}
+
+void windowMnaager_remove_client_if_found_by_hwnd(HWND hwnd)
+{
+    Client* client = windowManager_find_client_in_workspaces_by_hwnd(hwnd);
+    if(client)
+    {
+        workspace_remove_client_and_arrange(client->workspace, client);
+        workspace_focus_selected_window(client->workspace);
+    }
+    else if(scratchWindow && hwnd == scratchWindow->data->hwnd)
+    {
+        client = scratchWindow;
+        if(scratchWindow->data->isScratchWindow)
+        {
+            scratch_window_remove();
+        }
+    }
+    if(client)
+    {
+        free_client(client);
+    }
+}
+
+void windowManager_move_window_to_workspace_and_arrange(HWND hwnd, Workspace *workspace)
+{
+    Client* existingClient = windowManager_find_client_in_workspaces_by_hwnd(hwnd);
+    Client* client;
+    if(!existingClient)
+    {
+        client = clientFactory_create_from_hwnd(hwnd);
+    }
+    else
+    {
+        if(existingClient->workspace == workspace)
+        {
+            return;
+        }
+        //If the client is already in another workspace we need to remove it
+        workspace_remove_client_and_arrange(existingClient->workspace, existingClient);
+        client = existingClient;
+    }
+
+    worksapce_add_client(workspace, client);
+    workspace_arrange_windows(workspace);
+}
+
+//Not sure what this is but I think it ties alot of stuff together
+//windowManager_find_existing_client_in_workspaces
+Client* windowManager_find_client_in_workspaces_by_hwnd(HWND hwnd)
+{
+    for(int i = 0; i < numberOfWorkspaces; i++)
+    {
+        Client *c = workspace_find_client_by_hwnd(workspaces[i], hwnd);
+        if(c)
+        {
+            return c;
+        }
+    }
+    return NULL;
 }
 
 Client* clientFactory_create_from_hwnd(HWND hwnd)
@@ -512,6 +662,131 @@ Client* clientFactory_create_from_hwnd(HWND hwnd)
     return c;
 }
 
+void client_move_from_minimized_to_unminimized(Client *client)
+{
+    if(client->data->isMinimized)
+    {
+        workspace_remove_minimized_client(client->workspace, client);
+        workspace_add_unminimized_client(client->workspace, client);
+        client->data->isMinimized = FALSE;
+        workspace_update_client_counts(client->workspace);
+        workspace_arrange_windows(client->workspace);
+        workspace_focus_selected_window(client->workspace);
+    }
+}
+
+void client_move_from_unminimized_to_minimized(Client *client)
+{
+    if(!client->data->isMinimized)
+    {
+        workspace_remove_unminimized_client(client->workspace, client);
+        workspace_add_minimized_client(client->workspace, client);
+        client->data->isMinimized = TRUE;
+        workspace_update_client_counts(client->workspace);
+        workspace_arrange_windows(client->workspace);
+        workspace_focus_selected_window(client->workspace);
+    }
+}
+
+void client_move_to_location_on_screen(Client *client, HDWP hdwp)
+{
+    RECT wrect;
+    RECT xrect;
+    GetWindowRect(client->data->hwnd, &wrect);
+    DwmGetWindowAttribute(client->data->hwnd, 9, &xrect, sizeof(RECT));
+
+    long leftBorderWidth = xrect.left - wrect.left;
+    long rightBorderWidth = wrect.right - xrect.right;
+    long topBorderWidth = wrect.top - xrect.top;
+    long bottomBorderWidth = wrect.bottom - xrect.bottom;
+
+    long targetTop = client->data->y - topBorderWidth;
+    long targetHeight = client->data->h + topBorderWidth + bottomBorderWidth;
+    long targetLeft = client->data->x - leftBorderWidth;
+    long targetWidth = client->data->w + leftBorderWidth + rightBorderWidth;
+
+    if(!client->isVisible)
+    {
+        targetLeft = hiddenWindowMonitor->xOffset;
+    }
+
+    BOOL useOldMoveLogic = should_use_old_move_logic(client);
+    if(useOldMoveLogic)
+    {
+        MoveWindow(client->data->hwnd, targetLeft, targetTop, targetWidth, targetHeight, FALSE);
+        ShowWindow(client->data->hwnd, SW_RESTORE);
+        if(client->isVisible)
+        {
+            SetWindowPos(client->data->hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_SHOWWINDOW | SWP_NOSIZE | SWP_NOMOVE);
+            SetWindowPos(client->data->hwnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_SHOWWINDOW | SWP_NOSIZE | SWP_NOMOVE);
+        }
+        else
+        {
+            SetWindowPos(client->data->hwnd, HWND_BOTTOM, 0, 0, 0, 0, SWP_SHOWWINDOW | SWP_NOSIZE | SWP_NOMOVE);
+        }
+    }
+    else
+    {
+        DeferWindowPos(
+            hdwp,
+            client->data->hwnd,
+            NULL,
+            targetLeft,
+            targetTop,
+            targetWidth,
+            targetHeight,
+            SWP_NOREDRAW);
+    }
+}
+
+void client_set_screen_coordinates(Client *client, int w, int h, int x, int y)
+{
+    if(client->data->x != x || client->data->w != w || client->data->h != h || client->data->y != y) {
+        client->data->isDirty = TRUE;
+        client->data->w = w;
+        client->data->h = h;
+        client->data->x = x;
+        client->data->y = y;
+    }
+}
+
+void client_stop_managing(void)
+{
+    Client *client = selectedMonitor->workspace->selected;
+    if(client)
+    {
+        workspace_remove_client(client->workspace, client);
+        free_client(client);
+        int workspaceNumberOfClients = workspace_get_number_of_clients(client->workspace);
+        HDWP hdwp = BeginDeferWindowPos(workspaceNumberOfClients + 1);
+        workspace_arrange_windows_with_defer_handle(client->workspace, hdwp);
+
+        DeferWindowPos(
+            hdwp,
+            client->data->hwnd,
+            HWND_NOTOPMOST,
+            selectedMonitor->xOffset + scratchWindowsScreenPadding,
+            scratchWindowsScreenPadding,
+            selectedMonitor->w - (scratchWindowsScreenPadding * 2),
+            selectedMonitor->h - (scratchWindowsScreenPadding * 2),
+            SWP_SHOWWINDOW);
+        EndDeferWindowPos(hdwp);
+        SetForegroundWindow(client->data->hwnd);
+    }
+}
+
+void free_client(Client *client)
+{
+    if(client->data)
+    {
+        free(client->data->processImageName);
+        free(client->data->className);
+        free(client->data->title);
+        free(client->data);
+    }
+    free(client);
+}
+
 void clients_add_as_first_node(Client *client)
 {
     client->previous = NULL;
@@ -523,6 +798,28 @@ void clients_add_as_root_node(Client *currentRootNode, Client *client)
     client->previous = NULL;
     client->next = currentRootNode;
     currentRootNode->previous = client;
+}
+
+void clients_remove_root_node(Client *client)
+{
+    if(client->next)
+    {
+        client->next->previous = NULL;
+    }
+}
+
+void clients_remove_surrounded_node(Client *client)
+{
+    client->previous->next = client->next;
+    client->next->previous = client->previous;
+}
+
+void clients_remove_end_node(Client *client)
+{
+    if(client->previous)
+    {
+        client->previous->next = NULL;
+    }
 }
 
 void workspace_add_minimized_client(Workspace *workspace, Client *client)
@@ -567,82 +864,12 @@ void worksapce_add_client(Workspace *workspace, Client *client)
     workspace_update_client_counts(workspace);
 }
 
-void client_move_from_minimized_to_unminimized(Client *client)
-{
-    if(client->data->isMinimized)
-    {
-        workspace_remove_minimized_client(client->workspace, client);
-        workspace_add_unminimized_client(client->workspace, client);
-        client->data->isMinimized = FALSE;
-        workspace_update_client_counts(client->workspace);
-        workspace_arrange_windows(client->workspace);
-        workspace_focus_selected_window(client->workspace);
-    }
-}
-
-void client_move_from_unminimized_to_minimized(Client *client)
-{
-    if(!client->data->isMinimized)
-    {
-        workspace_remove_unminimized_client(client->workspace, client);
-        workspace_add_minimized_client(client->workspace, client);
-        client->data->isMinimized = TRUE;
-        workspace_update_client_counts(client->workspace);
-        workspace_arrange_windows(client->workspace);
-        workspace_focus_selected_window(client->workspace);
-    }
-}
-
-void windowMnaager_remove_client_if_found_by_hwnd(HWND hwnd)
-{
-    Client* client = windowManager_find_client_in_workspaces_by_hwnd(hwnd);
-    if(client)
-    {
-        workspace_remove_client_and_arrange(client->workspace, client);
-        workspace_focus_selected_window(client->workspace);
-    }
-    else if(scratchWindow && hwnd == scratchWindow->data->hwnd)
-    {
-        client = scratchWindow;
-        if(scratchWindow->data->isScratchWindow)
-        {
-            scratch_window_remove();
-        }
-    }
-    if(client)
-    {
-        free_client(client);
-    }
-}
-
 void workspace_remove_client_and_arrange(Workspace *workspace, Client *client)
 {
     if(workspace_remove_client(workspace, client))
     {
         workspace_arrange_windows(workspace);
         workspace_focus_selected_window(workspace);
-    }
-}
-
-void clients_remove_root_node(Client *client)
-{
-    if(client->next)
-    {
-        client->next->previous = NULL;
-    }
-}
-
-void clients_remove_surrounded_node(Client *client)
-{
-    client->previous->next = client->next;
-    client->next->previous = client->previous;
-}
-
-void clients_remove_end_node(Client *client)
-{
-    if(client->previous)
-    {
-        client->previous->next = NULL;
     }
 }
 
@@ -732,6 +959,85 @@ BOOL workspace_remove_client(Workspace *workspace, Client *client)
     return TRUE;
 }
 
+void workspace_arrange_clients(Workspace *workspace, HDWP hdwp)
+{
+    Client *c = workspace->clients;
+    Client *lastClient = NULL;
+    while(c)
+    {
+        if(!c->next)
+        {
+            lastClient = c;
+        }
+        c = c->next;
+    }
+
+    //Doing this in reverse so first client gets added last and show on top.
+    //(I have no clue how to get ZOrder work)
+    c = lastClient;
+    while(c)
+    {
+        client_move_to_location_on_screen(c, hdwp);
+        c = c->previous;
+    }
+}
+
+void workspace_increase_master_width_selected_monitor(void)
+{
+    workspace_increase_master_width(selectedMonitor->workspace);
+}
+
+void workspace_increase_master_width(Workspace *workspace)
+{
+    workspace->masterOffset = workspace->masterOffset + 20;
+    workspace_arrange_windows(workspace);
+    workspace_focus_selected_window(workspace);
+}
+
+void workspace_decrease_master_width(Workspace *workspace)
+{
+    workspace->masterOffset = workspace->masterOffset - 20;
+    workspace_arrange_windows(workspace);
+    workspace_focus_selected_window(workspace);
+}
+
+void workspace_decrease_master_width_selected_monitor(void)
+{
+    workspace_decrease_master_width(selectedMonitor->workspace);
+}
+
+int workspace_get_number_of_clients(Workspace *workspace)
+{
+    return workspace->numberOfClients;
+}
+
+int workspace_update_client_counts(Workspace *workspace)
+{
+    int numberOfClients = 0;
+    Client *c  = workspace->clients;
+    while(c)
+    {
+        if(!c->data->isMinimized)
+        {
+            numberOfClients++;
+            if(!c->next)
+            {
+                workspace->lastClient = c;
+            }
+        }
+        c = c->next;
+    }
+
+    workspace->numberOfClients = numberOfClients;
+    for(int i = 0; i < workspace->numberOfButtons; i++)
+    {
+        BOOL hasClients = numberOfClients > 0;
+        button_set_has_clients(workspace->buttons[i], hasClients);
+    }
+
+    return numberOfClients;
+}
+
 void border_window_update(void)
 {
     if(selectedMonitor)
@@ -783,104 +1089,6 @@ void border_window_update(void)
     }
 }
 
-void arrange_clients_in_workspace(Workspace *workspace, HDWP hdwp)
-{
-    Client *c = workspace->clients;
-    Client *lastClient = NULL;
-    while(c)
-    {
-        if(!c->next)
-        {
-            lastClient = c;
-        }
-        c = c->next;
-    }
-
-    //Doing this in reverse so first client gets added last and show on top.
-    //(I have no clue how to get ZOrder work)
-    c = lastClient;
-    while(c)
-    {
-        client_move_to_location_on_screen(c, hdwp);
-        c = c->previous;
-    }
-}
-
-void client_move_to_location_on_screen(Client *client, HDWP hdwp)
-{
-    RECT wrect;
-    RECT xrect;
-    GetWindowRect(client->data->hwnd, &wrect);
-    DwmGetWindowAttribute(client->data->hwnd, 9, &xrect, sizeof(RECT));
-
-    long leftBorderWidth = xrect.left - wrect.left;
-    long rightBorderWidth = wrect.right - xrect.right;
-    long topBorderWidth = wrect.top - xrect.top;
-    long bottomBorderWidth = wrect.bottom - xrect.bottom;
-
-    long targetTop = client->data->y - topBorderWidth;
-    long targetHeight = client->data->h + topBorderWidth + bottomBorderWidth;
-    long targetLeft = client->data->x - leftBorderWidth;
-    long targetWidth = client->data->w + leftBorderWidth + rightBorderWidth;
-
-    if(!client->isVisible)
-    {
-        targetLeft = hiddenWindowMonitor->xOffset;
-    }
-
-    BOOL useOldMoveLogic = should_use_old_move_logic(client);
-    if(useOldMoveLogic)
-    {
-        MoveWindow(client->data->hwnd, targetLeft, targetTop, targetWidth, targetHeight, FALSE);
-        ShowWindow(client->data->hwnd, SW_RESTORE);
-        if(client->isVisible)
-        {
-            SetWindowPos(client->data->hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_SHOWWINDOW | SWP_NOSIZE | SWP_NOMOVE);
-            SetWindowPos(client->data->hwnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_SHOWWINDOW | SWP_NOSIZE | SWP_NOMOVE);
-        }
-        else
-        {
-            SetWindowPos(client->data->hwnd, HWND_BOTTOM, 0, 0, 0, 0, SWP_SHOWWINDOW | SWP_NOSIZE | SWP_NOMOVE);
-        }
-    }
-    else
-    {
-        DeferWindowPos(
-            hdwp,
-            client->data->hwnd,
-            NULL,
-            targetLeft,
-            targetTop,
-            targetWidth,
-            targetHeight,
-            SWP_NOREDRAW);
-    }
-}
-
-//Not sure this is kind of global
-//windowManager_select_window
-//probably add a parameter for hwnd
-//the GetForegroundWindow stuff seems like it is part or a event router
-void move_focused_client_next(void)
-{
-    HWND foregroundHwnd = GetForegroundWindow();
-    Client* existingClient = windowManager_find_client_in_workspaces_by_hwnd(foregroundHwnd);
-    if(existingClient)
-    {
-        existingClient->workspace->layout->move_client_next(existingClient);
-    }
-}
-
-void move_focused_client_previous(void)
-{
-    HWND foregroundHwnd = GetForegroundWindow();
-    Client* existingClient = windowManager_find_client_in_workspaces_by_hwnd(foregroundHwnd);
-    if(existingClient)
-    {
-        existingClient->workspace->layout->move_client_previous(existingClient->workspace->selected);
-    }
-}
-
 void noop_move_client_to_master(Client *client)
 {
     UNREFERENCED_PARAMETER(client);
@@ -902,7 +1110,172 @@ void tileLayout_move_client_to_master(Client *client)
     workspace_focus_selected_window(client->workspace);
 }
 
-//workspace_move_client_to_next_position
+void tilelayout_move_client_next(Client *client)
+{
+    if(client->workspace->clients)
+    {
+        //Exit no clients
+    }
+
+    if(client->workspace->clients == client && !client->next)
+    {
+        //Exit there is only one client
+        return;
+    }
+
+    if(client->next)
+    {
+        ClientData *temp = client->data;
+        client->data = client->next->data;
+        client->next->data = temp;
+        client->workspace->selected = client->next;
+    }
+    else
+    {
+        Client *c = client->workspace->clients;
+        ClientData *previousClientData = NULL;
+        while(c)
+        {
+            if(!previousClientData)
+            {
+                previousClientData = c->data;
+            }
+            else if(c->next)
+            {
+                ClientData *temp = c->data;
+                c->data = previousClientData;
+                previousClientData = temp;
+            }
+            else
+            {
+                ClientData *temp = c->data;
+                c->data = previousClientData;
+                client->workspace->clients->data = temp;
+            }
+            c = c->next;
+        }
+        client->workspace->selected = client->workspace->clients;
+    }
+
+    workspace_arrange_windows(client->workspace);
+    workspace_focus_selected_window(client->workspace);
+}
+
+void tilelayout_move_client_previous(Client *client)
+{
+    if(client->workspace->clients)
+    {
+        //Exit no clients
+    }
+
+    if(client->workspace->clients == client && !client->next)
+    {
+        //Exit there is only one client
+        return;
+    }
+
+    if(client->previous)
+    {
+        ClientData *temp = client->data;
+        client->data = client->previous->data;
+        client->previous->data = temp;
+        client->workspace->selected = client->previous;
+    }
+    else
+    {
+        Client *c = client->workspace->lastClient;
+        ClientData *nextClientData = NULL;
+        while(c)
+        {
+            if(!nextClientData)
+            {
+                nextClientData = c->data;
+            }
+            else if(c->previous)
+            {
+                ClientData *temp = c->data;
+                c->data = nextClientData;
+                nextClientData = temp;
+            }
+            else
+            {
+                ClientData *temp = c->data;
+                c->data = nextClientData;
+                client->workspace->lastClient->data = temp;
+            }
+            c = c->previous;
+        }
+        client->workspace->selected = client->workspace->lastClient;
+    }
+
+    workspace_arrange_windows(client->workspace);
+    workspace_focus_selected_window(client->workspace);
+}
+
+void tilelayout_calulate_and_apply_client_sizes(Workspace *workspace)
+{
+    int screenWidth = workspace->monitor->w;
+    int screenHeight = workspace->monitor->h;
+
+    int numberOfClients = workspace_get_number_of_clients(workspace);
+
+    int masterX = workspace->monitor->xOffset + gapWidth;
+    int allWidth = 0;
+
+    int masterWidth;
+    int tileWidth;
+    if(numberOfClients == 1)
+    {
+      masterWidth = screenWidth - (gapWidth * 2);
+      tileWidth = 0;
+      allWidth = screenWidth - (gapWidth * 2);
+    }
+    else
+    {
+      masterWidth = (screenWidth / 2) - gapWidth - (gapWidth / 2) + workspace->masterOffset;
+      tileWidth = (screenWidth / 2) - gapWidth - (gapWidth / 2) - workspace->masterOffset;
+      allWidth = (screenWidth / 2) - gapWidth;
+    }
+
+    int masterHeight = screenHeight - barHeight - (gapWidth * 2);
+    int tileHeight = 0;
+    if(numberOfClients < 3)
+    {
+        tileHeight = masterHeight;
+    }
+    else
+    {
+        long numberOfTiles = numberOfClients - 1;
+        long numberOfGaps = numberOfTiles - 1;
+        long spaceForGaps = numberOfGaps * gapWidth;
+        long spaceForTiles = masterHeight - spaceForGaps;
+        tileHeight = spaceForTiles / numberOfTiles;
+    }
+
+    int masterY = barHeight + gapWidth;
+    int tileX = workspace->monitor->xOffset + masterWidth + (gapWidth * 2);
+
+    Client *c  = workspace->clients;
+    int NumberOfClients2 = 0;
+    int tileY = masterY;
+    while(c)
+    {
+        c->isVisible = TRUE;
+        if(NumberOfClients2 == 0)
+        {
+            client_set_screen_coordinates(c, masterWidth, masterHeight, masterX, masterY);
+        }
+        else
+        {
+            client_set_screen_coordinates(c, tileWidth, tileHeight, tileX, tileY);
+            tileY = tileY + tileHeight + gapWidth;
+        }
+
+        NumberOfClients2++;
+        c = c->next;
+    }
+}
+
 void deckLayout_move_client_next(Client *client)
 {
     if(!client->workspace->clients)
@@ -995,108 +1368,74 @@ void deckLayout_move_client_previous(Client *client)
     workspace_focus_selected_window(client->workspace);
 }
 
-//workspace_move_client_to_next_position
-void move_client_next(Client *client)
+void deckLayout_apply_to_workspace(Workspace *workspace)
 {
-    if(client->workspace->clients)
+    //if we are switching to deck layout.  We want to make sure that selected window is either the master or top of secondary stack
+    if(workspace->selected && workspace->clients)
     {
-        //Exit no clients
+        if(workspace->clients->next)
+        {
+            //if selected is already master or top of secondary stack we don't need to do anything
+            //otherwise move selected window to top of secondary stack and select it
+            if(workspace->selected != workspace->clients &&
+               workspace->selected != workspace->clients->next)
+            {
+                ClientData *temp = workspace->selected->data;
+                workspace->selected->data = workspace->clients->next->data;
+                workspace->clients->next->data = temp;
+                workspace->selected = workspace->clients->next;
+            }
+        }
     }
 
-    if(client->workspace->clients == client && !client->next)
-    {
-        //Exit there is only one client
-        return;
-    }
+    int screenWidth = workspace->monitor->w;
+    int screenHeight = workspace->monitor->h;
 
-    if(client->next)
+    int numberOfClients = workspace_get_number_of_clients(workspace);
+
+    int masterX = workspace->monitor->xOffset + gapWidth;
+
+    int masterWidth;
+    int secondaryWidth;
+    if(numberOfClients == 1)
     {
-        ClientData *temp = client->data;
-        client->data = client->next->data;
-        client->next->data = temp;
-        client->workspace->selected = client->next;
+        masterWidth = screenWidth - (gapWidth * 2);
+        secondaryWidth = 0;
     }
     else
     {
-        Client *c = client->workspace->clients;
-        ClientData *previousClientData = NULL;
-        while(c)
-        {
-            if(!previousClientData)
-            {
-                previousClientData = c->data;
-            }
-            else if(c->next)
-            {
-                ClientData *temp = c->data;
-                c->data = previousClientData;
-                previousClientData = temp;
-            }
-            else
-            {
-                ClientData *temp = c->data;
-                c->data = previousClientData;
-                client->workspace->clients->data = temp;
-            }
-            c = c->next;
-        }
-        client->workspace->selected = client->workspace->clients;
+        masterWidth = (screenWidth / 2) - gapWidth - (gapWidth / 2) + workspace->masterOffset;
+        secondaryWidth = (screenWidth / 2) - gapWidth - (gapWidth / 2) - workspace->masterOffset;
     }
 
-    workspace_arrange_windows(client->workspace);
-    workspace_focus_selected_window(client->workspace);
-}
+    int allHeight = screenHeight - barHeight - (gapWidth * 2);
+    int allY = barHeight + gapWidth;
+    int secondaryX = workspace->monitor->xOffset + masterWidth + (gapWidth * 2);
 
-//workspace_move_client_to_next_position
-void move_client_previous(Client *client)
-{
-    if(client->workspace->clients)
+    Client *c  = workspace->clients;
+    int numberOfClients2 = 0;
+    while(c)
     {
-        //Exit no clients
-    }
+      if(numberOfClients2 == 0)
+      {
+          client_set_screen_coordinates(c, masterWidth, allHeight, masterX, allY);
+      }
+      else
+      {
+          client_set_screen_coordinates(c, secondaryWidth, allHeight, secondaryX, allY);
+      }
+      if(numberOfClients2 == 0 || numberOfClients2 == 1)
+      {
+          c->isVisible = TRUE;
+      }
+      else
+      {
+          c->isVisible = FALSE;
+      }
 
-    if(client->workspace->clients == client && !client->next)
-    {
-        //Exit there is only one client
-        return;
+      numberOfClients2++;
+      c = c->next;
     }
-
-    if(client->previous)
-    {
-        ClientData *temp = client->data;
-        client->data = client->previous->data;
-        client->previous->data = temp;
-        client->workspace->selected = client->previous;
-    }
-    else
-    {
-        Client *c = client->workspace->lastClient;
-        ClientData *nextClientData = NULL;
-        while(c)
-        {
-            if(!nextClientData)
-            {
-                nextClientData = c->data;
-            }
-            else if(c->previous)
-            {
-                ClientData *temp = c->data;
-                c->data = nextClientData;
-                nextClientData = temp;
-            }
-            else
-            {
-                ClientData *temp = c->data;
-                c->data = nextClientData;
-                client->workspace->lastClient->data = temp;
-            }
-            c = c->previous;
-        }
-        client->workspace->selected = client->workspace->lastClient;
-    }
-
-    workspace_arrange_windows(client->workspace);
-    workspace_focus_selected_window(client->workspace);
 }
 
 void monacleLayout_select_next_client(Workspace *workspace)
@@ -1177,168 +1516,7 @@ void monacleLayout_select_previous_client(Workspace *workspace)
     workspace_focus_selected_window(workspace);
 }
 
-void workspace_increase_master_width_selected_monitor(void)
-{
-    workspace_increase_master_width(selectedMonitor->workspace);
-}
-
-void workspace_increase_master_width(Workspace *workspace)
-{
-    workspace->masterOffset = workspace->masterOffset + 20;
-    workspace_arrange_windows(workspace);
-    workspace_focus_selected_window(workspace);
-}
-
-void workspace_decrease_master_width(Workspace *workspace)
-{
-    workspace->masterOffset = workspace->masterOffset - 20;
-    workspace_arrange_windows(workspace);
-    workspace_focus_selected_window(workspace);
-}
-
-void workspace_decrease_master_width_selected_monitor(void)
-{
-    workspace_decrease_master_width(selectedMonitor->workspace);
-}
-
-//tiledlayout_apply_to_workspace
-void calc_new_sizes_for_workspace(Workspace *workspace)
-{
-    int screenWidth = workspace->monitor->w;
-    int screenHeight = workspace->monitor->h;
-
-    int numberOfClients = workspace_get_number_of_clients(workspace);
-
-    int masterX = workspace->monitor->xOffset + gapWidth;
-    int allWidth = 0;
-
-    int masterWidth;
-    int tileWidth;
-    if(numberOfClients == 1)
-    {
-      masterWidth = screenWidth - (gapWidth * 2);
-      tileWidth = 0;
-      allWidth = screenWidth - (gapWidth * 2);
-    }
-    else
-    {
-      masterWidth = (screenWidth / 2) - gapWidth - (gapWidth / 2) + workspace->masterOffset;
-      tileWidth = (screenWidth / 2) - gapWidth - (gapWidth / 2) - workspace->masterOffset;
-      allWidth = (screenWidth / 2) - gapWidth;
-    }
-
-    int masterHeight = screenHeight - barHeight - (gapWidth * 2);
-    int tileHeight = 0;
-    if(numberOfClients < 3)
-    {
-        tileHeight = masterHeight;
-    }
-    else
-    {
-        long numberOfTiles = numberOfClients - 1;
-        long numberOfGaps = numberOfTiles - 1;
-        long spaceForGaps = numberOfGaps * gapWidth;
-        long spaceForTiles = masterHeight - spaceForGaps;
-        tileHeight = spaceForTiles / numberOfTiles;
-    }
-
-    int masterY = barHeight + gapWidth;
-    int tileX = workspace->monitor->xOffset + masterWidth + (gapWidth * 2);
-
-    Client *c  = workspace->clients;
-    int NumberOfClients2 = 0;
-    int tileY = masterY;
-    while(c)
-    {
-        c->isVisible = TRUE;
-        if(NumberOfClients2 == 0)
-        {
-            apply_sizes(c, masterWidth, masterHeight, masterX, masterY);
-        }
-        else
-        {
-            apply_sizes(c, tileWidth, tileHeight, tileX, tileY);
-            tileY = tileY + tileHeight + gapWidth;
-        }
-
-        NumberOfClients2++;
-        c = c->next;
-    }
-}
-
-//tiledlayout_apply_to_workspace
-void deckLayout_apply_to_workspace(Workspace *workspace)
-{
-    //if we are switching to deck layout.  We want to make sure that selected window is either the master or top of secondary stack
-    if(workspace->selected && workspace->clients)
-    {
-        if(workspace->clients->next)
-        {
-            //if selected is already master or top of secondary stack we don't need to do anything
-            //otherwise move selected window to top of secondary stack and select it
-            if(workspace->selected != workspace->clients &&
-               workspace->selected != workspace->clients->next)
-            {
-                ClientData *temp = workspace->selected->data;
-                workspace->selected->data = workspace->clients->next->data;
-                workspace->clients->next->data = temp;
-                workspace->selected = workspace->clients->next;
-            }
-        }
-    }
-
-    int screenWidth = workspace->monitor->w;
-    int screenHeight = workspace->monitor->h;
-
-    int numberOfClients = workspace_get_number_of_clients(workspace);
-
-    int masterX = workspace->monitor->xOffset + gapWidth;
-
-    int masterWidth;
-    int secondaryWidth;
-    if(numberOfClients == 1)
-    {
-        masterWidth = screenWidth - (gapWidth * 2);
-        secondaryWidth = 0;
-    }
-    else
-    {
-        masterWidth = (screenWidth / 2) - gapWidth - (gapWidth / 2) + workspace->masterOffset;
-        secondaryWidth = (screenWidth / 2) - gapWidth - (gapWidth / 2) - workspace->masterOffset;
-    }
-
-    int allHeight = screenHeight - barHeight - (gapWidth * 2);
-    int allY = barHeight + gapWidth;
-    int secondaryX = workspace->monitor->xOffset + masterWidth + (gapWidth * 2);
-
-    Client *c  = workspace->clients;
-    int numberOfClients2 = 0;
-    while(c)
-    {
-      if(numberOfClients2 == 0)
-      {
-          apply_sizes(c, masterWidth, allHeight, masterX, allY);
-      }
-      else
-      {
-          apply_sizes(c, secondaryWidth, allHeight, secondaryX, allY);
-      }
-      if(numberOfClients2 == 0 || numberOfClients2 == 1)
-      {
-          c->isVisible = TRUE;
-      }
-      else
-      {
-          c->isVisible = FALSE;
-      }
-
-      numberOfClients2++;
-      c = c->next;
-    }
-}
-
-//monacleLayout_apply_to_workspace
-void calc_new_sizes_for_monacle_workspace(Workspace *workspace)
+void monacleLayout_calculate_and_apply_client_sizes(Workspace *workspace)
 {
     //if we are switching to this layout we want to make sure that the selected window is the top of the stack
     if(workspace->selected)
@@ -1371,115 +1549,9 @@ void calc_new_sizes_for_monacle_workspace(Workspace *workspace)
             c->isVisible = FALSE;
         }
         numberOfClients++;
-        apply_sizes(c, allWidth, allHeight, allX, allY);
+        client_set_screen_coordinates(c, allWidth, allHeight, allX, allY);
         c = c->next;
     }
-}
-
-//workspace_get_number_of_clients
-int workspace_get_number_of_clients(Workspace *workspace)
-{
-    return workspace->numberOfClients;
-}
-
-int workspace_update_client_counts(Workspace *workspace)
-{
-    int numberOfClients = 0;
-    Client *c  = workspace->clients;
-    while(c)
-    {
-        if(!c->data->isMinimized)
-        {
-            numberOfClients++;
-            if(!c->next)
-            {
-                workspace->lastClient = c;
-            }
-        }
-        c = c->next;
-    }
-
-    workspace->numberOfClients = numberOfClients;
-    for(int i = 0; i < workspace->numberOfButtons; i++)
-    {
-        BOOL hasClients = numberOfClients > 0;
-        button_set_has_clients(workspace->buttons[i], hasClients);
-    }
-
-    return numberOfClients;
-}
-
-//client_set_position
-void apply_sizes(Client *client, int w, int h, int x, int y) {
-    if(client->data->x != x || client->data->w != w || client->data->h != h || client->data->y != y) {
-        client->data->isDirty = TRUE;
-        client->data->w = w;
-        client->data->h = h;
-        client->data->x = x;
-        client->data->y = y;
-    }
-}
-
-void free_client(Client *client)
-{
-    if(client->data)
-    {
-        free(client->data->processImageName);
-        free(client->data->className);
-        free(client->data->title);
-        free(client->data);
-    }
-    free(client);
-}
-
-//workspace_add_client_if_new_add_trigger_render
-void register_client_to_workspace(Workspace *workspace, Client *client)
-{
-    Client *existingClient = workspace_find_client_by_hwnd(workspace, client->data->hwnd);
-    if(existingClient)
-    {
-        free_client(client);
-        workspace_arrange_windows(workspace);
-        workspace_focus_selected_window(workspace);
-        return;
-    }
-    worksapce_add_client(workspace, client);
-    workspace_arrange_windows(workspace);
-    workspace_focus_selected_window(workspace);
-}
-
-//windowManager_assign_window_to_workspace
-void register_window_to_workspace(HWND hwnd, Workspace *workspace)
-{
-    Client* existingClient = windowManager_find_client_in_workspaces_by_hwnd(hwnd);
-    Client* client;
-    if(!existingClient)
-    {
-        client = clientFactory_create_from_hwnd(hwnd);
-    }
-    else
-    {
-        //Why do I do this here?
-        workspace_remove_client_and_arrange(existingClient->workspace, existingClient);
-        client = existingClient;
-    }
-
-    register_client_to_workspace(workspace, client);
-}
-
-//Not sure what this is but I think it ties alot of stuff together
-//windowManager_find_existing_client_in_workspaces
-Client* windowManager_find_client_in_workspaces_by_hwnd(HWND hwnd)
-{
-    for(int i = 0; i < numberOfWorkspaces; i++)
-    {
-        Client *c = workspace_find_client_by_hwnd(workspaces[i], hwnd);
-        if(c)
-        {
-            return c;
-        }
-    }
-    return NULL;
 }
 
 //windowManager_find_existing_client_for_window_in_workspace
@@ -1557,22 +1629,8 @@ void scratch_window_remove()
     workspace_focus_selected_window(selectedMonitor->workspace);
 }
 
-void windowManager_add_window_if_not_filtered(HWND hwnd)
+Workspace* windowManager_find_client_workspace_using_filters(Client *client)
 {
-    BOOL isRootWindow = is_root_window(hwnd);
-    if(!isRootWindow)
-    {
-        return;
-    }
-
-    Client *client = clientFactory_create_from_hwnd(hwnd);
-
-    if(wcsstr(client->data->title, scratchWindowTitle))
-    {
-        scratch_window_add(client);
-        return;
-    }
-
     Workspace *workspaceFoundByFilter = NULL;
     Workspace *workspace = NULL;
 
@@ -1613,14 +1671,15 @@ void windowManager_add_window_if_not_filtered(HWND hwnd)
     }
     else
     {
-        free_client(client);
-        return;
+        return NULL;
     }
 
     if(workspace)
     {
-        register_client_to_workspace(workspace, client);
+        return workspace;
     }
+
+    return NULL;
 }
 
 void swap_selected_monitor_to(Workspace *workspace)
@@ -1694,7 +1753,7 @@ void workspace_arrange_windows(Workspace *workspace)
 void workspace_arrange_windows_with_defer_handle(Workspace *workspace, HDWP hdwp)
 {
     workspace->layout->apply_to_workspace(workspace);
-    arrange_clients_in_workspace(workspace, hdwp);
+    workspace_arrange_clients(workspace, hdwp);
 }
 
 void monitor_set_workspace(Workspace *workspace, Monitor *monitor, HDWP hdwp)
@@ -1794,7 +1853,7 @@ void bar_trigger_paint(Bar *bar)
 void move_focused_window_to_workspace(Workspace *workspace)
 {
     HWND foregroundHwnd = GetForegroundWindow();
-    register_window_to_workspace(foregroundHwnd, workspace);
+    windowManager_move_window_to_workspace_and_arrange(foregroundHwnd, workspace);
 }
 
 void close_focused_window(void)
@@ -1865,7 +1924,7 @@ void deckLayout_select_next_window(Workspace *workspace)
     }
 }
 
-void stackBasedLayout_select_next_window(Workspace *workspace)
+void tileLayout_select_next_window(Workspace *workspace)
 {
     Client *currentSelectedClient = workspace->selected;
 
@@ -1887,7 +1946,7 @@ void stackBasedLayout_select_next_window(Workspace *workspace)
     }
 }
 
-void stackBasedLayout_select_previous_window(Workspace *workspace)
+void tileLayout_select_previous_window(Workspace *workspace)
 {
     Client *currentSelectedClient = workspace->selected;
 
@@ -1947,15 +2006,6 @@ void workspace_focus_selected_window(Workspace *workspace)
     }
 
     border_window_update();
-}
-
-void windowManager_move_selected_window_to_workspace(Workspace *workspace)
-{
-    Workspace *selectedMonitorWorkspace = selectedMonitor->workspace;
-    Client *selectedClient = selectedMonitorWorkspace->selected;
-    Workspace *currentWorspace = selectedClient->workspace;
-    register_client_to_workspace(workspace, selectedClient);
-    workspace_remove_client_and_arrange(currentWorspace, selectedClient);
 }
 
 void toggle_selected_monitor_layout(void)
@@ -2854,6 +2904,15 @@ int run (void)
     WNDCLASSEX* borderWindowClass = register_border_window_class();
 
     EnumWindows(enum_windows_callback, 0);
+
+    for(int i = 0; i < numberOfMonitors; i++)
+    {
+        int workspaceNumberOfClients = workspace_get_number_of_clients(monitors[i]->workspace);
+        HDWP hdwp = BeginDeferWindowPos(workspaceNumberOfClients);
+        monitor_set_workspace(monitors[i]->workspace, monitors[i], hdwp);
+        EndDeferWindowPos(hdwp);
+    }
+
     run_border_window(borderWindowClass);
 
     g_kb_hook = SetWindowsHookEx(WH_KEYBOARD_LL, &handle_key_press, moduleHandle, 0);
