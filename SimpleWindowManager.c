@@ -17,6 +17,7 @@
 #include <windowsx.h>
 #include <netlistmgr.h>
 #include <dwmapi.h>
+#include <strsafe.h>
 #include "SimpleWindowManager.h"
 #pragma comment(lib, "user32.lib")
 #pragma comment(lib, "Oleacc.lib")
@@ -32,6 +33,17 @@ DEFINE_GUID(CLSID_MMDeviceEnumerator, 0xbcde0395, 0xe52f, 0x467c, 0x8e, 0x3d, 0x
 DEFINE_GUID(IID_IAudioEndpointVolume, 0x5cdf2c82, 0x841e, 0x4546, 0x97, 0x22, 0x0c, 0xf7, 0x40, 0x78, 0x22, 0x9a);
 DEFINE_GUID(CLSID_NetworkListManager, 0xdcb00c01, 0x570f, 0x4a9b, 0x8d,0x69, 0x19,0x9f,0xdb,0xa5,0x72,0x3b);
 DEFINE_GUID(IID_INetworkListManager, 0xdcb00000, 0x570f, 0x4a9b, 0x8d,0x69, 0x19,0x9f,0xdb,0xa5,0x72,0x3b);
+
+typedef struct LauncherProcess LauncherProcess;
+
+struct LauncherProcess
+{
+    HANDLE readFileHandle;
+    DWORD processId;
+    HANDLE wait;
+    HANDLE event;
+    void (*onSuccess) (CHAR *stdOut);
+};
 
 DWORD g_main_tid = 0;
 HHOOK g_kb_hook = 0;
@@ -60,6 +72,7 @@ void noop_move_client_to_master(Client *client);
 
 static void windowMnaager_remove_client_if_found_by_hwnd(HWND hwnd);
 static void windowManager_move_workspace_to_monitor(Monitor *monitor, Workspace *workspace);
+static void windowManager_move_window_to_workspace_and_arrange(HWND hwnd, Workspace *workspace);
 static Workspace* windowManager_find_client_workspace_using_filters(Client *client);
 static Client* windowManager_find_client_in_workspaces_by_hwnd(HWND hwnd);
 static void worksapce_add_client(Workspace *workspace, Client *client);
@@ -85,6 +98,7 @@ static void client_set_screen_coordinates(Client *client, int w, int h, int x, i
 static void free_client(Client *client);
 static void scratch_window_remove(void);
 static void scratch_window_add(Client *client);
+static void scratch_window_focus(void);
 static void button_set_selected(Button *button, BOOL value);
 static void button_set_has_clients(Button *button, BOOL value);
 static void button_press_handle(Button *button);
@@ -93,11 +107,13 @@ static void bar_render_selected_window_description(Bar *bar);
 static void bar_render_times(Bar *bar);
 static void bar_apply_workspace_change(Bar *bar, Workspace *previousWorkspace, Workspace *newWorkspace);
 static void bar_trigger_paint(Bar *bar);
-static void bar_window_run(Bar *bar, WNDCLASSEX *barWindowClass);
+static void bar_run(Bar *bar, WNDCLASSEX *barWindowClass);
+static void border_window_update(void);
+static LRESULT CALLBACK button_message_loop( HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam, UINT_PTR uIdSubclass, DWORD_PTR dwRefData);
 static void monitor_select(Monitor *monitor);
 static void monitor_set_layout(Layout *layout);
-static void monitor_set_workspace(Workspace *workspace, Monitor *monitor, HDWP hdwp);
-static void associate_workspace_to_monitor(Workspace *workspace, Monitor *monitor);
+static void monitor_set_workspace_and_arrange(Workspace *workspace, Monitor *monitor, HDWP hdwp);
+static void monitor_set_workspace(Workspace *workspace, Monitor *monitor);
 static BOOL is_root_window(HWND hwnd, LONG styles, LONG exStyles);
 static int get_cpu_usage(void);
 static int get_memory_percent(void);
@@ -197,6 +213,21 @@ void move_focused_client_previous(void)
     }
 }
 
+void move_focused_window_to_workspace(Workspace *workspace)
+{
+    HWND foregroundHwnd = GetForegroundWindow();
+    windowManager_move_window_to_workspace_and_arrange(foregroundHwnd, workspace);
+}
+
+void move_focused_window_to_master(void)
+{
+    HWND focusedHwnd = GetForegroundWindow();
+    Client *client = windowManager_find_client_in_workspaces_by_hwnd(focusedHwnd);
+    client->workspace->layout->move_client_to_master(client);
+    workspace_arrange_windows(client->workspace);
+    workspace_focus_selected_window(client->workspace);
+}
+
 void toggle_create_window_in_current_workspace(void)
 {
     if(currentWindowRoutingMode != FilteredCurrentWorkspace)
@@ -233,6 +264,124 @@ void toggle_ignore_workspace_filters(void)
             bar_render_selected_window_description(monitors[i]->bar);
         }
     }
+}
+
+void swap_selected_monitor_to(Workspace *workspace)
+{
+    windowManager_move_workspace_to_monitor(selectedMonitor, workspace);
+    workspace_focus_selected_window(workspace);
+}
+
+void close_focused_window(void)
+{
+    HWND foregroundHwnd = GetForegroundWindow();
+    Client* existingClient = windowManager_find_client_in_workspaces_by_hwnd(foregroundHwnd);
+    SendMessage(foregroundHwnd, WM_CLOSE, (WPARAM)NULL, (LPARAM)NULL);
+    CloseHandle(foregroundHwnd);
+
+    if(existingClient)
+    {
+        workspace_remove_client_and_arrange(existingClient->workspace, existingClient);
+    }
+}
+
+void kill_focused_window(void)
+{
+    HWND foregroundHwnd = GetForegroundWindow();
+    DWORD processId = 0;
+    GetWindowThreadProcessId(foregroundHwnd, &processId);
+    Client* existingClient = windowManager_find_client_in_workspaces_by_hwnd(foregroundHwnd);
+    HANDLE processHandle = OpenProcess(PROCESS_TERMINATE, FALSE, processId);
+    TerminateProcess(processHandle, 1);
+    CloseHandle(processHandle);
+    if(existingClient)
+    {
+        workspace_remove_client_and_arrange(existingClient->workspace, existingClient);
+    }
+}
+
+void redraw_focused_window(void)
+{
+    HWND foregroundHwnd = GetForegroundWindow();
+    RedrawWindow(foregroundHwnd, NULL, NULL, RDW_ERASE | RDW_INVALIDATE);
+}
+
+void select_next_window(void)
+{
+    Workspace *workspace = selectedMonitor->workspace;
+    workspace->layout->select_next_window(workspace);
+    workspace_focus_selected_window(workspace);
+}
+
+void select_previous_window(void)
+{
+    Workspace *workspace = selectedMonitor->workspace;
+    workspace->layout->select_previous_window(workspace);
+    workspace_focus_selected_window(workspace);
+}
+
+void toggle_selected_monitor_layout(void)
+{
+    Workspace *workspace = selectedMonitor->workspace;
+    if(workspace->layout->next)
+    {
+        workspace->selected = workspace->clients;
+        monitor_set_layout(workspace->layout->next);
+    }
+    else
+    {
+        monitor_set_layout(headLayoutNode);
+    }
+}
+
+void swap_selected_monitor_to_monacle_layout(void)
+{
+    monitor_set_layout(&monacleLayout);
+}
+
+void swap_selected_monitor_to_deck_layout(void)
+{
+    monitor_set_layout(&deckLayout);
+}
+
+void swap_selected_monitor_to_tile_layout(void)
+{
+    monitor_set_layout(&tileLayout);
+}
+
+void arrange_clients_in_selected_workspace(void)
+{
+    selectedMonitor->workspace->masterOffset = 0;
+    workspace_arrange_windows(selectedMonitor->workspace);
+    workspace_focus_selected_window(selectedMonitor->workspace);
+}
+
+void taskbar_toggle(void)
+{
+    HWND taskBarHandle = FindWindow(
+      L"Shell_TrayWnd",
+      NULL
+    );
+    HWND taskBar2Handle = FindWindow(
+      L"Shell_SecondaryTrayWnd",
+      NULL
+    );
+    long taskBarStyles = GetWindowLong(taskBarHandle, GWL_STYLE);
+    if(taskBarStyles & WS_VISIBLE)
+    {
+        ShowWindow(taskBarHandle, SW_HIDE);
+        ShowWindow(taskBar2Handle, SW_HIDE);
+    }
+    else
+    {
+        ShowWindow(taskBarHandle, SW_SHOW);
+        ShowWindow(taskBar2Handle, SW_SHOW);
+    }
+}
+
+void quit(void)
+{
+    ExitProcess(0);
 }
 
 static BOOL CALLBACK enum_windows_callback(HWND hwnd, LPARAM lparam)
@@ -283,6 +432,12 @@ BOOL is_alt_tab_window(HWND hwnd)
 BOOL is_root_window(HWND hwnd, LONG styles, LONG exStyles)
 {
     BOOL isWindowVisible = IsWindowVisible(hwnd);
+    HWND desktopWindow = GetDesktopWindow();
+
+    if(hwnd == desktopWindow)
+    {
+        return FALSE;
+    }
 
     if(isWindowVisible == FALSE)
     {
@@ -325,7 +480,7 @@ LRESULT CALLBACK handle_key_press(int code, WPARAM w, LPARAM l)
         while(keyBinding)
         {
             if(p->vkCode == keyBinding->key)
-            {
+           {
                 int modifiersPressed = 0;
                 if(GetKeyState(VK_LSHIFT) & 0x8000)
                 {
@@ -378,15 +533,6 @@ LRESULT CALLBACK handle_key_press(int code, WPARAM w, LPARAM l)
     }
 
     return CallNextHookEx(g_kb_hook, code, w, l);
-}
-
-void move_focused_window_to_master(void)
-{
-    HWND focusedHwnd = GetForegroundWindow();
-    Client *client = windowManager_find_client_in_workspaces_by_hwnd(focusedHwnd);
-    client->workspace->layout->move_client_to_master(client);
-    workspace_arrange_windows(client->workspace);
-    workspace_focus_selected_window(client->workspace);
 }
 
 void CALLBACK handle_windows_event(
@@ -578,8 +724,6 @@ void windowManager_move_window_to_workspace_and_arrange(HWND hwnd, Workspace *wo
     workspace_arrange_windows(workspace);
 }
 
-//Not sure what this is but I think it ties alot of stuff together
-//windowManager_find_existing_client_in_workspaces
 Client* windowManager_find_client_in_workspaces_by_hwnd(HWND hwnd)
 {
     for(int i = 0; i < numberOfWorkspaces; i++)
@@ -591,6 +735,79 @@ Client* windowManager_find_client_in_workspaces_by_hwnd(HWND hwnd)
         }
     }
     return NULL;
+}
+
+Workspace* windowManager_find_client_workspace_using_filters(Client *client)
+{
+    Workspace *workspaceFoundByFilter = NULL;
+    Workspace *workspace = NULL;
+
+    BOOL alwaysExclude = should_always_exclude(client);
+
+    if(alwaysExclude)
+    {
+    }
+    else if(currentWindowRoutingMode == NotFilteredCurrentWorkspace)
+    {
+        workspaceFoundByFilter = selectedMonitor->workspace;
+    }
+    else
+    {
+        for(int i = 0; i < numberOfWorkspaces; i++)
+        {
+            Workspace *currentWorkspace = workspaces[i];
+            BOOL filterResult = currentWorkspace->windowFilter(client);
+
+            if(filterResult)
+            {
+                if(currentWindowRoutingMode == FilteredCurrentWorkspace)
+                {
+                    workspaceFoundByFilter = selectedMonitor->workspace;
+                }
+                else
+                {
+                    workspaceFoundByFilter = currentWorkspace;
+                }
+                break;
+            }
+        }
+    }
+
+    if(workspaceFoundByFilter)
+    {
+        workspace = workspaceFoundByFilter;
+    }
+    else
+    {
+        return NULL;
+    }
+
+    if(workspace)
+    {
+        return workspace;
+    }
+
+    return NULL;
+}
+
+void windowManager_move_workspace_to_monitor(Monitor *monitor, Workspace *workspace)
+{
+    Monitor *currentMonitor = workspace->monitor;
+
+    Workspace *selectedMonitorCurrentWorkspace = monitor->workspace;
+
+    if(currentMonitor == monitor) {
+        return;
+    }
+
+    int workspaceNumberOfClients = workspace_get_number_of_clients(workspace);
+    int selectedMonitorCurrentWorkspaceNumberOfClients = workspace_get_number_of_clients(selectedMonitorCurrentWorkspace);
+
+    HDWP hdwp = BeginDeferWindowPos(workspaceNumberOfClients + selectedMonitorCurrentWorkspaceNumberOfClients);
+    monitor_set_workspace_and_arrange(workspace, monitor, hdwp);
+    workspace_focus_selected_window(workspace);
+    monitor_set_workspace_and_arrange(selectedMonitorCurrentWorkspace, currentMonitor, hdwp);
+    EndDeferWindowPos(hdwp);
 }
 
 Client* clientFactory_create_from_hwnd(HWND hwnd)
@@ -1038,55 +1255,79 @@ int workspace_update_client_counts(Workspace *workspace)
     return numberOfClients;
 }
 
-void border_window_update(void)
+Client* workspace_find_client_by_hwnd(Workspace *workspace, HWND hwnd)
 {
-    if(selectedMonitor)
+    Client *c = workspace->clients;
+    while(c)
     {
-        if(selectedMonitor->workspace->selected)
+        if(c->data->hwnd == hwnd)
         {
-            ClientData *selectedClientData = selectedMonitor->workspace->selected->data;
-
-            RECT currentPosition;
-            GetWindowRect(borderWindowHwnd, &currentPosition);
-
-            int targetLeft = selectedClientData->x - 4;
-            int targetTop = selectedClientData->y - 4;
-            int targetRight = selectedClientData->w + 8;
-            int targetBottom = selectedClientData->h + 8;
-
-            DWORD positionFlags;
-            if(targetLeft != currentPosition.left || targetTop != currentPosition.top ||
-                targetRight != currentPosition.right || targetBottom != currentPosition.bottom)
-            {
-                positionFlags = SWP_SHOWWINDOW;
-            }
-            else
-            {
-                positionFlags = SWP_NOREDRAW;
-            }
-
-            SetWindowPos(
-                borderWindowHwnd,
-                HWND_BOTTOM,
-                targetLeft,
-                targetTop,
-                targetRight,
-                targetBottom,
-                positionFlags);
+            return c;
         }
-        else
+        c = c->next;
+    }
+    c = workspace->minimizedClients;
+    while(c)
+    {
+        if(c->data->hwnd == hwnd)
         {
-            RedrawWindow(borderWindowHwnd, NULL, NULL, RDW_ERASE | RDW_INVALIDATE);
-            SetWindowPos(
-                borderWindowHwnd,
-                HWND_BOTTOM,
-                0,
-                0,
-                0,
-                0,
-                SWP_HIDEWINDOW);
+            return c;
+        }
+        c = c->next;
+    }
+    return NULL;
+}
+
+void workspace_arrange_windows(Workspace *workspace)
+{
+    int numberOfWorkspaceClients = workspace_get_number_of_clients(workspace);
+    HDWP hdwp = BeginDeferWindowPos(numberOfWorkspaceClients);
+    workspace_arrange_windows_with_defer_handle(workspace, hdwp);
+    EndDeferWindowPos(hdwp);
+}
+
+void workspace_arrange_windows_with_defer_handle(Workspace *workspace, HDWP hdwp)
+{
+    workspace->layout->apply_to_workspace(workspace);
+    workspace_arrange_clients(workspace, hdwp);
+}
+
+Workspace* workspace_create(TCHAR *name, WindowFilter windowFilter, WCHAR* tag, Layout *layout, int numberOfButtons)
+{
+    Button ** buttons = (Button **) calloc(numberOfButtons, sizeof(Button *));
+    Workspace *result = calloc(1, sizeof(Workspace));
+    result->name = _wcsdup(name);
+    result->windowFilter = windowFilter;
+    result->buttons = buttons;
+    result->tag = _wcsdup(tag);
+    result->layout = layout;
+    return result;
+}
+
+void workspace_focus_selected_window(Workspace *workspace)
+{
+    keybd_event(0, 0, 0, 0);
+    if(scratchWindow)
+    {
+        scratch_window_focus();
+        return;
+    }
+
+    if(workspace->clients && workspace->selected)
+    {
+        HWND focusedHwnd = GetForegroundWindow();
+        if(workspace->selected->data->hwnd != focusedHwnd)
+        {
+            SetForegroundWindow(workspace->selected->data->hwnd);
         }
     }
+    if(workspace->monitor->bar)
+    {
+        bar_render_selected_window_description(workspace->monitor->bar);
+        bar_trigger_paint(workspace->monitor->bar);
+    }
+
+    border_window_update();
 }
 
 void noop_move_client_to_master(Client *client)
@@ -1276,6 +1517,50 @@ void tilelayout_calulate_and_apply_client_sizes(Workspace *workspace)
     }
 }
 
+void tileLayout_select_next_window(Workspace *workspace)
+{
+    Client *currentSelectedClient = workspace->selected;
+
+    if(!workspace->clients)
+    {
+        return;
+    }
+    else if(!currentSelectedClient)
+    {
+        workspace->selected = workspace->clients;
+    }
+    else if(currentSelectedClient->next)
+    {
+        workspace->selected = currentSelectedClient->next;
+    }
+    else
+    {
+        workspace->selected = workspace->clients;
+    }
+}
+
+void tileLayout_select_previous_window(Workspace *workspace)
+{
+    Client *currentSelectedClient = workspace->selected;
+
+    if(!workspace->clients)
+    {
+        return;
+    }
+    else if(!currentSelectedClient)
+    {
+        workspace->selected = workspace->clients;
+    }
+    else if(currentSelectedClient->previous)
+    {
+        workspace->selected = currentSelectedClient->previous;
+    }
+    else
+    {
+        workspace->selected = workspace->lastClient;
+    }
+}
+
 void deckLayout_move_client_next(Client *client)
 {
     if(!client->workspace->clients)
@@ -1438,6 +1723,40 @@ void deckLayout_apply_to_workspace(Workspace *workspace)
     }
 }
 
+void deckLayout_select_next_window(Workspace *workspace)
+{
+    Client *currentSelectedClient = workspace->selected;
+
+    if(!workspace->clients)
+    {
+        return;
+    }
+    else if(!currentSelectedClient)
+    {
+        workspace->selected = workspace->clients;
+    }
+    else if(!currentSelectedClient->previous && !currentSelectedClient->next)
+    {
+        //there is only a master don't do anything
+        workspace->selected = workspace->clients;
+    }
+    else if(!currentSelectedClient->previous && currentSelectedClient->next)
+    {
+        //we are on the master go to the secondary
+        workspace->selected = currentSelectedClient->next;
+    }
+    else if(!currentSelectedClient->previous->previous && currentSelectedClient->next)
+    {
+        //we are on the secondary go to the master
+        workspace->selected = currentSelectedClient->previous;
+    }
+    else
+    {
+        //somehow we are not on the secondary or master.  Maybe fail instead 
+        workspace->selected = workspace->clients;
+    }
+}
+
 void monacleLayout_select_next_client(Workspace *workspace)
 {
     if(!workspace->clients)
@@ -1554,30 +1873,6 @@ void monacleLayout_calculate_and_apply_client_sizes(Workspace *workspace)
     }
 }
 
-//windowManager_find_existing_client_for_window_in_workspace
-Client* workspace_find_client_by_hwnd(Workspace *workspace, HWND hwnd)
-{
-    Client *c = workspace->clients;
-    while(c)
-    {
-        if(c->data->hwnd == hwnd)
-        {
-            return c;
-        }
-        c = c->next;
-    }
-    c = workspace->minimizedClients;
-    while(c)
-    {
-        if(c->data->hwnd == hwnd)
-        {
-            return c;
-        }
-        c = c->next;
-    }
-    return NULL;
-}
-
 void scratch_window_focus(void)
 {
     HDWP hdwp = BeginDeferWindowPos(2);
@@ -1629,136 +1924,9 @@ void scratch_window_remove()
     workspace_focus_selected_window(selectedMonitor->workspace);
 }
 
-Workspace* windowManager_find_client_workspace_using_filters(Client *client)
+void monitor_set_workspace_and_arrange(Workspace *workspace, Monitor *monitor, HDWP hdwp)
 {
-    Workspace *workspaceFoundByFilter = NULL;
-    Workspace *workspace = NULL;
-
-    BOOL alwaysExclude = should_always_exclude(client);
-
-    if(alwaysExclude)
-    {
-    }
-    else if(currentWindowRoutingMode == NotFilteredCurrentWorkspace)
-    {
-        workspaceFoundByFilter = selectedMonitor->workspace;
-    }
-    else
-    {
-        for(int i = 0; i < numberOfWorkspaces; i++)
-        {
-            Workspace *currentWorkspace = workspaces[i];
-            BOOL filterResult = currentWorkspace->windowFilter(client);
-
-            if(filterResult)
-            {
-                if(currentWindowRoutingMode == FilteredCurrentWorkspace)
-                {
-                    workspaceFoundByFilter = selectedMonitor->workspace;
-                }
-                else
-                {
-                    workspaceFoundByFilter = currentWorkspace;
-                }
-                break;
-            }
-        }
-    }
-
-    if(workspaceFoundByFilter)
-    {
-        workspace = workspaceFoundByFilter;
-    }
-    else
-    {
-        return NULL;
-    }
-
-    if(workspace)
-    {
-        return workspace;
-    }
-
-    return NULL;
-}
-
-void swap_selected_monitor_to(Workspace *workspace)
-{
-    windowManager_move_workspace_to_monitor(selectedMonitor, workspace);
-    workspace_focus_selected_window(workspace);
-}
-
-void windowManager_move_workspace_to_monitor(Monitor *monitor, Workspace *workspace)
-{
-    Monitor *currentMonitor = workspace->monitor;
-
-    Workspace *selectedMonitorCurrentWorkspace = monitor->workspace;
-
-    if(currentMonitor == monitor) {
-        return;
-    }
-
-    int workspaceNumberOfClients = workspace_get_number_of_clients(workspace);
-    int selectedMonitorCurrentWorkspaceNumberOfClients = workspace_get_number_of_clients(selectedMonitorCurrentWorkspace);
-
-    HDWP hdwp = BeginDeferWindowPos(workspaceNumberOfClients + selectedMonitorCurrentWorkspaceNumberOfClients);
-    monitor_set_workspace(workspace, monitor, hdwp);
-    workspace_focus_selected_window(workspace);
-    monitor_set_workspace(selectedMonitorCurrentWorkspace, currentMonitor, hdwp);
-    EndDeferWindowPos(hdwp);
-}
-
-void button_set_has_clients(Button *button, BOOL value)
-{
-    if(button->hasClients != value)
-    {
-        button->hasClients = value;
-        button_redraw(button);
-    }
-}
-
-void button_set_selected(Button *button, BOOL value)
-{
-    button->isSelected = value;
-    button_redraw(button);
-}
-
-void button_redraw(Button *button)
-{
-    if(button->hwnd)
-    {
-        InvalidateRect(
-          button->hwnd,
-          NULL,
-          TRUE
-        );
-        UpdateWindow(button->hwnd);
-    }
-}
-
-void button_press_handle(Button *button)
-{
-    windowManager_move_workspace_to_monitor(button->bar->monitor, button->workspace);
-    workspace_focus_selected_window(button->workspace);
-}
-
-void workspace_arrange_windows(Workspace *workspace)
-{
-    int numberOfWorkspaceClients = workspace_get_number_of_clients(workspace);
-    HDWP hdwp = BeginDeferWindowPos(numberOfWorkspaceClients);
-    workspace_arrange_windows_with_defer_handle(workspace, hdwp);
-    EndDeferWindowPos(hdwp);
-}
-
-void workspace_arrange_windows_with_defer_handle(Workspace *workspace, HDWP hdwp)
-{
-    workspace->layout->apply_to_workspace(workspace);
-    workspace_arrange_clients(workspace, hdwp);
-}
-
-void monitor_set_workspace(Workspace *workspace, Monitor *monitor, HDWP hdwp)
-{
-    associate_workspace_to_monitor(workspace, monitor);
+    monitor_set_workspace(workspace, monitor);
     workspace_arrange_windows_with_defer_handle(workspace, hdwp);
     if(!monitor->isHidden)
     {
@@ -1779,12 +1947,12 @@ void monitor_set_workspace(Workspace *workspace, Monitor *monitor, HDWP hdwp)
     }
 }
 
-void associate_workspace_to_monitor(Workspace *workspace, Monitor *monitor) {
+void monitor_set_workspace(Workspace *workspace, Monitor *monitor) {
     workspace->monitor = monitor;
     monitor->workspace = workspace;
 }
 
-void calclulate_monitor(Monitor *monitor, int monitorNumber)
+void monitor_calulate_coordinates(Monitor *monitor, int monitorNumber)
 {
     int screenWidth = GetSystemMetrics(SM_CXSCREEN);
     int screenHeight = GetSystemMetrics(SM_CYSCREEN);
@@ -1840,188 +2008,6 @@ void monitor_select(Monitor *monitor)
     }
 }
 
-void bar_trigger_paint(Bar *bar)
-{
-    InvalidateRect(
-      bar->hwnd,
-      NULL,
-      FALSE
-    );
-    UpdateWindow(bar->hwnd);
-}
-
-void move_focused_window_to_workspace(Workspace *workspace)
-{
-    HWND foregroundHwnd = GetForegroundWindow();
-    windowManager_move_window_to_workspace_and_arrange(foregroundHwnd, workspace);
-}
-
-void close_focused_window(void)
-{
-    HWND foregroundHwnd = GetForegroundWindow();
-    Client* existingClient = windowManager_find_client_in_workspaces_by_hwnd(foregroundHwnd);
-    SendMessage(foregroundHwnd, WM_CLOSE, (WPARAM)NULL, (LPARAM)NULL);
-    CloseHandle(foregroundHwnd);
-
-    if(existingClient)
-    {
-        workspace_remove_client_and_arrange(existingClient->workspace, existingClient);
-    }
-}
-
-void kill_focused_window(void)
-{
-    HWND foregroundHwnd = GetForegroundWindow();
-    DWORD processId = 0;
-    GetWindowThreadProcessId(foregroundHwnd, &processId);
-    Client* existingClient = windowManager_find_client_in_workspaces_by_hwnd(foregroundHwnd);
-    HANDLE processHandle = OpenProcess(PROCESS_TERMINATE, FALSE, processId);
-    TerminateProcess(processHandle, 1);
-    CloseHandle(processHandle);
-    if(existingClient)
-    {
-        workspace_remove_client_and_arrange(existingClient->workspace, existingClient);
-    }
-}
-
-void redraw_focused_window(void)
-{
-    HWND foregroundHwnd = GetForegroundWindow();
-    RedrawWindow(foregroundHwnd, NULL, NULL, RDW_ERASE | RDW_INVALIDATE);
-}
-
-void deckLayout_select_next_window(Workspace *workspace)
-{
-    Client *currentSelectedClient = workspace->selected;
-
-    if(!workspace->clients)
-    {
-        return;
-    }
-    else if(!currentSelectedClient)
-    {
-        workspace->selected = workspace->clients;
-    }
-    else if(!currentSelectedClient->previous && !currentSelectedClient->next)
-    {
-        //there is only a master don't do anything
-        workspace->selected = workspace->clients;
-    }
-    else if(!currentSelectedClient->previous && currentSelectedClient->next)
-    {
-        //we are on the master go to the secondary
-        workspace->selected = currentSelectedClient->next;
-    }
-    else if(!currentSelectedClient->previous->previous && currentSelectedClient->next)
-    {
-        //we are on the secondary go to the master
-        workspace->selected = currentSelectedClient->previous;
-    }
-    else
-    {
-        //somehow we are not on the secondary or master.  Maybe fail instead 
-        workspace->selected = workspace->clients;
-    }
-}
-
-void tileLayout_select_next_window(Workspace *workspace)
-{
-    Client *currentSelectedClient = workspace->selected;
-
-    if(!workspace->clients)
-    {
-        return;
-    }
-    else if(!currentSelectedClient)
-    {
-        workspace->selected = workspace->clients;
-    }
-    else if(currentSelectedClient->next)
-    {
-        workspace->selected = currentSelectedClient->next;
-    }
-    else
-    {
-        workspace->selected = workspace->clients;
-    }
-}
-
-void tileLayout_select_previous_window(Workspace *workspace)
-{
-    Client *currentSelectedClient = workspace->selected;
-
-    if(!workspace->clients)
-    {
-        return;
-    }
-    else if(!currentSelectedClient)
-    {
-        workspace->selected = workspace->clients;
-    }
-    else if(currentSelectedClient->previous)
-    {
-        workspace->selected = currentSelectedClient->previous;
-    }
-    else
-    {
-        workspace->selected = workspace->lastClient;
-    }
-}
-
-void select_next_window(void)
-{
-    Workspace *workspace = selectedMonitor->workspace;
-    workspace->layout->select_next_window(workspace);
-    workspace_focus_selected_window(workspace);
-}
-
-void select_previous_window(void)
-{
-    Workspace *workspace = selectedMonitor->workspace;
-    workspace->layout->select_previous_window(workspace);
-    workspace_focus_selected_window(workspace);
-}
-
-void workspace_focus_selected_window(Workspace *workspace)
-{
-    keybd_event(0, 0, 0, 0);
-    if(scratchWindow)
-    {
-        scratch_window_focus();
-        return;
-    }
-
-    if(workspace->clients && workspace->selected)
-    {
-        HWND focusedHwnd = GetForegroundWindow();
-        if(workspace->selected->data->hwnd != focusedHwnd)
-        {
-            SetForegroundWindow(workspace->selected->data->hwnd);
-        }
-    }
-    if(workspace->monitor->bar)
-    {
-        bar_render_selected_window_description(workspace->monitor->bar);
-        bar_trigger_paint(workspace->monitor->bar);
-    }
-
-    border_window_update();
-}
-
-void toggle_selected_monitor_layout(void)
-{
-    Workspace *workspace = selectedMonitor->workspace;
-    if(workspace->layout->next)
-    {
-        workspace->selected = workspace->clients;
-        monitor_set_layout(workspace->layout->next);
-    }
-    else
-    {
-        monitor_set_layout(headLayoutNode);
-    }
-}
-
 void monitor_set_layout(Layout *layout)
 {
     Workspace *workspace = selectedMonitor->workspace;
@@ -2035,27 +2021,14 @@ void monitor_set_layout(Layout *layout)
     workspace_focus_selected_window(workspace);
 }
 
-void swap_selected_monitor_to_monacle_layout(void)
+void bar_trigger_paint(Bar *bar)
 {
-    monitor_set_layout(&monacleLayout);
-}
-
-void swap_selected_monitor_to_deck_layout(void)
-{
-    monitor_set_layout(&deckLayout);
-}
-
-void swap_selected_monitor_to_tile_layout(void)
-{
-    monitor_set_layout(&tileLayout);
-}
-
-//reset selected workspace
-void arrange_clients_in_selected_workspace(void)
-{
-    selectedMonitor->workspace->masterOffset = 0;
-    workspace_arrange_windows(selectedMonitor->workspace);
-    workspace_focus_selected_window(selectedMonitor->workspace);
+    InvalidateRect(
+      bar->hwnd,
+      NULL,
+      FALSE
+    );
+    UpdateWindow(bar->hwnd);
 }
 
 void bar_render_selected_window_description(Bar *bar)
@@ -2096,12 +2069,19 @@ void bar_render_selected_window_description(Bar *bar)
     }
     else
     {
+        int numberOfWorkspaceClients = workspace_get_number_of_clients(bar->monitor->workspace);
+
+        TCHAR displayStr[MAX_PATH];
+        int displayStrLen = swprintf(displayStr, MAX_PATH, L"[%ls:%d] : (Mode: %ls)",
+            bar->monitor->workspace->layout->tag,
+            numberOfWorkspaceClients,
+            windowRoutingMode);
         if(bar->windowContextText)
         {
             free(bar->windowContextText);
         }
-        bar->windowContextText = NULL;
-        bar->windowContextTextLen = 0;
+        bar->windowContextText = _wcsdup(displayStr);
+        bar->windowContextTextLen = displayStrLen;
     }
 }
 
@@ -2165,180 +2145,7 @@ void bar_render_times(Bar *bar)
     bar->environmentContextTextLen = displayStrLen;
 }
 
-int get_memory_percent(void)
-{
-    MEMORYSTATUSEX statex;
-    statex.dwLength = sizeof (statex);
-    GlobalMemoryStatusEx (&statex);
-    return statex.dwMemoryLoad;
-}
-
-int get_cpu_usage(void)
-{
-    static int previousResult;
-    int nRes = -1;
-
-    FILETIME ftIdle, ftKrnl, ftUsr;
-    if(GetSystemTimes(&ftIdle, &ftKrnl, &ftUsr))
-    {
-        static BOOL bUsedOnce = FALSE;
-        static ULONGLONG uOldIdle = 0;
-        static ULONGLONG uOldKrnl = 0;
-        static ULONGLONG uOldUsr = 0;
-
-        ULONGLONG uIdle = ((ULONGLONG)ftIdle.dwHighDateTime << 32) | ftIdle.dwLowDateTime;
-        ULONGLONG uKrnl = ((ULONGLONG)ftKrnl.dwHighDateTime << 32) | ftKrnl.dwLowDateTime;
-        ULONGLONG uUsr = ((ULONGLONG)ftUsr.dwHighDateTime << 32) | ftUsr.dwLowDateTime;
-
-        if(bUsedOnce)
-        {
-            ULONGLONG uDiffIdle = uIdle - uOldIdle;
-            ULONGLONG uDiffKrnl = uKrnl - uOldKrnl;
-            ULONGLONG uDiffUsr = uUsr - uOldUsr;
-
-            if(uDiffKrnl + uDiffUsr)
-            {
-                //Calculate percentage
-                nRes = (int)((uDiffKrnl + uDiffUsr - uDiffIdle) * 100 / (uDiffKrnl + uDiffUsr));
-            }
-        }
-
-        bUsedOnce = TRUE;
-        uOldIdle = uIdle;
-        uOldKrnl = uKrnl;
-        uOldUsr = uUsr;
-    }
-
-    if(nRes < 0 || nRes > 100)
-    {
-        return previousResult;
-    }
-    return nRes;
-}
-
-void taskbar_toggle(void)
-{
-    HWND taskBarHandle = FindWindow(
-      L"Shell_TrayWnd",
-      NULL
-    );
-    HWND taskBar2Handle = FindWindow(
-      L"Shell_SecondaryTrayWnd",
-      NULL
-    );
-    long taskBarStyles = GetWindowLong(taskBarHandle, GWL_STYLE);
-    if(taskBarStyles & WS_VISIBLE)
-    {
-        ShowWindow(taskBarHandle, SW_HIDE);
-        ShowWindow(taskBar2Handle, SW_HIDE);
-    }
-    else
-    {
-        ShowWindow(taskBarHandle, SW_SHOW);
-        ShowWindow(taskBar2Handle, SW_SHOW);
-    }
-}
-
-LRESULT CALLBACK WorkspaceButtonProc(
-    HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam, UINT_PTR uIdSubclass, DWORD_PTR dwRefData)
-{
-    UNREFERENCED_PARAMETER(uIdSubclass);
-    Button* button = (Button*)dwRefData;
-    switch (uMsg)
-    {
-        case WM_PAINT:
-        {
-            RECT rc;
-            PAINTSTRUCT ps;
-            HDC hdc = BeginPaint(hWnd, &ps);
-            GetClientRect(hWnd, &rc);
-            HBRUSH brush = CreateSolidBrush(barBackgroundColor);
-            SetBkColor(hdc, barBackgroundColor);
-            if (button->isSelected)
-            {
-                SetTextColor(hdc, buttonSelectedTextColor);
-            }
-            else
-            {
-                if (button->hasClients)
-                {
-                    SetTextColor(hdc, buttonWithWindowsTextColor);
-                }
-                else
-                {
-                    SetTextColor(hdc, buttonWithoutWindowsTextColor);
-                }
-            }
-            FillRect(hdc, &rc, brush);
-            SelectObject(hdc, font);
-            DrawTextW(
-                hdc,
-                button->workspace->tag,
-                1,
-                &rc,
-                DT_CENTER | DT_VCENTER | DT_SINGLELINE);
-            EndPaint(hWnd, &ps);
-            break;
-        }
-        case WM_LBUTTONDOWN:
-        {
-            button_press_handle(button);
-            break;
-        }
-        default:
-            return DefSubclassProc(hWnd, uMsg, wParam, lParam);
-    }
-    return 0;
-}
-
-void PaintBorderWindow(HWND hWnd)
-{
-    if(selectedMonitor->workspace->selected || scratchWindow)
-    {
-        PAINTSTRUCT ps;
-        HDC hDC = BeginPaint(hWnd, &ps);
-        HPEN selectPen = CreatePen(PS_SOLID, 6, RGB(250, 189, 47));
-        HPEN hpenOld = SelectObject(hDC, selectPen);
-        HBRUSH hbrushOld = (HBRUSH)(SelectObject(hDC, GetStockObject(NULL_BRUSH)));
-        SetDCPenColor(hDC, RGB(255, 0, 0));
-
-        RECT rcWindow;
-        GetClientRect(hWnd, &rcWindow);
-        Rectangle(hDC, rcWindow.left, rcWindow.top, rcWindow.right, rcWindow.bottom);
-        SelectObject(hDC, hpenOld);
-        SelectObject(hDC, hbrushOld);
-        EndPaint(hWnd, &ps);
-    }
-}
-
-static LRESULT WindowProc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
-{
-    switch(msg)
-    {
-        case WM_WINDOWPOSCHANGING:
-        {
-            if(!scratchWindow)
-            {
-                WINDOWPOS* windowPos = (WINDOWPOS*)lp;
-                if(selectedMonitor->workspace->selected)
-                {
-                    windowPos->hwndInsertAfter = selectedMonitor->workspace->selected->data->hwnd;
-                }
-            }
-        }
-        case WM_PAINT:
-        {
-            PaintBorderWindow(h);
-        } break;
-
-        default:
-            return DefWindowProc(h, msg, wp, lp);
-    }
-
-    return 0;
-}
-
-LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
+LRESULT CALLBACK bar_message_loop(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 {
     HDC hdc;
     PAINTSTRUCT ps;
@@ -2369,7 +2176,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
                     hInst,
                     button);
 
-                SetWindowSubclass(buttonHwnd, WorkspaceButtonProc, 0, (DWORD_PTR)button);
+                SetWindowSubclass(buttonHwnd, button_message_loop, 0, (DWORD_PTR)button);
 
                 if (!buttonHwnd)
                 {
@@ -2449,7 +2256,7 @@ WNDCLASSEX* bar_register_window_class(void)
     WNDCLASSEX *wc = malloc(sizeof(WNDCLASSEX));
     wc->cbSize        = sizeof(WNDCLASSEX);
     wc->style         = 0;
-    wc->lpfnWndProc   = WndProc;
+    wc->lpfnWndProc   = bar_message_loop;
     wc->cbClsExtra    = 0;
     wc->cbWndExtra    = 0;
     wc->hIcon         = LoadIcon(NULL, IDI_APPLICATION);
@@ -2470,33 +2277,7 @@ WNDCLASSEX* bar_register_window_class(void)
     return wc;
 }
 
-WNDCLASSEX* register_border_window_class(void)
-{
-    WNDCLASSEX *wc    = malloc(sizeof(WNDCLASSEX));
-    wc->cbSize        = sizeof(WNDCLASSEX);
-    wc->style         = CS_DBLCLKS | CS_OWNDC | CS_HREDRAW | CS_VREDRAW;
-    wc->lpfnWndProc   = WindowProc;
-    wc->cbClsExtra    = 0;
-    wc->cbWndExtra    = 0;
-    wc->hIcon         = LoadIcon(NULL, IDI_APPLICATION);
-    wc->hInstance     = GetModuleHandle(0);
-    wc->hCursor       = LoadCursor(NULL, IDC_ARROW);
-    wc->hbrBackground = (HBRUSH)GetStockObject(BLACK_BRUSH);
-    wc->lpszMenuName  = NULL;
-    wc->lpszClassName = L"SimpleWindowBorderWindowClass";
-    wc->hIconSm       = LoadIcon(NULL, IDI_APPLICATION);
-
-    if(!RegisterClassEx(wc))
-    {
-        MessageBox(NULL, L"Window Registration Failed!", L"Error!",
-            MB_ICONEXCLAMATION | MB_OK);
-        return NULL;
-    }
-
-    return wc;
-}
-
-void bar_window_run(Bar *bar, WNDCLASSEX *barWindowClass)
+void bar_run(Bar *bar, WNDCLASSEX *barWindowClass)
 {
     HWND hwnd = CreateWindowEx(
         WS_EX_TOOLWINDOW | WS_EX_CONTROLPARENT,
@@ -2536,10 +2317,270 @@ void bar_window_run(Bar *bar, WNDCLASSEX *barWindowClass)
         (TIMERPROC) NULL);
 }
 
-void run_border_window(WNDCLASSEX *windowClass)
+int get_memory_percent(void)
+{
+    MEMORYSTATUSEX statex;
+    statex.dwLength = sizeof (statex);
+    GlobalMemoryStatusEx (&statex);
+    return statex.dwMemoryLoad;
+}
+
+int get_cpu_usage(void)
+{
+    static int previousResult;
+    int nRes = -1;
+
+    FILETIME ftIdle, ftKrnl, ftUsr;
+    if(GetSystemTimes(&ftIdle, &ftKrnl, &ftUsr))
+    {
+        static BOOL bUsedOnce = FALSE;
+        static ULONGLONG uOldIdle = 0;
+        static ULONGLONG uOldKrnl = 0;
+        static ULONGLONG uOldUsr = 0;
+
+        ULONGLONG uIdle = ((ULONGLONG)ftIdle.dwHighDateTime << 32) | ftIdle.dwLowDateTime;
+        ULONGLONG uKrnl = ((ULONGLONG)ftKrnl.dwHighDateTime << 32) | ftKrnl.dwLowDateTime;
+        ULONGLONG uUsr = ((ULONGLONG)ftUsr.dwHighDateTime << 32) | ftUsr.dwLowDateTime;
+
+        if(bUsedOnce)
+        {
+            ULONGLONG uDiffIdle = uIdle - uOldIdle;
+            ULONGLONG uDiffKrnl = uKrnl - uOldKrnl;
+            ULONGLONG uDiffUsr = uUsr - uOldUsr;
+
+            if(uDiffKrnl + uDiffUsr)
+            {
+                //Calculate percentage
+                nRes = (int)((uDiffKrnl + uDiffUsr - uDiffIdle) * 100 / (uDiffKrnl + uDiffUsr));
+            }
+        }
+
+        bUsedOnce = TRUE;
+        uOldIdle = uIdle;
+        uOldKrnl = uKrnl;
+        uOldUsr = uUsr;
+    }
+
+    if(nRes < 0 || nRes > 100)
+    {
+        return previousResult;
+    }
+    return nRes;
+}
+
+void button_set_has_clients(Button *button, BOOL value)
+{
+    if(button->hasClients != value)
+    {
+        button->hasClients = value;
+        button_redraw(button);
+    }
+}
+
+void button_set_selected(Button *button, BOOL value)
+{
+    button->isSelected = value;
+    button_redraw(button);
+}
+
+void button_redraw(Button *button)
+{
+    if(button->hwnd)
+    {
+        InvalidateRect(
+          button->hwnd,
+          NULL,
+          TRUE
+        );
+        UpdateWindow(button->hwnd);
+    }
+}
+
+void button_press_handle(Button *button)
+{
+    windowManager_move_workspace_to_monitor(button->bar->monitor, button->workspace);
+    workspace_focus_selected_window(button->workspace);
+}
+
+LRESULT CALLBACK button_message_loop( HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam, UINT_PTR uIdSubclass, DWORD_PTR dwRefData)
+{
+    UNREFERENCED_PARAMETER(uIdSubclass);
+    Button* button = (Button*)dwRefData;
+    switch (uMsg)
+    {
+        case WM_PAINT:
+        {
+            RECT rc;
+            PAINTSTRUCT ps;
+            HDC hdc = BeginPaint(hWnd, &ps);
+            GetClientRect(hWnd, &rc);
+            HBRUSH brush = CreateSolidBrush(barBackgroundColor);
+            SetBkColor(hdc, barBackgroundColor);
+            if (button->isSelected)
+            {
+                SetTextColor(hdc, buttonSelectedTextColor);
+            }
+            else
+            {
+                if (button->hasClients)
+                {
+                    SetTextColor(hdc, buttonWithWindowsTextColor);
+                }
+                else
+                {
+                    SetTextColor(hdc, buttonWithoutWindowsTextColor);
+                }
+            }
+            FillRect(hdc, &rc, brush);
+            SelectObject(hdc, font);
+            DrawTextW(
+                hdc,
+                button->workspace->tag,
+                1,
+                &rc,
+                DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+            EndPaint(hWnd, &ps);
+            break;
+        }
+        case WM_LBUTTONDOWN:
+        {
+            button_press_handle(button);
+            break;
+        }
+        default:
+            return DefSubclassProc(hWnd, uMsg, wParam, lParam);
+    }
+    return 0;
+}
+
+void border_window_update(void)
+{
+    if(selectedMonitor)
+    {
+        if(selectedMonitor->workspace->selected)
+        {
+            ClientData *selectedClientData = selectedMonitor->workspace->selected->data;
+
+            RECT currentPosition;
+            GetWindowRect(borderWindowHwnd, &currentPosition);
+
+            int targetLeft = selectedClientData->x - 4;
+            int targetTop = selectedClientData->y - 4;
+            int targetRight = selectedClientData->w + 8;
+            int targetBottom = selectedClientData->h + 8;
+
+            DWORD positionFlags;
+            if(targetLeft != currentPosition.left || targetTop != currentPosition.top ||
+                targetRight != currentPosition.right || targetBottom != currentPosition.bottom)
+            {
+                positionFlags = SWP_SHOWWINDOW;
+            }
+            else
+            {
+                positionFlags = SWP_NOREDRAW;
+            }
+
+            SetWindowPos(
+                borderWindowHwnd,
+                HWND_BOTTOM,
+                targetLeft,
+                targetTop,
+                targetRight,
+                targetBottom,
+                positionFlags);
+        }
+        else
+        {
+            RedrawWindow(borderWindowHwnd, NULL, NULL, RDW_ERASE | RDW_INVALIDATE);
+            SetWindowPos(
+                borderWindowHwnd,
+                HWND_BOTTOM,
+                0,
+                0,
+                0,
+                0,
+                SWP_HIDEWINDOW);
+        }
+    }
+}
+
+void border_window_paint(HWND hWnd)
+{
+    if(selectedMonitor->workspace->selected || scratchWindow)
+    {
+        PAINTSTRUCT ps;
+        HDC hDC = BeginPaint(hWnd, &ps);
+        HPEN selectPen = CreatePen(PS_SOLID, 6, RGB(250, 189, 47));
+        HPEN hpenOld = SelectObject(hDC, selectPen);
+        HBRUSH hbrushOld = (HBRUSH)(SelectObject(hDC, GetStockObject(NULL_BRUSH)));
+        SetDCPenColor(hDC, RGB(255, 0, 0));
+
+        RECT rcWindow;
+        GetClientRect(hWnd, &rcWindow);
+        Rectangle(hDC, rcWindow.left, rcWindow.top, rcWindow.right, rcWindow.bottom);
+        SelectObject(hDC, hpenOld);
+        SelectObject(hDC, hbrushOld);
+        EndPaint(hWnd, &ps);
+    }
+}
+
+static LRESULT border_window_message_loop(HWND h, UINT msg, WPARAM wp, LPARAM lp)
+{
+    switch(msg)
+    {
+        case WM_WINDOWPOSCHANGING:
+        {
+            if(!scratchWindow)
+            {
+                WINDOWPOS* windowPos = (WINDOWPOS*)lp;
+                if(selectedMonitor->workspace->selected)
+                {
+                    windowPos->hwndInsertAfter = selectedMonitor->workspace->selected->data->hwnd;
+                }
+            }
+        }
+        case WM_PAINT:
+        {
+            border_window_paint(h);
+        } break;
+
+        default:
+            return DefWindowProc(h, msg, wp, lp);
+    }
+
+    return 0;
+}
+
+WNDCLASSEX* border_window_register_class(void)
+{
+    WNDCLASSEX *wc    = malloc(sizeof(WNDCLASSEX));
+    wc->cbSize        = sizeof(WNDCLASSEX);
+    wc->style         = CS_DBLCLKS | CS_OWNDC | CS_HREDRAW | CS_VREDRAW;
+    wc->lpfnWndProc   = border_window_message_loop;
+    wc->cbClsExtra    = 0;
+    wc->cbWndExtra    = 0;
+    wc->hIcon         = LoadIcon(NULL, IDI_APPLICATION);
+    wc->hInstance     = GetModuleHandle(0);
+    wc->hCursor       = LoadCursor(NULL, IDC_ARROW);
+    wc->hbrBackground = (HBRUSH)GetStockObject(BLACK_BRUSH);
+    wc->lpszMenuName  = NULL;
+    wc->lpszClassName = L"SimpleWindowBorderWindowClass";
+    wc->hIconSm       = LoadIcon(NULL, IDI_APPLICATION);
+
+    if(!RegisterClassEx(wc))
+    {
+        MessageBox(NULL, L"Window Registration Failed!", L"Error!",
+            MB_ICONEXCLAMATION | MB_OK);
+        return NULL;
+    }
+
+    return wc;
+}
+
+void border_window_run(WNDCLASSEX *windowClass)
 {
     HWND hwnd = CreateWindowEx(
-        WS_EX_PALETTEWINDOW,
+        WS_EX_PALETTEWINDOW | WS_EX_NOACTIVATE,
         windowClass->lpszClassName,
         L"SimpleWM Border",
         WS_POPUP,
@@ -2559,18 +2600,6 @@ void run_border_window(WNDCLASSEX *windowClass)
         MessageBox(NULL, L"Window Creation Failed!", L"Error!",
             MB_ICONEXCLAMATION | MB_OK);
     }
-}
-
-Workspace* workspace_create(TCHAR *name, WindowFilter windowFilter, WCHAR* tag, Layout *layout, int numberOfButtons)
-{
-    Button ** buttons = (Button **) calloc(numberOfButtons, sizeof(Button *));
-    Workspace *result = calloc(1, sizeof(Workspace));
-    result->name = _wcsdup(name);
-    result->windowFilter = windowFilter;
-    result->buttons = buttons;
-    result->tag = _wcsdup(tag);
-    result->layout = layout;
-    return result;
 }
 
 void keybinding_add_to_list(KeyBinding *binding)
@@ -2667,7 +2696,8 @@ void start_not_elevated(TCHAR *processExe, TCHAR *cmdArgs, DWORD creationFlags)
     ZeroMemory(&siex, sizeof(siex));
     InitializeProcThreadAttributeList(NULL, 1, 0, &size);
     siex.StartupInfo.cb = sizeof(siex);
-    siex.StartupInfo.lpTitle = L"SimpleWindowManager Scratch";
+    siex.StartupInfo.lpTitle = scratchWindowTitle;
+    siex.StartupInfo.wShowWindow = SW_SHOW;
     siex.lpAttributeList = (LPPROC_THREAD_ATTRIBUTE_LIST)HeapAlloc(
         GetProcessHeap(),
         0,
@@ -2724,9 +2754,298 @@ void start_app_non_elevated(TCHAR *processExe)
     start_not_elevated(processExe, NULL, CREATE_NEW_CONSOLE);
 }
 
-void quit(void)
+void launcher_fail(PTSTR lpszFunction)
+{ 
+    LPVOID lpMsgBuf;
+    LPVOID lpDisplayBuf;
+    DWORD dw = GetLastError(); 
+
+    FormatMessage(
+        FORMAT_MESSAGE_ALLOCATE_BUFFER | 
+        FORMAT_MESSAGE_FROM_SYSTEM |
+        FORMAT_MESSAGE_IGNORE_INSERTS,
+        NULL,
+        dw,
+        MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
+        (LPTSTR) &lpMsgBuf,
+        0,
+        NULL);
+
+    lpDisplayBuf = (LPVOID)LocalAlloc(LMEM_ZEROINIT, (lstrlen((LPCTSTR)lpMsgBuf) + lstrlen((LPCTSTR)lpszFunction) + 40) * sizeof(TCHAR)); 
+
+    StringCchPrintf((LPTSTR)lpDisplayBuf, 
+        LocalSize(lpDisplayBuf) / sizeof(TCHAR),
+        TEXT("%s failed with error %d: %s"), 
+        lpszFunction, dw, lpMsgBuf); 
+
+    MessageBox(NULL, (LPCTSTR)lpDisplayBuf, TEXT("Error"), MB_OK); 
+
+    LocalFree(lpMsgBuf);
+    LocalFree(lpDisplayBuf);
+}
+
+static void CALLBACK process_with_stdout_exit_callback(void* context, BOOLEAN isTimeOut)
 {
-    ExitProcess(0);
+    UNREFERENCED_PARAMETER(isTimeOut);
+    LauncherProcess *launcherProcess = (LauncherProcess*)context;
+    CHAR chBuf[MAX_PATH];
+    DWORD dwRead;
+
+    BOOL bSuccess = ReadFile(launcherProcess->readFileHandle, chBuf, MAX_PATH, &dwRead, NULL);
+    if(bSuccess)
+    {
+        chBuf[dwRead - 1] = 0;
+        launcherProcess->onSuccess(chBuf);
+    }
+
+    CloseHandle(launcherProcess->readFileHandle);
+    SetEvent(launcherProcess->event);
+    UnregisterWait(launcherProcess->wait);
+    CloseHandle(launcherProcess->event);
+    CloseHandle(launcherProcess->wait);
+    free(launcherProcess);
+}
+
+void process_with_stdout_start(TCHAR *cmdArgs, void (*onSuccess) (CHAR *))
+{
+    if(scratchWindow)
+    {
+        return;
+    }
+
+    HANDLE readfh;
+
+    STARTUPINFO si = { 0 };
+    si.dwFlags = STARTF_USEPOSITION | STARTF_USESIZE | STARTF_USESHOWWINDOW | STARTF_USESTDHANDLES;
+    si.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
+    si.hStdOutput = GetStdHandle(STD_OUTPUT_HANDLE);
+    si.hStdError = GetStdHandle(STD_ERROR_HANDLE);
+    si.dwX= 200;
+    si.dwY = 100;
+    si.dwXSize = 2000;
+    si.dwYSize = 1200;
+    si.wShowWindow = SW_SHOW;
+    si.lpTitle = scratchWindowTitle;
+
+    SECURITY_ATTRIBUTES sattr;
+    sattr.nLength = sizeof(SECURITY_ATTRIBUTES);
+    sattr.lpSecurityDescriptor = NULL;
+    sattr.bInheritHandle = TRUE;
+
+    if(!CreatePipe(&readfh, &si.hStdOutput, &sattr, 0))
+    {
+        return;
+    }
+
+    if(SetHandleInformation(&readfh, HANDLE_FLAG_INHERIT, 0))
+    {
+        return;
+    }
+
+    PROCESS_INFORMATION pi = { 0 };
+
+    if(!CreateProcess(
+        cmdLineExe,
+        cmdArgs,
+        NULL,
+        NULL,
+        TRUE,
+        CREATE_NEW_CONSOLE,
+        NULL,
+        NULL,
+        &si,
+        &pi)
+    ) 
+    {
+        launcher_fail(TEXT("Failed to start process"));
+        CloseHandle(readfh);
+        return;
+    }
+
+    HANDLE hWait = NULL;
+    HANDLE hEvent = CreateEvent(NULL, TRUE, FALSE, NULL);
+    if (!hEvent)
+    {
+        CloseHandle(readfh);
+        launcher_fail(TEXT("Failed to create event"));
+    }
+    else
+    {
+        LauncherProcess *launcherProcess = calloc(1, sizeof(LauncherProcess));
+        launcherProcess->readFileHandle = readfh;
+        launcherProcess->processId = pi.dwProcessId;
+        launcherProcess->wait = hWait;
+        launcherProcess->event = hEvent;
+        launcherProcess->onSuccess = onSuccess;
+
+        if (!RegisterWaitForSingleObject(&hWait, pi.hProcess, process_with_stdout_exit_callback, launcherProcess, INFINITE, WT_EXECUTEONLYONCE))
+        {
+            CloseHandle(readfh);
+            CloseHandle(hEvent);
+            free(launcherProcess);
+            launcher_fail(TEXT("Failed to register wait handle"));
+            /* printf("register wait error = %u\n", GetLastError()); */
+        }
+    }
+
+    CloseHandle(pi.hProcess);
+    CloseHandle(pi.hThread);
+
+    CloseHandle(si.hStdInput);
+    CloseHandle(si.hStdOutput);
+}
+
+void open_windows_scratch_exit_callback(char *stdOut)
+{
+    CHAR hwndStr[16];
+    strncpy_s(hwndStr, sizeof(hwndStr), stdOut + 1, 15);
+    HWND hwnd = (HWND)strtoull(hwndStr, '\0', 16);
+
+    Client *client = windowManager_find_client_in_workspaces_by_hwnd(hwnd);
+    if(client)
+    {
+        if(selectedMonitor->workspace != client->workspace)
+        {
+            client->workspace->selected = client;
+            windowManager_move_workspace_to_monitor(selectedMonitor, client->workspace);
+        }
+        else
+        {
+            workspace_focus_selected_window(client->workspace);
+        }
+        if(client->data->isMinimized)
+        {
+            ShowWindow(hwnd, SW_RESTORE);
+            client_move_from_minimized_to_unminimized(client);
+        }
+        else
+        {
+            client->workspace->selected = client;
+        }
+    }
+    else
+    {
+        SetForegroundWindow(hwnd);
+        SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOSIZE | SWP_NOMOVE);
+        SetWindowPos(hwnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_SHOWWINDOW | SWP_NOSIZE | SWP_NOMOVE);
+        ShowWindow(hwnd, SW_SHOWDEFAULT);
+    }
+}
+
+static BOOL CALLBACK open_windows_scratch_enum_windows_callback(HWND hwnd, LPARAM lparam)
+{
+    Workspace *workspace = (Workspace*)lparam;
+
+    LONG styles = GetWindowLong(hwnd, GWL_STYLE);
+    LONG exStyles = GetWindowLong(hwnd, GWL_EXSTYLE);
+    BOOL isRootWindow = is_root_window(hwnd, styles, exStyles);
+    if(!isRootWindow)
+    {
+        return TRUE;
+    }
+
+    if(!(styles & WS_VISIBLE))
+    {
+        return TRUE;
+    }
+
+    Client *client = clientFactory_create_from_hwnd(hwnd);
+
+    if(wcsstr(client->data->className, L"Progman"))
+    {
+        return TRUE;
+    }
+
+    if(wcsstr(client->data->title, L"ApplicationFrameWindow"))
+    {
+        return TRUE;
+    }
+
+    if(workspace->clients == NULL)
+    {
+        workspace->clients = client;
+    }
+    else
+    {
+        Client *c = workspace->clients;
+        while(c)
+        {
+            if(c->next == NULL)
+            {
+                c->next = client;
+                break;
+            }
+            c = c->next;
+        }
+    }
+
+    return TRUE;
+}
+
+void open_windows_scratch_start(void)
+{
+    Workspace *dummyWorkspace = calloc(1, sizeof(Workspace));
+    EnumWindows(open_windows_scratch_enum_windows_callback, (LPARAM)dummyWorkspace);
+
+    HRESULT X;
+    TCHAR buf[10000] = _T("cmd /c powershell.exe -c \"@(");
+
+    Client *c = dummyWorkspace->clients;
+    while(c)
+    {
+        size_t len = wcslen(c->data->title);
+        if(len > 0)
+        {
+            int numberOfSingleQuotes = 0;
+            for(int i = 0; i <= len; i++)
+            {
+                if(c->data->title[i] == '\'')
+                {
+                    numberOfSingleQuotes++;
+                }
+            }
+
+            TCHAR *newTitle = malloc(sizeof(TCHAR) * (len + numberOfSingleQuotes + 1));
+            int newTitleIndex = 0;
+            for(int i = 0; i <= len; i++)
+            {
+                newTitle[newTitleIndex] = c->data->title[i];
+                if(c->data->title[i] == '\'')
+                {
+                    newTitle[newTitleIndex + 1] = '\'';
+                    newTitleIndex = newTitleIndex + 2;
+                }
+                else
+                {
+                    newTitleIndex = newTitleIndex + 1;
+                }
+            }
+
+            TCHAR displayStr[1000];
+            LPCWSTR processShortFileName = PathFindFileName(c->data->processImageName);
+            swprintf(displayStr, len + 50, L"%p %05d %ls (%ls)",
+                c->data->hwnd,
+                c->data->processId,
+                newTitle,
+                processShortFileName);
+            free(newTitle);
+            X = StringCchCat(buf, 10000, L"'");
+            X = StringCchCat(buf, 10000, displayStr);
+            X = StringCchCat(buf, 10000, L"'");
+            if(c->next)
+            {
+                X = StringCchCat(buf, 10000, L",");
+            }
+        }
+
+        Client *cToFree = c;
+        c = c->next;
+        free_client(cToFree);
+    }
+    free(dummyWorkspace);
+
+    X = StringCchCat(buf, 10000, L") | fzf --with-nth 2..\"");
+    process_with_stdout_start(buf, open_windows_scratch_exit_callback);
 }
 
 int run (void)
@@ -2736,11 +3055,10 @@ int run (void)
     if (GetLastError() == ERROR_ALREADY_EXISTS)
     {
         MessageBox(
-          NULL,
-          L"SimpleWindowManager is already running",
-          L"SimpleWindowManager",
-          MB_OK
-        );
+                NULL,
+                L"SimpleWindowManager is already running",
+                L"SimpleWindowManager",
+                MB_OK);
          CloseHandle(hMutex);
          return 0;
     }
@@ -2762,7 +3080,7 @@ int run (void)
     {
         Monitor *monitor = calloc(1, sizeof(Monitor));
         monitors[i] = monitor;
-        calclulate_monitor(monitor, i + 1);
+        monitor_calulate_coordinates(monitor, i + 1);
         if(i > 0 && !monitors[i]->isHidden)
         {
             monitors[i - 1]->next = monitors[i];
@@ -2770,7 +3088,7 @@ int run (void)
     }
 
     hiddenWindowMonitor = calloc(1, sizeof(Monitor));
-    calclulate_monitor(hiddenWindowMonitor, numberOfMonitors);
+    monitor_calulate_coordinates(hiddenWindowMonitor, numberOfMonitors);
 
     create_keybindings(workspaces);
 
@@ -2835,13 +3153,13 @@ int run (void)
             bars[i]->selectedWindowDescRect = selectedWindowDescRect;
             bars[i]->timesRect = timesRect;
         }
-        associate_workspace_to_monitor(workspaces[i], monitors[i]);
+        monitor_set_workspace(workspaces[i], monitors[i]);
     }
 
 
     for(int i = 0; i < numberOfBars; i++)
     {
-        bar_window_run(bars[i], barWindowClass);
+        bar_run(bars[i], barWindowClass);
     }
 
     monitor_select(monitors[0]);
@@ -2901,7 +3219,7 @@ int run (void)
       return 1;
     }
 
-    WNDCLASSEX* borderWindowClass = register_border_window_class();
+    WNDCLASSEX* borderWindowClass = border_window_register_class();
 
     EnumWindows(enum_windows_callback, 0);
 
@@ -2909,11 +3227,11 @@ int run (void)
     {
         int workspaceNumberOfClients = workspace_get_number_of_clients(monitors[i]->workspace);
         HDWP hdwp = BeginDeferWindowPos(workspaceNumberOfClients);
-        monitor_set_workspace(monitors[i]->workspace, monitors[i], hdwp);
+        monitor_set_workspace_and_arrange(monitors[i]->workspace, monitors[i], hdwp);
         EndDeferWindowPos(hdwp);
     }
 
-    run_border_window(borderWindowClass);
+    border_window_run(borderWindowClass);
 
     g_kb_hook = SetWindowsHookEx(WH_KEYBOARD_LL, &handle_key_press, moduleHandle, 0);
     if (g_kb_hook == NULL)

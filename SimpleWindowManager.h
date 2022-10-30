@@ -201,6 +201,7 @@ void swap_selected_monitor_to_tile_layout(void);
 void toggle_create_window_in_current_workspace(void);
 void toggle_ignore_workspace_filters(void);
 void client_stop_managing(void);
+void open_windows_scratch_start(void);
 void quit(void);
 
 /* Everything below is what Config.c must implement */
