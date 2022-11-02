@@ -182,16 +182,19 @@ Layout tileLayout = {
 
 Layout *headLayoutNode = &tileLayout;
 static TCHAR *cmdLineExe = L"C:\\Windows\\System32\\cmd.exe";
-static TCHAR *cmdScratchCmd = L"cmd /k";
-static TCHAR *launcherCommand = L"cmd /c for /f \"delims=\" %i in ('fd -t f -g \"*{.lnk,.exe}\" \"%USERPROFILE\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\" \"C:\\ProgramData\\Microsoft\\Windows\\Start Menu\" \"C:\\Users\\eric\\AppData\\Local\\Microsoft\\WindowsApps\" ^| fzf --bind=\"ctrl-c:execute(echo {} | clip)\"') do start \" \" \"%i\"";
-static TCHAR *allFilesCommand = L"cmd /c set /p \"pth=Enter Path: \" && for /f \"delims=\" %i in ('fd . -t f %^pth% ^| fzf --bind=\"ctrl-c:execute(echo {} | clip)\"') do start \" \" \"%i\"";
-static TCHAR *processListCommand = L"/c tasklist /nh | sort | fzf -e --bind=\"ctrl-k:execute(for /f \\\"tokens=2\\\" %f in ({}) do taskkill /f /pid %f)+reload(tasklist /nh | sort)\" --bind=\"ctrl-r:reload(tasklist /nh | sort)\" --header \"ctrl-k Kill Pid\" --reverse";
 
 KeyBinding *headKeyBinding;
 Client *scratchWindow;
 
 enum WindowRoutingMode currentWindowRoutingMode = FilteredAndRoutedToWorkspace;
 int scratchWindowsScreenPadding = 250;
+
+void mimimize_focused_window(void)
+{
+    HWND foregroundHwnd = GetForegroundWindow();
+    ShowWindow(foregroundHwnd, SW_SHOWMINIMIZED);
+    workspace_focus_selected_window(selectedMonitor->workspace);
+}
 
 void move_focused_client_next(void)
 {
@@ -285,6 +288,50 @@ void close_focused_window(void)
     }
 }
 
+void float_window_move_up(HWND hwnd)
+{
+    RECT currentRect;
+    GetWindowRect(hwnd, &currentRect);
+    int targetLeft = currentRect.left;
+    int targetTop = currentRect.top - 10;
+    int targetWidth = currentRect.right - currentRect.left;
+    int targetHeight = currentRect.bottom - currentRect.top;
+    MoveWindow(hwnd, targetLeft, targetTop, targetWidth, targetHeight, FALSE);
+}
+
+void float_window_move_down(HWND hwnd)
+{
+    RECT currentRect;
+    GetWindowRect(hwnd, &currentRect);
+    int targetLeft = currentRect.left;
+    int targetTop = currentRect.top + 10;
+    int targetWidth = currentRect.right - currentRect.left;
+    int targetHeight = currentRect.bottom - currentRect.top;
+    MoveWindow(hwnd, targetLeft, targetTop, targetWidth, targetHeight, FALSE);
+}
+
+void float_window_move_right(HWND hwnd)
+{
+    RECT currentRect;
+    GetWindowRect(hwnd, &currentRect);
+    int targetLeft = currentRect.left + 10;
+    int targetTop = currentRect.top;
+    int targetWidth = currentRect.right - currentRect.left;
+    int targetHeight = currentRect.bottom - currentRect.top;
+    MoveWindow(hwnd, targetLeft, targetTop, targetWidth, targetHeight, FALSE);
+}
+
+void float_window_move_left(HWND hwnd)
+{
+    RECT currentRect;
+    GetWindowRect(hwnd, &currentRect);
+    int targetLeft = currentRect.left - 10;
+    int targetTop = currentRect.top;
+    int targetWidth = currentRect.right - currentRect.left;
+    int targetHeight = currentRect.bottom - currentRect.top;
+    MoveWindow(hwnd, targetLeft, targetTop, targetWidth, targetHeight, FALSE);
+}
+
 void kill_focused_window(void)
 {
     HWND foregroundHwnd = GetForegroundWindow();
@@ -308,16 +355,35 @@ void redraw_focused_window(void)
 
 void select_next_window(void)
 {
-    Workspace *workspace = selectedMonitor->workspace;
-    workspace->layout->select_next_window(workspace);
-    workspace_focus_selected_window(workspace);
+    HWND foregroundHwnd = GetForegroundWindow();
+    Client* existingClient = windowManager_find_client_in_workspaces_by_hwnd(foregroundHwnd);
+    if(!existingClient)
+    {
+        float_window_move_down(foregroundHwnd);
+    }
+    else
+    {
+        Workspace *workspace = selectedMonitor->workspace;
+        workspace->layout->select_next_window(workspace);
+        workspace_focus_selected_window(workspace);
+    }
 }
 
 void select_previous_window(void)
 {
-    Workspace *workspace = selectedMonitor->workspace;
-    workspace->layout->select_previous_window(workspace);
-    workspace_focus_selected_window(workspace);
+    HWND foregroundHwnd = GetForegroundWindow();
+    Client* existingClient = windowManager_find_client_in_workspaces_by_hwnd(foregroundHwnd);
+    if(!existingClient)
+    {
+        float_window_move_up(foregroundHwnd);
+    }
+    else
+    {
+        Workspace *workspace = selectedMonitor->workspace;
+        workspace->layout->select_previous_window(workspace);
+        workspace_focus_selected_window(workspace);
+        /* workspace_decrease_master_width(selectedMonitor->workspace); */
+    }
 }
 
 void toggle_selected_monitor_layout(void)
@@ -1201,7 +1267,16 @@ void workspace_arrange_clients(Workspace *workspace, HDWP hdwp)
 
 void workspace_increase_master_width_selected_monitor(void)
 {
-    workspace_increase_master_width(selectedMonitor->workspace);
+    HWND foregroundHwnd = GetForegroundWindow();
+    Client* existingClient = windowManager_find_client_in_workspaces_by_hwnd(foregroundHwnd);
+    if(!existingClient)
+    {
+        float_window_move_right(foregroundHwnd);
+    }
+    else
+    {
+        workspace_increase_master_width(selectedMonitor->workspace);
+    }
 }
 
 void workspace_increase_master_width(Workspace *workspace)
@@ -1220,7 +1295,16 @@ void workspace_decrease_master_width(Workspace *workspace)
 
 void workspace_decrease_master_width_selected_monitor(void)
 {
-    workspace_decrease_master_width(selectedMonitor->workspace);
+    HWND foregroundHwnd = GetForegroundWindow();
+    Client* existingClient = windowManager_find_client_in_workspaces_by_hwnd(foregroundHwnd);
+    if(!existingClient)
+    {
+        float_window_move_left(foregroundHwnd);
+    }
+    else
+    {
+        workspace_decrease_master_width(selectedMonitor->workspace);
+    }
 }
 
 int workspace_get_number_of_clients(Workspace *workspace)
@@ -2911,6 +2995,8 @@ void open_windows_scratch_exit_callback(char *stdOut)
         }
         else
         {
+            client->workspace->selected = client;
+            workspace_arrange_windows(client->workspace);
             workspace_focus_selected_window(client->workspace);
         }
         if(client->data->isMinimized)
@@ -2984,68 +3070,8 @@ static BOOL CALLBACK open_windows_scratch_enum_windows_callback(HWND hwnd, LPARA
 
 void open_windows_scratch_start(void)
 {
-    Workspace *dummyWorkspace = calloc(1, sizeof(Workspace));
-    EnumWindows(open_windows_scratch_enum_windows_callback, (LPARAM)dummyWorkspace);
-
-    HRESULT X;
-    TCHAR buf[10000] = _T("cmd /c powershell.exe -c \"@(");
-
-    Client *c = dummyWorkspace->clients;
-    while(c)
-    {
-        size_t len = wcslen(c->data->title);
-        if(len > 0)
-        {
-            int numberOfSingleQuotes = 0;
-            for(int i = 0; i <= len; i++)
-            {
-                if(c->data->title[i] == '\'')
-                {
-                    numberOfSingleQuotes++;
-                }
-            }
-
-            TCHAR *newTitle = malloc(sizeof(TCHAR) * (len + numberOfSingleQuotes + 1));
-            int newTitleIndex = 0;
-            for(int i = 0; i <= len; i++)
-            {
-                newTitle[newTitleIndex] = c->data->title[i];
-                if(c->data->title[i] == '\'')
-                {
-                    newTitle[newTitleIndex + 1] = '\'';
-                    newTitleIndex = newTitleIndex + 2;
-                }
-                else
-                {
-                    newTitleIndex = newTitleIndex + 1;
-                }
-            }
-
-            TCHAR displayStr[1000];
-            LPCWSTR processShortFileName = PathFindFileName(c->data->processImageName);
-            swprintf(displayStr, len + 50, L"%p %05d %ls (%ls)",
-                c->data->hwnd,
-                c->data->processId,
-                newTitle,
-                processShortFileName);
-            free(newTitle);
-            X = StringCchCat(buf, 10000, L"'");
-            X = StringCchCat(buf, 10000, displayStr);
-            X = StringCchCat(buf, 10000, L"'");
-            if(c->next)
-            {
-                X = StringCchCat(buf, 10000, L",");
-            }
-        }
-
-        Client *cToFree = c;
-        c = c->next;
-        free_client(cToFree);
-    }
-    free(dummyWorkspace);
-
-    X = StringCchCat(buf, 10000, L") | fzf --with-nth 2..\"");
-    process_with_stdout_start(buf, open_windows_scratch_exit_callback);
+    TCHAR *cmd = L"cmd /c powershell -c .\\list_open_windows.ps1 | fzf --with-nth 2.. --color=gutter:black --header \"ctrl-k:Kill Window, ctrl-c:Close Window, Enter:Select Window\" --bind=\"ctrl-k:execute(taskkill /f /pid {2})+reload(powershell -c .\\list_open_windows.ps1)\"";
+    process_with_stdout_start(cmd, open_windows_scratch_exit_callback);
 }
 
 int run (void)
