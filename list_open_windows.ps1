@@ -1,4 +1,5 @@
 $ErrorActionPreference = "STOP"
+$env:SHELL = "powershell"
 
 Add-Type -TypeDefinition @'
 using System;
@@ -148,10 +149,10 @@ public static class WindowFinder
 			return hwndWalk == hwnd;
 	}
 
-	public static IEnumerable<string> FindWindows()
+	public static IEnumerable<object> FindWindows()
 	{
 		IntPtr found = IntPtr.Zero;
-		var windows = new List<string>();
+		var windows = new List<object>();
 
 		EnumWindows(delegate(IntPtr hwnd, IntPtr param)
 				{
@@ -181,7 +182,7 @@ public static class WindowFinder
 								var processId = GetProcessId(hwnd);
 								var processPath = GetProcessPath(processId);
 								var processName = Path.GetFileName(processPath);
-								var result = string.Format("{0:X16} {1:00000000} {2} ({3})", (long)hwnd, processId, title, processName);
+								var result = new { hwnd = hwnd.ToString("X16"), PID = processId.ToString("D8"), Title = title, ProcessName = processName };
 								windows.Add(result);
 							}
 						}
@@ -196,5 +197,21 @@ public static class WindowFinder
 }
 '@
 
-$windows = [WindowFinder]::FindWindows()
-$windows
+function GetWindows {
+	$windows = [WindowFinder]::FindWindows()
+	$header1 = "1 Kill Process:  ctrl-k"
+	$header2 = "1 Close Process: ctrl-c"
+	$header3 = "1 Reload:        ctrl-r"
+	$header1,$header2,$header3,$windows
+}
+
+function Run {
+	$result = GetWindows | Fzf `
+		--with-nth 2.. `
+		--header-lines=6 `
+		--bind="ctrl-r:reload(. .\list_open_windows.ps1;GetWindows)" `
+		--bind="ctrl-c:execute(taskkill /pid {2})+reload(. .\list_open_windows.ps1;GetWindows)" `
+		--bind="ctrl-k:execute(taskkill /f /pid {2})+reload(. .\list_open_windows.ps1;GetWindows)" `
+		--reverse
+	$result
+}

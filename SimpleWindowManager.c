@@ -18,6 +18,7 @@
 #include <netlistmgr.h>
 #include <dwmapi.h>
 #include <strsafe.h>
+#include <shellapi.h>
 #include "SimpleWindowManager.h"
 #pragma comment(lib, "user32.lib")
 #pragma comment(lib, "Oleacc.lib")
@@ -27,6 +28,7 @@
 #pragma comment(lib, "OLE32.lib")
 #pragma comment(lib, "Advapi32.lib")
 #pragma comment(lib, "Dwmapi.lib")
+#pragma comment(lib, "Shell32.lib")
 
 DEFINE_GUID(IID_IMMDeviceEnumerator, 0xa95664d2, 0x9614, 0x4f35, 0xa7, 0x46, 0xde, 0x8d, 0xb6, 0x36, 0x17, 0xe6);
 DEFINE_GUID(CLSID_MMDeviceEnumerator, 0xbcde0395, 0xe52f, 0x467c, 0x8e, 0x3d, 0xc4, 0x57, 0x92, 0x91, 0x69, 0x2e);
@@ -220,6 +222,7 @@ void move_focused_window_to_workspace(Workspace *workspace)
 {
     HWND foregroundHwnd = GetForegroundWindow();
     windowManager_move_window_to_workspace_and_arrange(foregroundHwnd, workspace);
+    workspace_focus_selected_window(selectedMonitor->workspace);
 }
 
 void move_focused_window_to_master(void)
@@ -2830,7 +2833,7 @@ void start_launcher(TCHAR *cmdArgs)
 
 void start_app(TCHAR *processExe)
 {
-    start_process(processExe, NULL, NORMAL_PRIORITY_CLASS);
+    ShellExecute(NULL, L"open", processExe, NULL, NULL, SW_SHOWNORMAL);
 }
 
 void start_app_non_elevated(TCHAR *processExe)
@@ -3070,7 +3073,7 @@ static BOOL CALLBACK open_windows_scratch_enum_windows_callback(HWND hwnd, LPARA
 
 void open_windows_scratch_start(void)
 {
-    TCHAR *cmd = L"cmd /c powershell -c .\\list_open_windows.ps1 | fzf --with-nth 2.. --color=gutter:black --header \"ctrl-k:Kill Window, ctrl-c:Close Window, Enter:Select Window\" --bind=\"ctrl-k:execute(taskkill /f /pid {2})+reload(powershell -c .\\list_open_windows.ps1)\"";
+    TCHAR *cmd = L"cmd /c powershell -NoProfile -NoLogo -c . .\\list_open_windows.ps1;run";
     process_with_stdout_start(cmd, open_windows_scratch_exit_callback);
 }
 

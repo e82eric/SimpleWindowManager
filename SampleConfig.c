@@ -13,6 +13,8 @@ COLORREF buttonWithWindowsTextColor = RGB(255, 255, 247);
 COLORREF buttonWithoutWindowsTextColor = 0x504945;
 COLORREF barTextColor =RGB(235, 219, 178);
 
+TCHAR *scratchWindowTitle = L"SimpleWindowManager Scratch";
+
 HFONT initalize_font()
 {
     HDC hdc = GetDC(NULL);
@@ -31,20 +33,6 @@ BOOL chrome_workspace_filter(Client *client)
         wcsstr(client->data->processImageName, L"firefox.exe") ||
         wcsstr(client->data->processImageName, L"msedge.exe"))
     {
-        if(wcsstr(client->data->className, L"Chrome_WidgetWin_2"))
-        {
-            return FALSE;
-        }
-        if(
-                wcsstr(client->data->className, L"MozillaDropShadowWindowClass")
-                /* || wcsstr(client->data->className, L"MozillaHiddenWindowClass") */
-                || wcsstr(client->data->className, L"MozillaDialogClass")
-                /* || wcsstr(client->data->className, L"MozillaTempWindowClass") */
-                /* || wcsstr(client->data->className, L"MozillaTransitionWindowClass") */
-            )
-        {
-            return FALSE;
-        }
         return TRUE;
     }
     return FALSE;
@@ -85,24 +73,8 @@ BOOL paint_workspace_filter(Client *client)
     return FALSE;
 }
 
-BOOL teams_workspace(Client *client)
+BOOL teams_workspace_filter(Client *client)
 {
-    if(wcsstr(client->data->title, L"toolbar"))
-    {
-        return FALSE;
-    }
-    if(wcsstr(client->data->title, L"Toolbar"))
-    {
-        return FALSE;
-    }
-    if(wcsstr(client->data->title, L"appSharingToolbar"))
-    {
-        return FALSE;
-    }
-    if(wcsstr(client->data->title, L"Microsoft Teams Notification"))
-    {
-        return FALSE;
-    }
     if(wcsstr(client->data->processImageName, L"Teams.exe"))
     {
         return TRUE;
@@ -121,6 +93,7 @@ Workspace** create_workspaces(int* outSize)
     WCHAR chromeTag = { 0xfa9e };
     WCHAR terminalTag = { 0xf120 };
     WCHAR riderTag = { 0xf668 };
+    WCHAR teamsTag = { 0xf865 };
 
     int* numberOfWorkspaces = malloc(sizeof(int));
     *numberOfWorkspaces = 9;
@@ -131,7 +104,7 @@ Workspace** create_workspaces(int* outSize)
     workspaces[2] = workspace_create(L"Rider", rider_workspace_filter, &riderTag, &monacleLayout, numberOfBars);
     workspaces[3] = workspace_create(L"4", null_filter, L"4", &tileLayout, numberOfBars);
     workspaces[4] = workspace_create(L"5", null_filter, L"5", &tileLayout, numberOfBars);
-    workspaces[5] = workspace_create(L"6", null_filter, L"6", &tileLayout, numberOfBars);
+    workspaces[5] = workspace_create(L"Teams", teams_workspace_filter, &teamsTag, &tileLayout, numberOfBars);
     workspaces[6] = workspace_create(L"7", null_filter, L"7", &tileLayout, numberOfBars);
     workspaces[7] = workspace_create(L"8", null_filter, L"8", &tileLayout, numberOfBars);
     workspaces[8] = workspace_create(L"9", null_filter, L"9", &tileLayout, numberOfBars);
@@ -140,23 +113,21 @@ Workspace** create_workspaces(int* outSize)
     return workspaces;
 }
 
-TCHAR *cmdScratchCmd = L"cmd /k";
-TCHAR *launcherCommand = L"cmd /c for /f \"delims=\" %i in ('fd -t f -g \"*{.lnk,.exe}\" \"%USERPROFILE%\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\" \"C:\\ProgramData\\Microsoft\\Windows\\Start Menu\" \"C:\\Users\\eric\\AppData\\Local\\Microsoft\\WindowsApps\" ^| fzf --bind=\"ctrl-c:execute(echo {} | clip)\"') do start \" \" \"%i\"";
+TCHAR *cmdScratchCmd = L"cmd /c powershell -NoLogo";
+TCHAR *launcherCommand = L"cmd /c for /f \"delims=\" %i in ('fd -t f -g \"*{.lnk,.exe}\" \"%USERPROFILE%\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\" \"C:\\ProgramData\\Microsoft\\Windows\\Start Menu\" \"%USERPROFILE%\\AppData\\Local\\Microsoft\\WindowsApps\" \"%USERPROFILE%\\Utilites\" ^| fzf --bind=\"ctrl-c:execute(echo {} | clip)\"') do start \" \" \"%i\"";
 TCHAR *allFilesCommand = L"cmd /c set /p \"pth=Enter Path: \" && for /f \"delims=\" %i in ('fd . -t f %^pth% ^| fzf --bind=\"ctrl-c:execute(echo {} | clip)\"') do start \" \" \"%i\"";
-TCHAR *processListCommand = L"/c tasklist /nh | sort | fzf -e --bind=\"ctrl-k:execute(for /f \\\"tokens=2\\\" %f in ({}) do taskkill /f /pid %f)+reload(tasklist /nh | sort)\" --bind=\"ctrl-r:reload(tasklist /nh | sort)\" --header \"ctrl-k Kill Pid\" --reverse";
+TCHAR *terminalAppPath = L"wt.exe";
+TCHAR *processListCommand1 = L"cmd /c powershell -NoLogo -NoProfile -c . .\\processlist.ps1;Run";
 
 void create_keybindings(Workspace** workspaces)
 {
     keybinding_create_no_args(LAlt, VK_J, select_next_window);
     keybinding_create_no_args(LAlt, VK_OEM_COMMA, monitor_select_next);
-    keybinding_create_cmd_args(LShift | LAlt, VK_P, start_launcher, launcherCommand);
-    keybinding_create_cmd_args(LAlt, VK_P, start_scratch_not_elevated, launcherCommand);
-    keybinding_create_cmd_args(LAlt, VK_K, start_launcher, processListCommand);
-    keybinding_create_no_args(LAlt, VK_SPACE, toggle_selected_monitor_layout);
     keybinding_create_no_args(LAlt, VK_N, arrange_clients_in_selected_workspace);
     keybinding_create_no_args(LAlt, VK_L, workspace_increase_master_width_selected_monitor);
     keybinding_create_no_args(LAlt, VK_H, workspace_decrease_master_width_selected_monitor);
     keybinding_create_no_args(LAlt, VK_RETURN, move_focused_window_to_master);
+    keybinding_create_no_args(LShift | LAlt, VK_DOWN, mimimize_focused_window);
 
     keybinding_create_workspace_arg(LAlt, VK_1, swap_selected_monitor_to, workspaces[0]);
     keybinding_create_workspace_arg(LAlt, VK_2, swap_selected_monitor_to, workspaces[1]);
@@ -182,18 +153,68 @@ void create_keybindings(Workspace** workspaces)
 
     keybinding_create_no_args(LShift | LAlt, VK_C, close_focused_window);
     keybinding_create_no_args(LShift | LAlt, VK_C, kill_focused_window);
-    keybinding_create_cmd_args(LAlt, VK_S, start_scratch_not_elevated, allFilesCommand);
-    keybinding_create_cmd_args(LShift | LAlt, VK_S, start_launcher, allFilesCommand);
-    keybinding_create_cmd_args(LWin, VK_1, start_scratch_not_elevated, cmdScratchCmd);
-    keybinding_create_cmd_args(LShift | LWin, VK_1, start_launcher, cmdScratchCmd);
     keybinding_create_no_args(LAlt, VK_V, taskbar_toggle);
+
+    keybinding_create_no_args(LAlt, VK_B, toggle_create_window_in_current_workspace);
+    keybinding_create_no_args(LAlt, VK_Z, toggle_ignore_workspace_filters);
+    keybinding_create_no_args(LAlt, VK_F, client_stop_managing);
 
     keybinding_create_no_args(LAlt, VK_M, swap_selected_monitor_to_monacle_layout);
     keybinding_create_no_args(LAlt, VK_D, swap_selected_monitor_to_deck_layout);
     keybinding_create_no_args(LAlt, VK_T, swap_selected_monitor_to_tile_layout);
     keybinding_create_no_args(LAlt, VK_R, redraw_focused_window);
 
+    keybinding_create_cmd_args(LWin, VK_T, start_app, terminalAppPath);
+
+    keybinding_create_cmd_args(LAlt, VK_S, start_scratch_not_elevated, allFilesCommand);
+    keybinding_create_cmd_args(LShift | LAlt, VK_S, start_launcher, allFilesCommand);
+    keybinding_create_cmd_args(LWin, VK_0, start_scratch_not_elevated, cmdScratchCmd);
+    keybinding_create_cmd_args(LShift | LWin, VK_0, start_launcher, cmdScratchCmd);
+    keybinding_create_cmd_args(LShift | LAlt, VK_P, start_launcher, launcherCommand);
+    keybinding_create_cmd_args(LAlt, VK_P, start_scratch_not_elevated, launcherCommand);
+    keybinding_create_cmd_args(LWin, VK_9, start_launcher, processListCommand1);
+    keybinding_create_no_args(LAlt, VK_SPACE, open_windows_scratch_start);
+
     keybinding_create_no_args(LAlt, VK_F9, quit);
+}
+
+BOOL should_always_exclude(Client* client)
+{
+    if(wcsstr(client->data->title, scratchWindowTitle))
+    {
+        return TRUE;
+    }
+
+    return FALSE;
+}
+
+BOOL is_float_window(Client *client, LONG_PTR styles, LONG_PTR exStyles)
+{
+    if(exStyles & WS_EX_APPWINDOW)
+    {
+        return FALSE;
+    }
+
+    if(exStyles & WS_EX_TOOLWINDOW)
+    {
+        return TRUE;
+    }
+
+    if(styles & WS_POPUP)
+    {
+        if(wcsstr(client->data->className, L"Qt5QWindowIcon"))
+        {
+            return FALSE;
+        }
+        return TRUE;
+    }
+
+    if(!(styles & WS_SIZEBOX))
+    {
+        return TRUE;
+    }
+
+    return FALSE;
 }
 
 BOOL should_use_old_move_logic(Client* client)
