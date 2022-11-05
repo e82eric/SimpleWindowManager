@@ -3073,7 +3073,9 @@ static BOOL CALLBACK open_windows_scratch_enum_windows_callback(HWND hwnd, LPARA
 
 void open_windows_scratch_start(void)
 {
-    TCHAR *cmd = L"cmd /c powershell -NoProfile -NoLogo -c . .\\list_open_windows.ps1;run";
+    /* TCHAR *cmd = L"cmd /c powershell -c .\\list_open_windows.ps1 | fzf --with-nth 2.. --color=gutter:black --header \"ctrl-k:Kill Window, ctrl-c:Close Window, Enter:Select Window\" --bind=\"ctrl-k:execute(taskkill /f /pid {2})+reload(powershell -c .\\list_open_windows.ps1)\""; */
+    /* TCHAR *cmd = L"cmd /c powershell -NoProfile -NoLogo -c . .\\list_open_windows.ps1;run"; */
+    TCHAR *cmd = L"cmd /c bin\\ListWindows.exe | fzf --reverse --header-lines=1 --with-nth=2..";
     process_with_stdout_start(cmd, open_windows_scratch_exit_callback);
 }
 
