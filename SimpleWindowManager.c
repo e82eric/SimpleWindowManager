@@ -1962,6 +1962,7 @@ void monacleLayout_calculate_and_apply_client_sizes(Workspace *workspace)
 
 void scratch_window_focus(void)
 {
+    ShowWindow(borderWindowHwnd, SW_HIDE);
     HDWP hdwp = BeginDeferWindowPos(2);
     DeferWindowPos(
             hdwp,
@@ -1983,6 +1984,7 @@ void scratch_window_focus(void)
             SWP_SHOWWINDOW);
     EndDeferWindowPos(hdwp);
     ShowWindow(scratchWindow->data->hwnd, SW_RESTORE);
+    ShowWindow(borderWindowHwnd, SW_SHOW);
     SetForegroundWindow(borderWindowHwnd);
     SetForegroundWindow(scratchWindow->data->hwnd);
     LONG lStyle = GetWindowLong(scratchWindow->data->hwnd, GWL_STYLE);

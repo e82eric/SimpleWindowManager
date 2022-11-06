@@ -8,3 +8,6 @@ LINK /DEBUG bin\SimpleWindowManager.obj bin\Config.obj /OUT:bin\SimpleWindowMana
 
 CL /c /W4 /EHsc /nologo ListWindows.c /DUNICODE /D_UNICODE /Zi /Fd"bin\ListWindows.pdb" /Fo"bin\ListWindows.obj"
 LINK /DEBUG bin\ListWindows.obj /OUT:bin\ListWindows.exe
+
+CL /c /W4 /EHsc /nologo ListProcesses.c /DUNICODE /D_UNICODE /Zi /Fd"bin\ListProcesses.pdb" /Fo"bin\ListProcesses.obj"
+LINK /DEBUG bin\ListProcesses.obj /OUT:bin\ListProcesses.exe
