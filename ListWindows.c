@@ -2,14 +2,18 @@
 #include <stdio.h>
 #include <windows.h>
 #include <shlwapi.h>
+#include <strsafe.h>
 #pragma comment(lib, "user32.lib")
 #pragma comment(lib, "Advapi32.lib")
 #pragma comment(lib, "Dwmapi.lib")
 #pragma comment(lib, "Shlwapi.lib")
+#pragma comment(lib, "Shell32.lib")
 
 typedef struct Client Client;
 typedef struct Workspace Workspace;
 typedef struct ClientData ClientData;
+
+static const WCHAR UNICODE_BOM = 0xFEFF;
 
 struct Workspace
 {
@@ -28,9 +32,9 @@ struct ClientData
 {
     HWND hwnd;
     DWORD processId;
-    TCHAR *processName;
-    TCHAR *className;
-    TCHAR *title;
+    CHAR *processName;
+    CHAR *className;
+    CHAR *title;
     BOOL isElevated;
     BOOL isMinimized;
 };
@@ -115,9 +119,9 @@ Client* clientFactory_create_from_hwnd(HWND hwnd)
         CloseHandle( hToken );
     }
 
-    TCHAR processImageFileName[1024] = {0};
+    CHAR processImageFileName[1024] = {0};
     DWORD dwFileSize = 1024;
-    DWORD processImageFileNameResult = QueryFullProcessImageNameW(
+    DWORD processImageFileNameResult = QueryFullProcessImageNameA(
         hProcess,
         0,
         processImageFileName,
@@ -133,24 +137,24 @@ Client* clientFactory_create_from_hwnd(HWND hwnd)
             buf, (sizeof(buf) / sizeof(wchar_t)), NULL);
     }
 
-    TCHAR title[256];
-    GetWindowTextW(
+    CHAR title[1024];
+    GetWindowTextA(
       hwnd,
       title,
       sizeof(title)/sizeof(TCHAR)
     );
 
-    TCHAR className[256] = {0};
-    GetClassName(hwnd, className, sizeof(className)/sizeof(TCHAR));
+    CHAR className[256] = {0};
+    GetClassNameA(hwnd, className, sizeof(className)/sizeof(TCHAR));
     BOOL isMinimized = IsIconic(hwnd);
 
-    LPCWSTR processShortFileName = PathFindFileName(processImageFileName);
+    LPCSTR processShortFileName = PathFindFileNameA(processImageFileName);
     ClientData *clientData = calloc(1, sizeof(ClientData));
     clientData->hwnd = hwnd;
     clientData->processId = processId;
-    clientData->className = _wcsdup(className);
-    clientData->processName = _wcsdup(processShortFileName);
-    clientData->title = _wcsdup(title);
+    clientData->className = strdup(className);
+    clientData->processName = strdup(processShortFileName);
+    clientData->title = strdup(title);
     clientData->isElevated = isElevated;
     clientData->isMinimized = isMinimized;
 
@@ -207,7 +211,7 @@ static BOOL CALLBACK enum_windows_callback(HWND hwnd, LPARAM lparam)
         workspace->lastClient = client;
     }
 
-    size_t processFileNameLen = wcslen(client->data->processName);
+    size_t processFileNameLen = strlen(client->data->processName);
     if(processFileNameLen > workspace->maxProcessNameLen)
     {
         workspace->maxProcessNameLen = processFileNameLen;
@@ -218,14 +222,51 @@ static BOOL CALLBACK enum_windows_callback(HWND hwnd, LPARAM lparam)
 
 int main (void)
 {
+    HANDLE someHandle = GetStdHandle(STD_OUTPUT_HANDLE);
     Workspace *workspace = calloc(1, sizeof(Workspace));
     EnumWindows(enum_windows_callback, (LPARAM)workspace);
 
+    DWORD Written;
+    size_t cchStringSize;
+    TCHAR temp[1024];
+    StringCchPrintf(temp, 1024, TEXT("%-*s %-*s %-*s %s\n"), 16, L"HWND", 8, L"PID", (int)workspace->maxProcessNameLen, L"Name", L"Title");
+    StringCchLength(temp, 1024, &cchStringSize);
+    /* WriteFile(someHandle, */
+    /*         (PVOID)temp, */
+    /*         (cchStringSize * sizeof(WCHAR)), */
+    /*         &Written, */
+    /*         NULL); */
     printf("%-*s %-*s %-*s %s\n", 16, "HWND", 8, "PID", (int)workspace->maxProcessNameLen, "Name", "Title");
     Client *c = workspace->clients;
     while(c)
     {
-        printf("%p %08d %-*ls %ls\n", c->data->hwnd, c->data->processId, (int)workspace->maxProcessNameLen, c->data->processName, c->data->title);
+        size_t t2;
+        StringCchPrintf(temp, 1024, TEXT("%p %08d %-*s %s\n"),
+            c->data->hwnd, c->data->processId, (int)workspace->maxProcessNameLen, c->data->processName, c->data->title);
+        StringCchLength(temp, 1024, &cchStringSize);
+        printf("%p %08d %-*s %s\n",
+            c->data->hwnd, c->data->processId, (int)workspace->maxProcessNameLen, c->data->processName, c->data->title);
+
+        //
+        // Write out a Unicode BOM to ensure proper processing by text readers
+        //
+        /* WriteFile(someHandle, */
+        /*           (PVOID)&UNICODE_BOM, */
+        /*           sizeof(UNICODE_BOM), */
+        /*           &Written, */
+        /*           NULL); */
+
+        //
+        // The number of bytes to write to standard output must exclude the null
+        // terminating character.
+        //
+        /* WriteFile(someHandle, */
+        /*           (PVOID)temp, */
+        /*           (cchStringSize * sizeof(WCHAR)), */
+        /*           &Written, */
+        /*           NULL); */
+
+        /* WriteConsole(someHandle, temp, (DWORD)cchStringSize, &t2, NULL); */
         c = c->next;
     }
 

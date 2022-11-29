@@ -207,6 +207,9 @@ void toggle_create_window_in_current_workspace(void);
 void toggle_ignore_workspace_filters(void);
 void client_stop_managing(void);
 void open_windows_scratch_start(void);
+void open_program_scratch_start(void);
+void open_program_scratch_start_not_elevated(void);
+void open_process_list(void);
 void quit(void);
 
 /* Everything below is what Config.c must implement */
