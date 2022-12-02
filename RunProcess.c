@@ -157,7 +157,8 @@ typedef struct MenuView
 
 void ItemsView_SetLoading(ItemsView *self);
 void ItemsView_SetDoneLoading(ItemsView *self);
-DWORD WINAPI ItemsView_ProcessChunkWorker2(LPVOID lpParam);
+/* DWORD WINAPI ItemsView_ProcessChunkWorker2(LPVOID lpParam); */
+VOID CALLBACK ItemsView_ProcessChunkWorker2( PTP_CALLBACK_INSTANCE Instance, PVOID lpParam, PTP_WORK Work);
 void DisplayItemList_MergeIntoRight(DisplayItemList *self, DisplayItemList *resultList2);
 void ItemsView_SetHeader(ItemsView *self, char* headerLine);
 NamedCommand* ItemsView_FindNamedCommandByName(ItemsView *self, char *name);
@@ -185,15 +186,16 @@ DWORD WINAPI SearchView_Worker(LPVOID lpParam)
 
     SearchView *self = menuView->searchView;
 
-    ProcessChunkJob *jobs[25];
-    HANDLE completeHandles[25];
-    DWORD dwThreadIdArray[25];
+    ProcessChunkJob *jobs[250];
+    HANDLE completeHandles[250];
+    DWORD dwThreadIdArray[250];
     int numberOfJobs = 0;
 
     CHAR buff[BUF_LEN];
     GetWindowTextA(self->hwnd, buff, BUF_LEN);
 
     self->itemsView->fzfPattern = fzf_parse_pattern(CaseSmart, false, buff, true);
+    PTP_WORK completeWorkHandles[50];
     Chunk *currentChunk = self->itemsView->chunks;
     while(currentChunk)
     {
@@ -208,19 +210,17 @@ DWORD WINAPI SearchView_Worker(LPVOID lpParam)
         jobs[numberOfJobs]->displayItemList->items = calloc(self->itemsView->maxDisplayItems, sizeof(ItemMatchResult*));
         jobs[numberOfJobs]->displayItemList->maxItems = self->itemsView->maxDisplayItems;
 
-        completeHandles[numberOfJobs] = CreateThread( 
-                NULL,
-                0,
-                ItemsView_ProcessChunkWorker2,
-                jobs[numberOfJobs],
-                0,
-                &dwThreadIdArray[numberOfJobs]);
+        completeWorkHandles[numberOfJobs] = CreateThreadpoolWork(ItemsView_ProcessChunkWorker2, jobs[numberOfJobs], NULL);
+        SubmitThreadpoolWork(completeWorkHandles[numberOfJobs]);
 
         numberOfJobs++;
         currentChunk = currentChunk->next;
     }
 
-    WaitForMultipleObjects(numberOfJobs, completeHandles, TRUE, INFINITE);
+    for(int i = 0; i < numberOfJobs; i++)
+    {
+        WaitForThreadpoolWorkCallbacks(completeWorkHandles[i], FALSE);
+    }
 
     DisplayItemList *mergedDisplayItemList = calloc(1, sizeof(DisplayItemList));
     mergedDisplayItemList->items = calloc(self->itemsView->maxDisplayItems, sizeof(ItemMatchResult*));
@@ -282,7 +282,6 @@ DWORD WINAPI SearchView_Worker(LPVOID lpParam)
         fzf_free_pattern(jobs[i]->fzfPattern);
         free(jobs[i]->displayItemList->items);
         free(jobs[i]);
-        CloseHandle(completeHandles[i]);
     }
 
     free(mergedDisplayItemList->items);
@@ -687,8 +686,8 @@ void DisplayItemList_TryAdd(DisplayItemList *self, ItemMatchResult *matchResult)
         }
     }
 }
-
-DWORD WINAPI ItemsView_ProcessChunkWorker2(LPVOID lpParam)
+VOID CALLBACK ItemsView_ProcessChunkWorker2( PTP_CALLBACK_INSTANCE Instance, PVOID lpParam, PTP_WORK Work)
+/* DWORD WINAPI ItemsView_ProcessChunkWorker2(LPVOID lpParam) */
 {
     ProcessChunkJob *job = (ProcessChunkJob*)lpParam;
     Chunk *chunk = job->chunk;
@@ -698,7 +697,8 @@ DWORD WINAPI ItemsView_ProcessChunkWorker2(LPVOID lpParam)
         Item *item = chunk->items[i];
         if(g_cancelSearch)
         {
-            return TRUE;
+            return;
+            /* return TRUE; */
         }
 
         ItemMatchResult *matchResult = calloc(1, sizeof(ItemMatchResult));
@@ -717,7 +717,8 @@ DWORD WINAPI ItemsView_ProcessChunkWorker2(LPVOID lpParam)
         }
     }
 
-    return TRUE;
+    return;
+    /* return TRUE; */
 }
 
 void DisplayItemList_MergeIntoRight(DisplayItemList *self, DisplayItemList *resultList2)
