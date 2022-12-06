@@ -20,6 +20,8 @@
 #include <strsafe.h>
 #include <shellapi.h>
 #include "SimpleWindowManager.h"
+#include <wbemidl.h>
+#include <Assert.h>
 #pragma comment(lib, "user32.lib")
 #pragma comment(lib, "Oleacc.lib")
 #pragma comment(lib, "Gdi32.lib")
@@ -35,6 +37,8 @@ DEFINE_GUID(CLSID_MMDeviceEnumerator, 0xbcde0395, 0xe52f, 0x467c, 0x8e, 0x3d, 0x
 DEFINE_GUID(IID_IAudioEndpointVolume, 0x5cdf2c82, 0x841e, 0x4546, 0x97, 0x22, 0x0c, 0xf7, 0x40, 0x78, 0x22, 0x9a);
 DEFINE_GUID(CLSID_NetworkListManager, 0xdcb00c01, 0x570f, 0x4a9b, 0x8d,0x69, 0x19,0x9f,0xdb,0xa5,0x72,0x3b);
 DEFINE_GUID(IID_INetworkListManager, 0xdcb00000, 0x570f, 0x4a9b, 0x8d,0x69, 0x19,0x9f,0xdb,0xa5,0x72,0x3b);
+DEFINE_GUID(CLSID_WbemLocator, 0x4590f811, 0x1d3a, 0x11d0, 0x89, 0x1f,0x00, 0xaa, 0x00, 0x4b, 0x2e, 0x24);
+DEFINE_GUID(IID_IWbemLocator, 0xdc12a687, 0x737f, 0x11cf, 0x88, 0x4d, 0x00, 0xaa, 0x00, 0x4b, 0x2e, 0x24);
 
 typedef struct LauncherProcess LauncherProcess;
 
@@ -72,6 +76,10 @@ void monacleLayout_calculate_and_apply_client_sizes(Workspace *workspace);
 
 void noop_move_client_to_master(Client *client);
 
+
+void start_process(CHAR *processExe, CHAR *cmdArgs, DWORD creationFlags);
+void process_with_stdout_start(TCHAR *cmdArgs, void (*onSuccess) (CHAR *));
+
 static void windowMnaager_remove_client_if_found_by_hwnd(HWND hwnd);
 static void windowManager_move_workspace_to_monitor(Monitor *monitor, Workspace *workspace);
 static void windowManager_move_window_to_workspace_and_arrange(HWND hwnd, Workspace *workspace);
@@ -91,6 +99,10 @@ static void workspace_remove_client_and_arrange(Workspace *workspace, Client *cl
 static void workspace_focus_selected_window(Workspace *workspace);
 static int workspace_update_client_counts(Workspace *workspace);
 static int workspace_get_number_of_clients(Workspace *workspace);
+static ScratchWindow* scratch_windows_find_from_client(Client *client);
+static ScratchWindow* scratch_windows_find_from_hwnd(HWND hwnd);
+static void scratch_window_toggle(ScratchWindow *self);
+static void scratch_window_show(ScratchWindow *self);
 static Client* workspace_find_client_by_hwnd(Workspace *workspace, HWND hwnd);
 static Client* clientFactory_create_from_hwnd(HWND hwnd);
 static void client_move_to_location_on_screen(Client *client, HDWP hdwp);
@@ -98,9 +110,9 @@ static void client_move_from_unminimized_to_minimized(Client *client);
 static void client_move_from_minimized_to_unminimized(Client *client);
 static void client_set_screen_coordinates(Client *client, int w, int h, int x, int y);
 static void free_client(Client *client);
-static void scratch_window_remove(void);
-static void scratch_window_add(Client *client);
-static void scratch_window_focus(void);
+static void scratch_window_remove(ScratchWindow *scratchWindow);
+static void scratch_window_add(ScratchWindow *scratchWindow);
+static void scratch_window_focus(ScratchWindow *scratchWindow);
 static void button_set_selected(Button *button, BOOL value);
 static void button_set_has_clients(Button *button, BOOL value);
 static void button_press_handle(Button *button);
@@ -186,8 +198,13 @@ Layout *headLayoutNode = &tileLayout;
 static TCHAR *cmdLineExe = L"C:\\Windows\\System32\\cmd.exe";
 static CHAR *cmdLineExe2 = "C:\\Windows\\System32\\cmd.exe";
 
+
+IWbemServices *services = NULL;
+
 KeyBinding *headKeyBinding;
-Client *scratchWindow;
+ScratchWindow *scratchWindows;
+ScratchWindow *focusedScratchWindow;
+/* PersistentScratchWindow *persistentScratchWindows; */
 
 enum WindowRoutingMode currentWindowRoutingMode = FilteredAndRoutedToWorkspace;
 int scratchWindowsScreenPadding = 250;
@@ -361,8 +378,8 @@ void redraw_focused_window(void)
 
 void select_next_window(void)
 {
-    HWND foregroundHwnd = GetForegroundWindow();
-    Client* existingClient = windowManager_find_client_in_workspaces_by_hwnd(foregroundHwnd);
+    /* HWND foregroundHwnd = GetForegroundWindow(); */
+    /* Client* existingClient = windowManager_find_client_in_workspaces_by_hwnd(foregroundHwnd); */
     /* if(!existingClient) */
     /* { */
     /*     float_window_move_down(foregroundHwnd); */
@@ -377,8 +394,8 @@ void select_next_window(void)
 
 void select_previous_window(void)
 {
-    HWND foregroundHwnd = GetForegroundWindow();
-    Client* existingClient = windowManager_find_client_in_workspaces_by_hwnd(foregroundHwnd);
+    /* HWND foregroundHwnd = GetForegroundWindow(); */
+    /* Client* existingClient = windowManager_find_client_in_workspaces_by_hwnd(foregroundHwnd); */
     /* if(!existingClient) */
     /* { */
     /*     float_window_move_up(foregroundHwnd); */
@@ -469,11 +486,23 @@ static BOOL CALLBACK enum_windows_callback(HWND hwnd, LPARAM lparam)
     }
 
     Client *client = clientFactory_create_from_hwnd(hwnd);
+    ScratchWindow *scratchWindow = scratch_windows_find_from_client(client);
+    if(scratchWindow)
+    {
+        if(!scratchWindow->client)
+        {
+            scratchWindow->client = client;
+        }
+        scratch_window_add(scratchWindow);
+        return TRUE;
+    }
+
     if(is_float_window(client, styles, exStyles))
     {
         free_client(client);
         return TRUE;
     }
+
     Workspace *workspace = windowManager_find_client_workspace_using_filters(client);
     if(workspace)
     {
@@ -556,30 +585,37 @@ LRESULT CALLBACK handle_key_press(int code, WPARAM w, LPARAM l)
                 int modifiersPressed = 0;
                 if(GetKeyState(VK_LSHIFT) & 0x8000)
                 {
+                    /* printf("LShift pressed\n"); */
                     modifiersPressed |= LShift;
                 }
                 if(GetKeyState(VK_RSHIFT) & 0x8000)
                 {
+                    /* printf("RShift pressed\n"); */
                     modifiersPressed |= RShift;
                 }
                 if(GetKeyState(VK_LMENU) & 0x8000)
                 {
+                    /* printf("LMENU pressed\n"); */
                     modifiersPressed |= LAlt;
                 }
                 if(GetKeyState(VK_RMENU) & 0x8000)
                 {
+                    /* printf("VK_RMENU pressed\n"); */
                     modifiersPressed |= RAlt;
                 }
                 if(GetKeyState(VK_CONTROL) & 0x8000)
                 {
+                    /* printf("VK_CONTROL pressed\n"); */
                     modifiersPressed |= LCtl;
                 }
                 if(GetKeyState(VK_LWIN) & 0x8000)
                 {
+                    /* printf("VK_LWIN pressed\n"); */
                     modifiersPressed |= LWin;
                 }
                 if(GetKeyState(VK_RWIN) & 0x8000)
                 {
+                    /* printf("VK_RWIN pressed\n"); */
                     modifiersPressed |= RWin;
                 }
 
@@ -596,6 +632,10 @@ LRESULT CALLBACK handle_key_press(int code, WPARAM w, LPARAM l)
                     else if(keyBinding->workspaceAction)
                     {
                         keyBinding->workspaceAction(keyBinding->workspaceArg);
+                    }
+                    else if(keyBinding->scratchWindowAction)
+                    {
+                        keyBinding->scratchWindowAction(keyBinding->scratchWindowArg);
                     }
                     return 1;
                 }
@@ -639,31 +679,80 @@ void CALLBACK handle_windows_event(
                 return;
             }
         }
+        /* if (event == EVENT_OBJECT_CREATE) */
+        /* { */
+        /*     if(!isRootWindow) */
+        /*     { */
+        /*         return; */
+        /*     } */
+
+        /*     printf("EVENT_OBJECT_CREATE1 %p\n", hwnd); */
+        /*     Client *client = clientFactory_create_from_hwnd(hwnd); */
+
+        /*     printf("EVENT_OBJECT_CREATE %ls\n", client->data->title); */
+        /*     ScratchWindow *sWindow = scratch_windows_find_from_client(client); */
+        /*     if(sWindow) */
+        /*     { */
+        /*         printf("EVENT_OBJECT_CREATE scratch window %ls\n", client->data->commandLine); */
+        /*         if(sWindow->client) */
+        /*         { */
+        /*             free(client); */
+        /*             /1* scratch_window_show(sWindow); *1/ */
+        /*         } */
+        /*         else */
+        /*         { */
+        /*             sWindow->client = client; */
+        /*             scratch_window_add(sWindow); */
+        /*         } */
+        /*         return; */
+        /*     } */
+        /* } */
         if (event == EVENT_OBJECT_SHOW)
         {
             if(!isRootWindow)
             {
+                /* printf("EVENT_OBJECT_SHOW non root %p\n", hwnd); */
                 return;
             }
+
+            /* printf("EVENT_OBJECT_SHOW1 %p\n", hwnd); */
+            Client *client = clientFactory_create_from_hwnd(hwnd);
+
+            /* printf("EVENT_OBJECT_SHOW %ls\n", client->data->title); */
+            ScratchWindow *sWindow = scratch_windows_find_from_client(client);
+            if(sWindow)
+            {
+                /* printf("EVENT_OBJECT_SHOW scratch window %ls\n", client->data->commandLine); */
+                if(sWindow->client)
+                {
+                    free(client);
+                    /* scratch_window_show(sWindow); */
+                }
+                else
+                {
+                    sWindow->client = client;
+                    scratch_window_add(sWindow);
+                    scratch_window_show(sWindow);
+                }
+                return;
+            }
+            /* if(client->data->commandLine) */
+            /* { */
+            /*     if(wcsstr(client->data->commandLine, L"SimpleMenuTitle") || wcsstr(client->data->title, L"SimpleMenuTitle")) */
+            /*     { */
+            /*         if(!client->data->isMinimized) */
+            /*         { */
+            /*             scratch_window_add(client); */
+            /*         } */
+            /*         return; */
+            /*     } */
+            /* } */
 
             Client *existingClient = windowManager_find_client_in_workspaces_by_hwnd(hwnd);
             if(existingClient)
             {
                 workspace_arrange_windows(existingClient->workspace);
                 workspace_focus_selected_window(existingClient->workspace);
-                return;
-            }
-
-            Client *client = clientFactory_create_from_hwnd(hwnd);
-            /* if(wcsstr(client->data->processImageName, L"WindowsTerminal.exe")) */
-            /* { */
-            /*     scratch_window_add(client); */
-            /*     return; */
-            /* } */
-
-            if(wcsstr(client->data->title, L"SimpleMenuTitle"))
-            {
-                scratch_window_add(client);
                 return;
             }
 
@@ -703,15 +792,16 @@ void CALLBACK handle_windows_event(
         }
         else if(event == EVENT_OBJECT_LOCATIONCHANGE)
         {
+            /* if(scratchWindow) */
+            /* { */
+            /*     client = scratchWindow; */
+            /* } */
+            /* else */
+            /* { */
+            /*     client = windowManager_find_client_in_workspaces_by_hwnd(hwnd); */
+            /* } */
             Client *client = NULL;
-            if(scratchWindow && hwnd == scratchWindow->data->hwnd)
-            {
-                client = scratchWindow;
-            }
-            else
-            {
-                client = windowManager_find_client_in_workspaces_by_hwnd(hwnd);
-            }
+            client = windowManager_find_client_in_workspaces_by_hwnd(hwnd);
 
             if(client)
             {
@@ -734,6 +824,23 @@ void CALLBACK handle_windows_event(
                         HDWP hdwp = BeginDeferWindowPos(1);
                         client_move_to_location_on_screen(client, hdwp);
                         EndDeferWindowPos(hdwp);
+                    }
+                }
+            }
+            else
+            {
+                if(focusedScratchWindow)
+                {
+                    if(focusedScratchWindow->client)
+                    {
+                        if(!focusedScratchWindow->client->data->isMinimized)
+                        {
+                            HDWP hdwp = BeginDeferWindowPos(1);
+                            client_move_to_location_on_screen(focusedScratchWindow->client, hdwp);
+                            EndDeferWindowPos(hdwp);
+                        }
+                        free(client);
+                        return;
                     }
                 }
             }
@@ -765,14 +872,23 @@ void windowMnaager_remove_client_if_found_by_hwnd(HWND hwnd)
         workspace_remove_client_and_arrange(client->workspace, client);
         workspace_focus_selected_window(client->workspace);
     }
-    else if(scratchWindow && hwnd == scratchWindow->data->hwnd)
+    else
     {
-        client = scratchWindow;
-        if(scratchWindow->data->isScratchWindow)
+        ScratchWindow *sWindow = scratch_windows_find_from_hwnd(hwnd);
+        if(sWindow)
         {
-            scratch_window_remove();
+            scratch_window_remove(sWindow);
+            workspace_focus_selected_window(selectedMonitor->workspace);
         }
     }
+    /* else if(scratchWindow && hwnd == scratchWindow->data->hwnd) */
+    /* { */
+    /*     client = scratchWindow; */
+    /*     if(scratchWindow->data->isScratchWindow) */
+    /*     { */
+    /*         scratch_window_remove(client); */
+    /*     } */
+    /* } */
     if(client)
     {
         free_client(client);
@@ -888,6 +1004,37 @@ void windowManager_move_workspace_to_monitor(Monitor *monitor, Workspace *worksp
     EndDeferWindowPos(hdwp);
 }
 
+void get_command_line(DWORD processId, TCHAR* target)
+{
+    TCHAR *language = L"WQL";
+    TCHAR queryBuff[1024];
+
+    swprintf(queryBuff, 1024, L"SELECT * FROM Win32_Process WHERE ProcessID = %d", processId);
+    IEnumWbemClassObject *results  = NULL;
+    /* services->lpVtbl->ExecQuery(services, language, queryBuff, WBEM_FLAG_FORWARD_ONLY | WBEM_FLAG_RETURN_IMMEDIATELY, NULL, &results); */
+    /* printf("Before ExecuteQuery %ls\n", queryBuff); */
+    HRESULT hr = services->lpVtbl->ExecQuery(services, language, queryBuff, WBEM_FLAG_BIDIRECTIONAL, NULL, &results);
+    /* printf("ExecuteQuery %ls hr %d\n", queryBuff, hr); */
+
+    if (results != NULL)
+    {
+        IWbemClassObject *result = NULL;
+        ULONG returnedCount = 0;
+
+        results->lpVtbl->Next(results, WBEM_INFINITE, 1, &result, &returnedCount);
+        VARIANT CommandLine;
+
+        result->lpVtbl->Get(result, L"CommandLine", 0, &CommandLine, 0, 0);
+        wcscpy(target, CommandLine.bstrVal);
+
+        results->lpVtbl->Next(results, WBEM_INFINITE, 1, &result, &returnedCount);
+        assert(0 == returnedCount);
+
+        result->lpVtbl->Release(result);
+        results->lpVtbl->Release(results);
+    }
+}
+
 Client* clientFactory_create_from_hwnd(HWND hwnd)
 {
     DWORD processId = 0;
@@ -949,6 +1096,13 @@ Client* clientFactory_create_from_hwnd(HWND hwnd)
     clientData->title = _wcsdup(title);
     clientData->isElevated = isElevated;
     clientData->isMinimized = isMinimized;
+
+    TCHAR commandLine[1024];
+    if(wcsstr(processImageFileName, L"WindowsTerminal.exe"))
+    {
+         get_command_line(processId, &commandLine);
+         clientData->commandLine = _wcsdup(commandLine);
+    }
 
     Client *c;
     c = calloc(1, sizeof(Client));
@@ -1403,11 +1557,14 @@ Workspace* workspace_create(TCHAR *name, WindowFilter windowFilter, WCHAR* tag, 
 void workspace_focus_selected_window(Workspace *workspace)
 {
     keybd_event(0, 0, 0, 0);
-    if(scratchWindow)
-    {
-        scratch_window_focus();
-        return;
-    }
+    /* if(scratchWindow) */
+    /* { */
+    /*     if(!scratchWindow->data->isMinimized) */
+    /*     { */
+    /*         scratch_window_focus(); */
+    /*         return; */
+    /*     } */
+    /* } */
 
     if(workspace->clients && workspace->selected)
     {
@@ -1969,56 +2126,226 @@ void monacleLayout_calculate_and_apply_client_sizes(Workspace *workspace)
     }
 }
 
-void scratch_window_focus(void)
+void scratch_window_focus(ScratchWindow *self)
 {
-    LONG lStyle = GetWindowLong(scratchWindow->data->hwnd, GWL_STYLE);
+    self->client->data->x = selectedMonitor->xOffset + scratchWindowsScreenPadding;
+    self->client->data->y = scratchWindowsScreenPadding;
+    self->client->data->w = selectedMonitor->w - (scratchWindowsScreenPadding * 2);
+    self->client->data->h = selectedMonitor->h - (scratchWindowsScreenPadding * 2);
+
+    LONG lStyle = GetWindowLong(self->client->data->hwnd, GWL_STYLE);
     lStyle &= ~(WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_SYSMENU | WS_VSCROLL);
     /* lStyle &= ~(WS_CAPTION | WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_SYSMENU); */
-    SetWindowLong(scratchWindow->data->hwnd, GWL_STYLE, lStyle);
+    SetWindowLong(self->client->data->hwnd, GWL_STYLE, lStyle);
     ShowWindow(borderWindowHwnd, SW_HIDE);
     HDWP hdwp = BeginDeferWindowPos(2);
     DeferWindowPos(
             hdwp,
             borderWindowHwnd,
-            scratchWindow->data->hwnd,
-            scratchWindow->data->x - 4,
-            scratchWindow->data->y - 4,
-            scratchWindow->data->w + 8,
-            scratchWindow->data->h + 8,
+            self->client->data->hwnd,
+            self->client->data->x - 4,
+            self->client->data->y - 4,
+            self->client->data->w + 8,
+            self->client->data->h + 8,
             SWP_SHOWWINDOW);
     DeferWindowPos(
             hdwp,
-            scratchWindow->data->hwnd,
+            self->client->data->hwnd,
             HWND_TOPMOST,
-            scratchWindow->data->x,
-            scratchWindow->data->y,
-            scratchWindow->data->w,
-            scratchWindow->data->h,
+            self->client->data->x,
+            self->client->data->y,
+            self->client->data->w,
+            self->client->data->h,
             SWP_SHOWWINDOW);
     EndDeferWindowPos(hdwp);
-    ShowWindow(scratchWindow->data->hwnd, SW_RESTORE);
+    ShowWindow(self->client->data->hwnd, SW_RESTORE);
     ShowWindow(borderWindowHwnd, SW_SHOW);
-    /* SetForegroundWindow(borderWindowHwnd); */
-    SetForegroundWindow(scratchWindow->data->hwnd);
+    SetForegroundWindow(borderWindowHwnd);
+    SetForegroundWindow(self->client->data->hwnd);
 }
 
-void scratch_window_add(Client *client)
+void scratch_window_add(ScratchWindow *self)
 {
-    scratchWindow = client;
-    scratchWindow->isVisible = TRUE;
-
-    scratchWindow->data->isScratchWindow = TRUE;
-    scratchWindow->data->x = selectedMonitor->xOffset + scratchWindowsScreenPadding;
-    scratchWindow->data->y = scratchWindowsScreenPadding;
-    scratchWindow->data->w = selectedMonitor->w - (scratchWindowsScreenPadding * 2);
-    scratchWindow->data->h = selectedMonitor->h - (scratchWindowsScreenPadding * 2);
-
-    scratch_window_focus();
+    self->client->isVisible = TRUE;
+    self->client->data->isScratchWindow = TRUE;
+    self->client->data->isMinimized = TRUE;
+    self->client->data->x = selectedMonitor->xOffset + scratchWindowsScreenPadding;
+    self->client->data->y = scratchWindowsScreenPadding;
+    self->client->data->w = selectedMonitor->w - (scratchWindowsScreenPadding * 2);
+    self->client->data->h = selectedMonitor->h - (scratchWindowsScreenPadding * 2);
 }
 
-void scratch_window_remove()
+ScratchWindow* scratch_windows_find_from_hwnd(HWND hwnd)
 {
-    scratchWindow = NULL;
+    ScratchWindow *current = scratchWindows;
+    while(current)
+    {
+        if(current->client)
+        {
+            if(current->client->data->hwnd == hwnd)
+            {
+                return current;
+            }
+        }
+
+        current = current->next;
+    }
+
+    return NULL;
+}
+
+ScratchWindow* scratch_windows_find_from_client(Client *client)
+{
+    ScratchWindow *current = scratchWindows;
+    while(current)
+    {
+        BOOL found = current->windowFilter(client);
+        if(found)
+        {
+            return current;
+        }
+
+        current = current->next;
+    }
+
+    return NULL;
+}
+
+void scratch_window_register(CHAR *cmd, TCHAR *cmd2, CHAR *cmdArgs, void (*stdOutCallback) (CHAR *), WindowFilter windowFilter, int modifiers, int key)
+{
+    ScratchWindow *sWindow = calloc(1, sizeof(ScratchWindow));
+    sWindow->cmd = cmd;
+    sWindow->cmd2 = cmd2;
+    sWindow->stdOutCallback = stdOutCallback;
+    sWindow->cmdArgs = cmdArgs;
+    sWindow->windowFilter = windowFilter;
+    sWindow->next = NULL;
+
+    if(scratchWindows == NULL)
+    {
+        scratchWindows = sWindow;
+    }
+    else
+    {
+        ScratchWindow *current = scratchWindows;
+        while(current)
+        {
+            if(!current->next)
+            {
+                current->next = sWindow;
+                break;
+            }
+
+            current = current->next;
+        }
+    }
+
+    keybinding_create_scratch_arg(modifiers, key, scratch_window_toggle, sWindow);
+}
+
+void scratch_window_show(ScratchWindow *self)
+{
+    self->client->data->isMinimized = FALSE;
+    focusedScratchWindow= self;
+    scratch_window_focus(self);
+}
+
+void scratch_window_hide(ScratchWindow *self)
+{
+    self->client->data->isMinimized = TRUE;
+    focusedScratchWindow = NULL;
+    ShowWindow(self->client->data->hwnd, SW_MINIMIZE);
+    workspace_focus_selected_window(selectedMonitor->workspace);
+}
+
+void scratch_window_toggle(ScratchWindow *self)
+{
+    if(self->client)
+    {
+        if(!self->client->data->isMinimized)
+        {
+            scratch_window_hide(self);
+            workspace_focus_selected_window(selectedMonitor->workspace);
+        }
+        else
+        {
+            if(focusedScratchWindow == self)
+            {
+                return;
+            }
+            else if(focusedScratchWindow)
+            {
+                scratch_window_hide(focusedScratchWindow);
+            }
+            scratch_window_show(self);
+        }
+    }
+    else
+    {
+        if(focusedScratchWindow)
+        {
+            if(focusedScratchWindow != self)
+            {
+                scratch_window_hide(focusedScratchWindow);
+            }
+        }
+
+        if(self->stdOutCallback)
+        {
+            process_with_stdout_start(self->cmd2, self->stdOutCallback);
+        }
+        else
+        {
+            start_process(NULL, self->cmd, CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS);
+        }
+    }
+}
+
+/* void scratch_window_toggle_stdout_program(ScratchWindow *self) */
+/* { */
+/*     if(self->client) */
+/*     { */
+/*         if(!self->client->data->isMinimized) */
+/*         { */
+/*             scratch_window_hide(self); */
+/*             workspace_focus_selected_window(selectedMonitor->workspace); */
+/*         } */
+/*         else */
+/*         { */
+/*             if(focusedScratchWindow == self) */
+/*             { */
+/*                 return; */
+/*             } */
+/*             else if(focusedScratchWindow) */
+/*             { */
+/*                 scratch_window_hide(focusedScratchWindow); */
+/*             } */
+/*             scratch_window_show(self); */
+/*         } */
+/*     } */
+/*     else */
+/*     { */
+/*         if(focusedScratchWindow) */
+/*         { */
+/*             if(focusedScratchWindow != self) */
+/*             { */
+/*                 scratch_window_hide(focusedScratchWindow); */
+/*             } */
+/*         } */
+
+/*         TCHAR *cmd = L"/c \"c:\\src\\simplewindowmanager2\\bin\\ListWindows.exe | bin\\RunProcess.exe --title \"SimpleMenuTitle\" --hasHeader\""; */
+/*         process_with_stdout_start(self->cmd, self->stdOutCallback); */
+/*     } */
+/* } */
+
+void scratch_window_remove(ScratchWindow *self)
+{
+    if(focusedScratchWindow == self)
+    {
+        focusedScratchWindow = NULL;
+    }
+    free(self->client);
+    self->client = NULL;
     workspace_focus_selected_window(selectedMonitor->workspace);
 }
 
@@ -2604,7 +2931,7 @@ void border_window_update(void)
 
 void border_window_paint(HWND hWnd)
 {
-    if(selectedMonitor->workspace->selected || scratchWindow)
+    if(selectedMonitor->workspace->selected || focusedScratchWindow)
     {
         PAINTSTRUCT ps;
         HDC hDC = BeginPaint(hWnd, &ps);
@@ -2628,12 +2955,23 @@ static LRESULT border_window_message_loop(HWND h, UINT msg, WPARAM wp, LPARAM lp
     {
         case WM_WINDOWPOSCHANGING:
         {
-            if(!scratchWindow)
+            if(!focusedScratchWindow)
             {
                 WINDOWPOS* windowPos = (WINDOWPOS*)lp;
                 if(selectedMonitor->workspace->selected)
                 {
                     windowPos->hwndInsertAfter = selectedMonitor->workspace->selected->data->hwnd;
+                }
+            }
+            else
+            {
+                if(focusedScratchWindow->client)
+                {
+                    WINDOWPOS* windowPos = (WINDOWPOS*)lp;
+                    if(selectedMonitor->workspace->selected)
+                    {
+                        windowPos->hwndInsertAfter = focusedScratchWindow->client->data->hwnd;
+                    }
                 }
             }
         }
@@ -2746,6 +3084,16 @@ void keybinding_create_workspace_arg(int modifiers, unsigned int key, void (*act
     keybinding_add_to_list(result);
 }
 
+void keybinding_create_scratch_arg(int modifiers, unsigned int key, void (*action) (ScratchWindow*), ScratchWindow *arg)
+{
+    KeyBinding *result = calloc(1, sizeof(KeyBinding));
+    result->modifiers = modifiers;
+    result->key = key;
+    result->scratchWindowAction = action;
+    result->scratchWindowArg = arg;
+    keybinding_add_to_list(result);
+}
+
 void start_process(CHAR *processExe, CHAR *cmdArgs, DWORD creationFlags)
 {
     STARTUPINFO si = { 0 };
@@ -2759,7 +3107,7 @@ void start_process(CHAR *processExe, CHAR *cmdArgs, DWORD creationFlags)
 
     PROCESS_INFORMATION pi = { 0 };
 
-    if( !CreateProcessA(
+    if(!CreateProcessA(
         processExe,
         cmdArgs,
         NULL,
@@ -2842,6 +3190,22 @@ void start_launcher(CHAR *cmdArgs)
     start_process(cmdLineExe2, cmdArgs, CREATE_NO_WINDOW);
 }
 
+void start_app_with_args(TCHAR *processExe, TCHAR *args)
+{
+    SHELLEXECUTEINFO ShExecInfo;
+    ShExecInfo.cbSize = sizeof(SHELLEXECUTEINFO);
+    ShExecInfo.fMask = NULL;
+    ShExecInfo.hwnd = NULL;
+    ShExecInfo.lpVerb = NULL;
+    ShExecInfo.lpFile = processExe;
+    ShExecInfo.lpParameters = args;
+    ShExecInfo.lpDirectory = NULL;
+    ShExecInfo.nShow = SW_MAXIMIZE;
+    ShExecInfo.hInstApp = NULL;
+
+    ShellExecuteEx(&ShExecInfo);
+}
+
 void start_app(TCHAR *processExe)
 {
     ShellExecute(NULL, L"open", processExe, NULL, NULL, SW_SHOWNORMAL);
@@ -2907,9 +3271,9 @@ static void CALLBACK process_with_stdout_exit_callback(void* context, BOOLEAN is
     free(launcherProcess);
 }
 
-void process_with_stdout_start(TCHAR *cmdArgs, void (*onSuccess) (CHAR *))
+void process_with_stdout_start(CHAR *cmdArgs, void (*onSuccess) (CHAR *))
 {
-    if(scratchWindow)
+    if(focusedScratchWindow)
     {
         return;
     }
@@ -2945,7 +3309,7 @@ void process_with_stdout_start(TCHAR *cmdArgs, void (*onSuccess) (CHAR *))
 
     PROCESS_INFORMATION pi = { 0 };
 
-    if(!CreateProcess(
+    if(!CreateProcessA(
         /* L"C:\\Users\\eric\\AppData\\Local\\Microsoft\\WindowsApps\\wt.exe", */
         cmdLineExe,
         cmdArgs,
@@ -3024,6 +3388,7 @@ void open_program_scratch_callback_not_elevated(char *stdOut)
 
 void open_process_list_scratch_callback(char *stdOut)
 {
+    UNREFERENCED_PARAMETER(stdOut);
 }
 
 void open_windows_scratch_exit_callback(char *stdOut)
@@ -3115,38 +3480,35 @@ void open_windows_scratch_exit_callback(char *stdOut)
 /*     return TRUE; */
 /* } */
 
-void open_windows_scratch_start(void)
-{
-    /* TCHAR *cmd = L"cmd /c powershell -c .\\list_open_windows.ps1 | fzf --with-nth 2.. --color=gutter:black --header \"ctrl-k:Kill Window, ctrl-c:Close Window, Enter:Select Window\" --bind=\"ctrl-k:execute(taskkill /f /pid {2})+reload(powershell -c .\\list_open_windows.ps1)\""; */
-    /* TCHAR *cmd = L"cmd /c powershell -NoProfile -NoLogo -c . .\\list_open_windows.ps1;run"; */
-    /* TCHAR *cmd = L"cmd /c \"bin\\ListWindows.exe | fzf --reverse --header-lines=1 --with-nth=2..\""; */
-    /* TCHAR *cmd = L" cmd /c \"c:\\src\\simplewindowmanager2\\bin\\ListWindows.exe | fzf\""; */
-    /* TCHAR *cmd = L"/c \"c:\\src\\simplewindowmanager2\\bin\\ListWindows.exe | fzf\""; */
-    TCHAR *cmd = L"/c \"c:\\src\\simplewindowmanager2\\bin\\ListWindows.exe | bin\\RunProcess.exe --title \"SimpleMenuTitle\" --hasHeader\"";
-    /* TCHAR *cmd = L""; */
-    process_with_stdout_start(cmd, open_windows_scratch_exit_callback);
-}
+/* void open_windows_scratch_start(void) */
+/* { */
+/*     TCHAR *cmd = L"/c \"c:\\src\\simplewindowmanager2\\bin\\ListWindows.exe | bin\\RunProcess.exe --title \"SimpleMenuTitle\" --hasHeader\""; */
+/*     process_with_stdout_start(cmd, open_windows_scratch_exit_callback); */
+/* } */
 
-void open_program_scratch_start(void)
-{
-    TCHAR *cmd = L"/c fd -t f -g \"*{.lnk,.exe}\" \"%USERPROFILE%\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\" \"C:\\ProgramData\\Microsoft\\Windows\\Start Menu\" \"%USERPROFILE%\\AppData\\Local\\Microsoft\\WindowsApps\" \"%USERPROFILE%\\Utilites\" | bin\\RunProcess.exe --title \"SimpleMenuTitle\"\"";
-    process_with_stdout_start(cmd, open_program_scratch_callback);
-}
+/* void search_file_sytem_start(void) */
+/* { */
+/*     TCHAR *cmd = L"cmd /c powershell -c \"$drive = (Get-PSDrive -PSProvider FileSystem).Root | bin\\RunProcess.exe --title SimpleMenuTitle; if($drive -eq $null) { exit }; bin\\RunProcess.exe --namedCommand \"\"\"ld:fd . $($drive)\\\\\"\"\" --loadCommand ld\" --title SimpleMenuTitle\""; */
+/*     process_with_stdout_start(cmd, open_program_scratch_callback_not_elevated); */
+/* } */
 
-void open_program_scratch_start_not_elevated(void)
-{
-    TCHAR *cmd = L"/c fd -t f -g \"*{.lnk,.exe}\" \"%USERPROFILE%\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\" \"C:\\ProgramData\\Microsoft\\Windows\\Start Menu\" \"%USERPROFILE%\\AppData\\Local\\Microsoft\\WindowsApps\" \"%USERPROFILE%\\Utilites\" | bin\\RunProcess.exe --title \"SimpleMenuTitle\"\"";
-    process_with_stdout_start(cmd, open_program_scratch_callback_not_elevated);
-}
+/* void open_program_scratch_start(void) */
+/* { */
+/*     TCHAR *cmd = L"/c fd -t f -g \"*{.lnk,.exe}\" \"%USERPROFILE%\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\" \"C:\\ProgramData\\Microsoft\\Windows\\Start Menu\" \"%USERPROFILE%\\AppData\\Local\\Microsoft\\WindowsApps\" \"%USERPROFILE%\\Utilites\" | bin\\RunProcess.exe --title \"SimpleMenuTitle\"\""; */
+/*     process_with_stdout_start(cmd, open_program_scratch_callback); */
+/* } */
 
-void open_process_list(void)
-{
-    /* TCHAR *cmd = L"/c \"c:\\src\\simplewindowmanager2\\bin\\ListProcesses.exe | c:\\src\\simplemenu\\bin\\SimpleMenu.exe --hasHeader\""; */
+/* void open_program_scratch_start_not_elevated(void) */
+/* { */
+/*     TCHAR *cmd = L"/c fd -t f -g \"*{.lnk,.exe}\" \"%USERPROFILE%\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\" \"C:\\ProgramData\\Microsoft\\Windows\\Start Menu\" \"%USERPROFILE%\\AppData\\Local\\Microsoft\\WindowsApps\" \"%USERPROFILE%\\Utilites\" | bin\\RunProcess.exe --title \"SimpleMenuTitle\"\""; */
+/*     process_with_stdout_start(cmd, open_program_scratch_callback_not_elevated); */
+/* } */
 
-    /* TCHAR *cmd = L"/c c:\\src\\simplemenu\\bin\\SimpleMenu.exe --loadCommand c:\\src\\SimpleWindowManager2\\bin\\ListProcesses.exe --hasHeader --bind \"powershell.exe -C '{}' -match '\\d{8}';taskkill /f /pid $Matches[0]\""; */
-    TCHAR *cmd = L"/c bin\\RunProcess.exe --title \"SimpleMenuTitle\" --hasHeader --loadCommand \"ld\" --namedCommand \"ld:c:\\src\\simplewindowmanager2\\bin\\ListProcesses.exe\" --namedCommand \"procKill:powershell.exe -C '{}' -match '\\d{8}';taskkill /f /pid $Matches[0]\" --bind \"ctl-k:procKill\"";
-    process_with_stdout_start(cmd, open_process_list_scratch_callback);
-}
+/* void open_process_list(void) */
+/* { */
+/*     TCHAR *cmd = L"/c bin\\RunProcess.exe --title \"SimpleMenuTitle\" --hasHeader --loadCommand \"ld\" --namedCommand \"ld:c:\\src\\simplewindowmanager2\\bin\\ListProcesses.exe\" --namedCommand \"procKill:powershell.exe -C '{}' -match '\\d{8}';taskkill /f /pid $Matches[0]\" --bind \"ctl-k:procKill\""; */
+/*     process_with_stdout_start(cmd, open_process_list_scratch_callback); */
+/* } */
 
 int run (void)
 {
@@ -3264,32 +3626,107 @@ int run (void)
 
     monitor_select(monitors[0]);
 
+    IWbemLocator *locator  = NULL;
+    /* IWbemServices *services = NULL; */ /* IEnumWbemClassObject *results  = NULL; */
+
+    TCHAR *resource = L"ROOT\\CIMV2";
+    /* TCHAR *language = L"WQL"; */
+    /* TCHAR *query = L"SELECT * FROM Win32_Process WHERE ProcessID = 563556"; */
+
     HRESULT hr;
 
     IMMDeviceEnumerator* dev_enumerator = NULL;
-    hr = CoInitialize(NULL);
+    hr = CoInitializeEx(0, COINIT_MULTITHREADED);
+    /* hr = CoInitialize(NULL); */
     if (FAILED(hr)) {
       return 1;
     }
 
+    hr = CoInitializeSecurity(NULL,
+            -1,
+            NULL,
+            NULL,
+            RPC_C_AUTHN_LEVEL_DEFAULT,
+            RPC_C_IMP_LEVEL_IMPERSONATE,
+            NULL,
+            EOAC_NONE,
+            NULL);
+
+    hr = CoCreateInstance(
+            &CLSID_WbemLocator,
+            0,
+            CLSCTX_INPROC_SERVER,
+            &IID_IWbemLocator,
+            (LPVOID *) &locator);
+
+    hr = locator->lpVtbl->ConnectServer(
+            locator,
+            resource,
+            NULL,
+            NULL,
+            NULL,
+            0,
+            NULL,
+            NULL,
+            &services);
+
+    /* hr = services->lpVtbl->ExecQuery(services, */
+    /*         language, */
+    /*         query, */
+    /*         WBEM_FLAG_FORWARD_ONLY | WBEM_FLAG_RETURN_IMMEDIATELY, */
+    /*         NULL, */
+    /*         &results); */
+
+    // issue a WMI query
+    /* hr = services->lpVtbl->ExecQuery(services, language, query, WBEM_FLAG_FORWARD_ONLY | WBEM_FLAG_RETURN_IMMEDIATELY, NULL, &results); */
+
+    /* if (results != NULL) { */
+    /*     IWbemClassObject *result = NULL; */
+    /*     ULONG returnedCount = 0; */
+
+    /*     // enumerate the retrieved objects */
+    /*     while((hr = results->lpVtbl->Next(results, WBEM_INFINITE, 1, &result, &returnedCount)) == S_OK) { */
+    /*         VARIANT ProcessId; */
+    /*         VARIANT CommandLine; */
+    /*         VARIANT ExecutablePath; */
+
+    /*         // access the properties */
+    /*         hr = result->lpVtbl->Get(result, L"Name", 0, &ProcessId, 0, 0); */
+    /*         hr = result->lpVtbl->Get(result, L"CommandLine", 0, &CommandLine, 0, 0); */
+    /*         hr = result->lpVtbl->Get(result, L"ExecutablePath", 0, &ExecutablePath, 0, 0); */
+
+    /*         /1* VARIANT name; *1/ */
+    /*         /1* VARIANT speed; *1/ */
+
+    /*         /1* // obtain the desired properties of the next result and print them out *1/ */
+    /*         /1* hr = result->lpVtbl->Get(result, L"ProcessId", 0, &name, 0, 0); *1/ */
+    /*         /1* hr = result->lpVtbl->Get(result, L"CommandLine", 0, &speed, 0, 0); *1/ */
+    /*         /1* hr = result->lpVtbl->Get(result, L"ExecutablePath", 0, &speed, 0, 0); *1/ */
+    /*         wprintf(L"%s, %s\r\n", ProcessId.bstrVal, CommandLine.bstrVal); */
+
+    /*         // release the current result object */
+    /*         result->lpVtbl->Release(result); */
+    /*     } */
+    /* } */
+
     networkListManager = NULL;
     hr = CoCreateInstance(
-        &CLSID_NetworkListManager,
-        NULL,
-        CLSCTX_ALL,
-        &IID_INetworkListManager,
-        &networkListManager);
+            &CLSID_NetworkListManager,
+            NULL,
+            CLSCTX_ALL,
+            &IID_INetworkListManager,
+            &networkListManager);
     if (FAILED(hr))
     {
         return 1;
     }
 
     hr = CoCreateInstance(
-      &CLSID_MMDeviceEnumerator,
-      NULL,
-      CLSCTX_ALL,
-      &IID_IMMDeviceEnumerator,
-      (void**)&dev_enumerator);
+            &CLSID_MMDeviceEnumerator,
+            NULL,
+            CLSCTX_ALL,
+            &IID_IMMDeviceEnumerator,
+            (void**)&dev_enumerator);
     if (FAILED(hr))
     {
       return 1;
@@ -3374,6 +3811,14 @@ int run (void)
 
     g_win_hook = SetWinEventHook(
         EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_FOREGROUND,
+        NULL,
+        handle_windows_event,
+        0,
+        0,
+        WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
+
+    g_win_hook = SetWinEventHook(
+        EVENT_OBJECT_NAMECHANGE, EVENT_OBJECT_NAMECHANGE,
         NULL,
         handle_windows_event,
         0,

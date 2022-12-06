@@ -108,6 +108,7 @@ typedef struct ProcessChunkJob
     fzf_pattern_t *fzfPattern;
     fzf_slab_t *fzfSlab;
     int jobNumber;
+    char* searchString;
 } ProcessChunkJob;
 
 typedef struct SearchView
@@ -132,12 +133,14 @@ struct ItemsView
     int maxDisplayItems;
     int numberOfItemsMatched;
     BOOL isReading;
+    BOOL isSearching;
     fzf_slab_t *fzfSlab;
     fzf_pattern_t *fzfPattern;
     UINT numberOfItems;
     Chunk *chunks;
     NamedCommand *namedCommands;
     NamedCommand *lastNamedCommand;
+    char* selectedString;
 };
 
 typedef struct ProcessCmdOutputJob
@@ -157,7 +160,6 @@ typedef struct MenuView
 
 void ItemsView_SetLoading(ItemsView *self);
 void ItemsView_SetDoneLoading(ItemsView *self);
-/* DWORD WINAPI ItemsView_ProcessChunkWorker2(LPVOID lpParam); */
 VOID CALLBACK ItemsView_ProcessChunkWorker2( PTP_CALLBACK_INSTANCE Instance, PVOID lpParam, PTP_WORK Work);
 void DisplayItemList_MergeIntoRight(DisplayItemList *self, DisplayItemList *resultList2);
 void ItemsView_SetHeader(ItemsView *self, char* headerLine);
@@ -185,10 +187,9 @@ DWORD WINAPI SearchView_Worker(LPVOID lpParam)
     LeaveCriticalSection(&CriticalSection);
 
     SearchView *self = menuView->searchView;
+    self->itemsView->isSearching = TRUE;
 
     ProcessChunkJob *jobs[250];
-    HANDLE completeHandles[250];
-    DWORD dwThreadIdArray[250];
     int numberOfJobs = 0;
 
     CHAR buff[BUF_LEN];
@@ -205,6 +206,7 @@ DWORD WINAPI SearchView_Worker(LPVOID lpParam)
         jobs[numberOfJobs]->chunk = currentChunk;
         jobs[numberOfJobs]->allItemsWithScores = calloc(CHUNK_SIZE, sizeof(ItemMatchResult*));
         jobs[numberOfJobs]->jobNumber = numberOfJobs;
+        jobs[numberOfJobs]->searchString = _strdup(buff);
 
         jobs[numberOfJobs]->displayItemList = calloc(1, sizeof(DisplayItemList));
         jobs[numberOfJobs]->displayItemList->items = calloc(self->itemsView->maxDisplayItems, sizeof(ItemMatchResult*));
@@ -234,13 +236,6 @@ DWORD WINAPI SearchView_Worker(LPVOID lpParam)
     }
     self->itemsView->numberOfItemsMatched = totalMatches;
 
-    CHAR oldSelectionText[BUF_LEN] = "";
-    LRESULT oldSelection = SendMessageA(self->itemsView->hwnd, LB_GETCURSEL, 0, 0);
-    if(oldSelection != LB_ERR)
-    {
-        SendMessageA(self->itemsView->hwnd, LB_GETTEXT, oldSelection, (LPARAM)oldSelectionText);
-    }
-
     SendMessageA(self->itemsView->hwnd, WM_SETREDRAW, FALSE, 0);
     SendMessageA(self->itemsView->hwnd, LB_RESETCONTENT, 0, 0);
     for(int i = 0; i < mergedDisplayItemList->count; i++)
@@ -259,16 +254,20 @@ DWORD WINAPI SearchView_Worker(LPVOID lpParam)
         {
             free(jobs[i]->allItemsWithScores[j]);
         }
+        free(jobs[i]->allItemsWithScores);
     }
 
-    if(oldSelection != LB_ERR)
-    {
-        SendMessageA(self->itemsView->hwnd, LB_SELECTSTRING, 0, oldSelectionText);
-    }
-    LRESULT lResult = SendMessageA(self->itemsView->hwnd, LB_GETCURSEL, 0, 0);
+    LRESULT lResult = SendMessageA(self->itemsView->hwnd, LB_FINDSTRING, 0, self->itemsView->selectedString);
     if(lResult == LB_ERR)
     {
-        SendMessageA(self->itemsView->hwnd, LB_SETCURSEL, 0, 0);
+        LRESULT newSelection = SendMessageA(self->itemsView->hwnd, LB_SETCURSEL, 0, 0);
+        char achBuffer[BUF_LEN];
+        SendMessageA(self->itemsView->hwnd, LB_GETTEXT, newSelection, (LPARAM)achBuffer); 
+        self->itemsView->selectedString = _strdup(achBuffer);
+    }
+    else
+    {
+        SendMessageA(self->itemsView->hwnd, LB_SETCURSEL, lResult, 0);
     }
 
     if(!g_cancelSearch)
@@ -280,14 +279,24 @@ DWORD WINAPI SearchView_Worker(LPVOID lpParam)
     {
         fzf_free_slab(jobs[i]->fzfSlab);
         fzf_free_pattern(jobs[i]->fzfPattern);
+        /* for(int j = 0; j = jobs[i]->displayItemList->count; j++) */
+        /* { */
+        /*     free(jobs[i]->displayItemList->items[j]); */
+        /* } */
         free(jobs[i]->displayItemList->items);
         free(jobs[i]);
     }
+
+    /* for(int i = 0; i < mergedDisplayItemList->count; i++) */
+    /* { */
+    /*     free(mergedDisplayItemList->items[i]); */
+    /* } */
 
     free(mergedDisplayItemList->items);
     free(mergedDisplayItemList);
 
     SetEvent(cancelSearchEvent);
+    self->itemsView->isSearching = FALSE;
     return TRUE;
 }
 
@@ -345,7 +354,7 @@ LRESULT CALLBACK Summary_MessageProcessor(HWND hWnd, UINT uMsg, WPARAM wParam, L
              GetTextExtentPoint32(hdc, countBuffer, (int)cch, &sz); 
              int offset = width - sz.cx - 2;
              TextOut(hdc, offset, 2, countBuffer, (int)cch);
-             if(menuView->itemsView->isReading)
+             if(menuView->itemsView->isReading || menuView->itemsView->isSearching)
              {
                  GetTextExtentPoint32(hdc, spinnerBuffer, 2, &sz); 
                  SetTextColor(hdc, fuzzmatchCharTextColor);
@@ -379,21 +388,27 @@ void ItemsView_SetHeader(ItemsView *self, char* headerLine)
     SetWindowTextA(self->headerHwnd, headerLine);
 }
 
-void ItemsView_SelectNext(HWND selfHwnd)
+void ItemsView_SelectNext(ItemsView *self)
 {
-    LRESULT dwSel = SendMessageA(selfHwnd, LB_GETCURSEL, 0, 0);
+    LRESULT dwSel = SendMessageA(self->hwnd, LB_GETCURSEL, 0, 0);
     if (dwSel != LB_ERR)
     {
-        SendMessageA(selfHwnd, LB_SETCURSEL, dwSel + 1, 0);
+        SendMessageA(self->hwnd, LB_SETCURSEL, dwSel + 1, 0);
+        char achBuffer[BUF_LEN];
+        SendMessageA(self->hwnd, LB_GETTEXT, dwSel + 1, (LPARAM)achBuffer); 
+        self->selectedString = _strdup(achBuffer);
     }
 }
 
-void ItemsView_SelectPrevious(HWND selfHwnd)
+void ItemsView_SelectPrevious(ItemsView *self)
 {
-    LRESULT dwSel = SendMessageA(selfHwnd, LB_GETCURSEL, 0, 0);
+    LRESULT dwSel = SendMessageA(self->hwnd, LB_GETCURSEL, 0, 0);
     if (dwSel != LB_ERR && dwSel > 0)
     {
-        SendMessageA(selfHwnd, LB_SETCURSEL, dwSel + -1, 0);
+        SendMessageA(self->hwnd, LB_SETCURSEL, dwSel + -1, 0);
+        char achBuffer[BUF_LEN];
+        SendMessageA(self->hwnd, LB_GETTEXT, dwSel + 1, (LPARAM)achBuffer); 
+        self->selectedString = _strdup(achBuffer);
     }
 }
 
@@ -512,7 +527,7 @@ void ItemsView_HandleReload(ItemsView *self)
         {
             for(int i = 0; i < currentChunk->count; i++)
             {
-                /* free(currentChunk->items[i]); */
+                free(currentChunk->items[i]);
             }
 
             Chunk *temp = currentChunk;
@@ -583,7 +598,7 @@ LRESULT CALLBACK SearchView_MessageProcessor(HWND hWnd, UINT uMsg, WPARAM wParam
     {
         if(GetAsyncKeyState(VK_CONTROL))
         {
-            ItemsView_SelectNext(self->itemsView->hwnd);
+            ItemsView_SelectNext(self->itemsView);
             return 1;
         }
     }
@@ -591,7 +606,7 @@ LRESULT CALLBACK SearchView_MessageProcessor(HWND hWnd, UINT uMsg, WPARAM wParam
     {
         if(GetAsyncKeyState(VK_CONTROL))
         {
-            ItemsView_SelectPrevious(self->itemsView->hwnd);
+            ItemsView_SelectPrevious(self->itemsView);
             return 1;
         }
     }
@@ -662,16 +677,12 @@ void DisplayItemList_TryAdd(DisplayItemList *self, ItemMatchResult *matchResult)
                     {
                         self->items[j + 1] = self->items[j];
                     }
-                    else
-                    {
-                        //TODO need to write some sort of test to make sure stuff is getting shifted correctly
-                        self->items[i] = matchResult;
-                        DisplayItemList_UpdateMinScore(self);
-                        return;
-                    }
                 }
                 self->items[i] = matchResult;
-                self->count++;
+                if(self->count < self->maxItems)
+                {
+                    self->count++;
+                }
                 DisplayItemList_UpdateMinScore(self);
                 return;
             }
@@ -686,9 +697,12 @@ void DisplayItemList_TryAdd(DisplayItemList *self, ItemMatchResult *matchResult)
         }
     }
 }
-VOID CALLBACK ItemsView_ProcessChunkWorker2( PTP_CALLBACK_INSTANCE Instance, PVOID lpParam, PTP_WORK Work)
-/* DWORD WINAPI ItemsView_ProcessChunkWorker2(LPVOID lpParam) */
+
+VOID CALLBACK ItemsView_ProcessChunkWorker2(PTP_CALLBACK_INSTANCE Instance, PVOID lpParam, PTP_WORK Work)
 {
+    UNREFERENCED_PARAMETER(Work);
+    UNREFERENCED_PARAMETER(Instance);
+
     ProcessChunkJob *job = (ProcessChunkJob*)lpParam;
     Chunk *chunk = job->chunk;
 
@@ -698,27 +712,22 @@ VOID CALLBACK ItemsView_ProcessChunkWorker2( PTP_CALLBACK_INSTANCE Instance, PVO
         if(g_cancelSearch)
         {
             return;
-            /* return TRUE; */
         }
 
-        ItemMatchResult *matchResult = calloc(1, sizeof(ItemMatchResult));
-        matchResult->item = item;
-        matchResult->score = fzf_get_score(item->text, job->fzfPattern, job->fzfSlab);
+        int score = fzf_get_score(item->text, job->fzfPattern, job->fzfSlab);
 
-        if(matchResult->score > 0)
+        if(score > 0)
         {
+            ItemMatchResult *matchResult = calloc(1, sizeof(ItemMatchResult));
+            matchResult->item = item;
+            matchResult->score = score;
             job->numberOfMatches++;
             job->allItemsWithScores[job->numberOfMatches - 1] = matchResult;
             DisplayItemList_TryAdd(job->displayItemList, matchResult);
         }
-        else
-        {
-            free(matchResult);
-        }
     }
 
     return;
-    /* return TRUE; */
 }
 
 void DisplayItemList_MergeIntoRight(DisplayItemList *self, DisplayItemList *resultList2)
@@ -956,7 +965,7 @@ void ItemsView_Move(ItemsView *self, int left, int top, int width, int height)
     MoveWindow(self->hwnd, left, listTop, width, listHeight, TRUE);
     self->height = listHeight;
     /* printf("listHeight %d\n", listHeight); */
-    self->maxDisplayItems = (listHeight - 10) / listBoxItemHeight;
+    self->maxDisplayItems = (listHeight - 3) / listBoxItemHeight;
     /* printf("maxDisplayItems %d\n", self->maxDisplayItems); */
 }
 
@@ -984,6 +993,7 @@ void MenuView_FitChildControls(MenuView *self)
             itemsTop,
             width,
             self->height - itemsTop - padding);
+    SetFocus(menuView->searchView->hwnd);
 }
 
 void MenuView_CreateChildControls(MenuView *self)
@@ -1003,7 +1013,6 @@ void MenuView_CreateChildControls(MenuView *self)
             NULL);
     SetWindowSubclass(self->searchView->hwnd, SearchView_MessageProcessor, 0, (DWORD_PTR)self->searchView);
     SendMessage(self->searchView->hwnd, WM_SETFONT, (WPARAM)font, (LPARAM)TRUE);
-    SetFocus(self->searchView->hwnd);
 
     if(menuView->itemsView->hasHeader)
     {
@@ -1055,6 +1064,7 @@ void MenuView_CreateChildControls(MenuView *self)
             IDT_LOADINGTIMER,
             75,
             (TIMERPROC) NULL);
+    SetFocus(self->searchView->hwnd);
 }
 
 LRESULT CALLBACK Menu_MessageProcessor(
@@ -1107,6 +1117,7 @@ LRESULT CALLBACK Menu_MessageProcessor(
             }
         case WM_MOVE:
             {
+                /* SetFocus(menuView->searchView->hwnd); */
                 /* MenuView_FitChildControls(menuView); */
             }
             break;
@@ -1119,6 +1130,7 @@ LRESULT CALLBACK Menu_MessageProcessor(
             switch (wParam)
             {
                 case IDT_LOADINGTIMER:
+                    SetFocus(menuView->searchView->hwnd);
                     InvalidateRect(menuView->itemsView->summaryHwnd, NULL, FALSE);
             }
         case WM_COMMAND:

@@ -6,6 +6,7 @@ typedef struct Layout Layout;
 typedef struct Bar Bar;
 typedef struct Button Button;
 typedef struct KeyBinding KeyBinding;
+typedef struct ScratchWindow ScratchWindow;
 
 typedef BOOL (*WindowFilter)(Client *client);
 
@@ -86,6 +87,17 @@ struct Client
     Workspace *workspace;
 };
 
+struct ScratchWindow
+{
+    CHAR *cmd;
+    CHAR *cmdArgs;
+    TCHAR *cmd2;
+    Client *client;
+    void (*stdOutCallback) (CHAR *);
+    WindowFilter windowFilter;
+    ScratchWindow *next;
+};
+
 struct ClientData
 {
     int x, y, w, h;
@@ -95,6 +107,7 @@ struct ClientData
     TCHAR *processImageName;
     TCHAR *className;
     TCHAR *title;
+    TCHAR *commandLine;
     BOOL isElevated;
     BOOL isMinimized;
     BOOL isScratchWindow;
@@ -159,6 +172,8 @@ struct KeyBinding
     void (*cmdAction) (TCHAR*);
     TCHAR *cmdArg;
     KeyBinding *next;
+    void (*scratchWindowAction) (ScratchWindow*);
+    ScratchWindow *scratchWindowArg;
 };
 
 extern Layout deckLayout;
@@ -174,6 +189,7 @@ Workspace* workspace_create(TCHAR *name, WindowFilter windowFilter, WCHAR* tag, 
 void keybinding_create_no_args(int modifiers, unsigned int key, void (*action) (void));
 void keybinding_create_cmd_args(int modifiers, unsigned int key, void (*action) (TCHAR*), TCHAR *cmdArg);
 void keybinding_create_workspace_arg(int modifiers, unsigned int key, void (*action) (Workspace*), Workspace *arg);
+void keybinding_create_scratch_arg(int modifiers, unsigned int key, void (*action) (ScratchWindow*), ScratchWindow *arg);
 
 void redraw_focused_window(void);
 void select_next_window(void);
@@ -181,6 +197,7 @@ void select_previous_window(void);
 void monitor_select_next(void);
 void start_launcher(TCHAR *cmdArgs);
 void start_scratch_not_elevated(TCHAR *cmdArgs);
+void scratch_window_register(CHAR *cmd, TCHAR *cmd2, CHAR *cmdArgs, void (*stdOutCallback) (CHAR *), WindowFilter windowFilter, int modifiers, int key);
 void start_app(TCHAR *processExe);
 void start_app_non_elevated(TCHAR *processExe);
 void toggle_selected_monitor_layout(void);
@@ -209,6 +226,10 @@ void client_stop_managing(void);
 void open_windows_scratch_start(void);
 void open_program_scratch_start(void);
 void open_program_scratch_start_not_elevated(void);
+void open_windows_scratch_exit_callback(char *stdOut);
+void open_program_scratch_callback_not_elevated(char *stdOut);
+void open_program_scratch_callback(char *stdOut);
+void open_process_list_scratch_callback(char *stdOut);
 void open_process_list(void);
 void quit(void);
 
