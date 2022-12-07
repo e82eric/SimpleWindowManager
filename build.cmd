@@ -12,7 +12,7 @@ LINK /DEBUG bin\ListWindows.obj /OUT:bin\ListWindows.exe
 CL /c /W4 /EHsc /nologo ListProcesses.c /DUNICODE /D_UNICODE /Zi /Fd"bin\ListProcesses.pdb" /Fo"bin\ListProcesses.obj"
 LINK /DEBUG bin\ListProcesses.obj /OUT:bin\ListProcesses.exe
 
-CL /c /W4 /EHsc /nologo fzf\fzf.c /DUNICODE /D_UNICODE /Zi /Fd"bin\fzf.pdb" /Fo"bin\fzf.obj"
+CL /c /EHsc /nologo fzf\fzf.c /DUNICODE /D_UNICODE /Zi /Fd"bin\fzf.pdb" /Fo"bin\fzf.obj"
 
 CL /c /W4 /EHsc /nologo RunProcess.c /DUNICODE /D_UNICODE /Zi /Fd"bin\RunProcess.pdb" /Fo"bin\RunProcess.obj"
 LINK /DEBUG bin\RunProcess.obj bin\fzf.obj Gdi32.lib user32.lib ComCtl32.lib /OUT:bin\RunProcess.exe

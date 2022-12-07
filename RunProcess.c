@@ -257,7 +257,7 @@ DWORD WINAPI SearchView_Worker(LPVOID lpParam)
         free(jobs[i]->allItemsWithScores);
     }
 
-    LRESULT lResult = SendMessageA(self->itemsView->hwnd, LB_FINDSTRING, 0, self->itemsView->selectedString);
+    LRESULT lResult = SendMessageA(self->itemsView->hwnd, LB_FINDSTRING, 0, (LPARAM)self->itemsView->selectedString);
     if(lResult == LB_ERR)
     {
         LRESULT newSelection = SendMessageA(self->itemsView->hwnd, LB_SETCURSEL, 0, 0);

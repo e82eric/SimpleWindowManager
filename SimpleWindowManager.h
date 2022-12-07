@@ -91,7 +91,6 @@ struct ScratchWindow
 {
     CHAR *cmd;
     CHAR *cmdArgs;
-    TCHAR *cmd2;
     Client *client;
     void (*stdOutCallback) (CHAR *);
     WindowFilter windowFilter;
@@ -119,6 +118,7 @@ struct Monitor
     int h;
     int w;
     Workspace *workspace;
+    ScratchWindow *scratchWindow;
     BOOL isHidden;
     HWND barHwnd;
     BOOL selected;
@@ -195,9 +195,9 @@ void redraw_focused_window(void);
 void select_next_window(void);
 void select_previous_window(void);
 void monitor_select_next(void);
-void start_launcher(TCHAR *cmdArgs);
-void start_scratch_not_elevated(TCHAR *cmdArgs);
-void scratch_window_register(CHAR *cmd, TCHAR *cmd2, CHAR *cmdArgs, void (*stdOutCallback) (CHAR *), WindowFilter windowFilter, int modifiers, int key);
+void start_launcher(CHAR *cmdArgs);
+void start_scratch_not_elevated(CHAR *cmdArgs);
+void scratch_window_register(CHAR *cmd,  CHAR *cmdArgs, void (*stdOutCallback) (CHAR *), WindowFilter windowFilter, int modifiers, int key);
 void start_app(TCHAR *processExe);
 void start_app_non_elevated(TCHAR *processExe);
 void toggle_selected_monitor_layout(void);

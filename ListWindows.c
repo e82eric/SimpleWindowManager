@@ -152,9 +152,9 @@ Client* clientFactory_create_from_hwnd(HWND hwnd)
     ClientData *clientData = calloc(1, sizeof(ClientData));
     clientData->hwnd = hwnd;
     clientData->processId = processId;
-    clientData->className = strdup(className);
-    clientData->processName = strdup(processShortFileName);
-    clientData->title = strdup(title);
+    clientData->className = _strdup(className);
+    clientData->processName = _strdup(processShortFileName);
+    clientData->title = _strdup(title);
     clientData->isElevated = isElevated;
     clientData->isMinimized = isMinimized;
 
@@ -190,12 +190,12 @@ static BOOL CALLBACK enum_windows_callback(HWND hwnd, LPARAM lparam)
 
     Client *client = clientFactory_create_from_hwnd(hwnd);
 
-    if(wcsstr(client->data->className, L"Progman"))
+    if(strstr(client->data->className, "Progman"))
     {
         return TRUE;
     }
 
-    if(wcsstr(client->data->title, L"ApplicationFrameWindow"))
+    if(strstr(client->data->title, "ApplicationFrameWindow"))
     {
         return TRUE;
     }
@@ -222,51 +222,22 @@ static BOOL CALLBACK enum_windows_callback(HWND hwnd, LPARAM lparam)
 
 int main (void)
 {
-    HANDLE someHandle = GetStdHandle(STD_OUTPUT_HANDLE);
     Workspace *workspace = calloc(1, sizeof(Workspace));
     EnumWindows(enum_windows_callback, (LPARAM)workspace);
 
-    DWORD Written;
     size_t cchStringSize;
     TCHAR temp[1024];
     StringCchPrintf(temp, 1024, TEXT("%-*s %-*s %-*s %s\n"), 16, L"HWND", 8, L"PID", (int)workspace->maxProcessNameLen, L"Name", L"Title");
     StringCchLength(temp, 1024, &cchStringSize);
-    /* WriteFile(someHandle, */
-    /*         (PVOID)temp, */
-    /*         (cchStringSize * sizeof(WCHAR)), */
-    /*         &Written, */
-    /*         NULL); */
     printf("%-*s %-*s %-*s %s\n", 16, "HWND", 8, "PID", (int)workspace->maxProcessNameLen, "Name", "Title");
     Client *c = workspace->clients;
     while(c)
     {
-        size_t t2;
         StringCchPrintf(temp, 1024, TEXT("%p %08d %-*s %s\n"),
             c->data->hwnd, c->data->processId, (int)workspace->maxProcessNameLen, c->data->processName, c->data->title);
         StringCchLength(temp, 1024, &cchStringSize);
         printf("%p %08d %-*s %s\n",
             c->data->hwnd, c->data->processId, (int)workspace->maxProcessNameLen, c->data->processName, c->data->title);
-
-        //
-        // Write out a Unicode BOM to ensure proper processing by text readers
-        //
-        /* WriteFile(someHandle, */
-        /*           (PVOID)&UNICODE_BOM, */
-        /*           sizeof(UNICODE_BOM), */
-        /*           &Written, */
-        /*           NULL); */
-
-        //
-        // The number of bytes to write to standard output must exclude the null
-        // terminating character.
-        //
-        /* WriteFile(someHandle, */
-        /*           (PVOID)temp, */
-        /*           (cchStringSize * sizeof(WCHAR)), */
-        /*           &Written, */
-        /*           NULL); */
-
-        /* WriteConsole(someHandle, temp, (DWORD)cchStringSize, &t2, NULL); */
         c = c->next;
     }
 
