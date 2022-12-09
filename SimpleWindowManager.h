@@ -233,6 +233,8 @@ void open_process_list_scratch_callback(char *stdOut);
 void open_process_list(void);
 void quit(void);
 
+void show_clients(void);
+void show_keybindings(void);
 /* Everything below is what Config.c must implement */
 Workspace** create_workspaces(int* outSize);
 void create_keybindings(Workspace** workspaces);

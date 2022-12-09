@@ -16,3 +16,6 @@ CL /c /EHsc /nologo fzf\fzf.c /DUNICODE /D_UNICODE /Zi /Fd"bin\fzf.pdb" /Fo"bin\
 
 CL /c /W4 /EHsc /nologo RunProcess.c /DUNICODE /D_UNICODE /Zi /Fd"bin\RunProcess.pdb" /Fo"bin\RunProcess.obj"
 LINK /DEBUG bin\RunProcess.obj bin\fzf.obj Gdi32.lib user32.lib ComCtl32.lib /OUT:bin\RunProcess.exe
+
+CL /c /W4 /EHsc /nologo StdInTest.c /DUNICODE /D_UNICODE /Zi /Fd"bin\StdInTest.pdb" /Fo"bin\StdInTest.obj"
+LINK /DEBUG bin\StdInTest.obj User32.lib /OUT:bin\StdInTest.exe

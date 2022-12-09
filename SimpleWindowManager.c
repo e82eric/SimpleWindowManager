@@ -197,6 +197,7 @@ Layout tileLayout = {
 
 Layout *headLayoutNode = &tileLayout;
 static CHAR *cmdLineExe = "C:\\Windows\\System32\\cmd.exe";
+static TCHAR *cmdLineExe2 = L"C:\\Windows\\System32\\cmd.exe";
 
 IWbemServices *services = NULL;
 
@@ -586,37 +587,30 @@ LRESULT CALLBACK handle_key_press(int code, WPARAM w, LPARAM l)
                 int modifiersPressed = 0;
                 if(GetKeyState(VK_LSHIFT) & 0x8000)
                 {
-                    /* printf("LShift pressed\n"); */
                     modifiersPressed |= LShift;
                 }
                 if(GetKeyState(VK_RSHIFT) & 0x8000)
                 {
-                    /* printf("RShift pressed\n"); */
                     modifiersPressed |= RShift;
                 }
                 if(GetKeyState(VK_LMENU) & 0x8000)
                 {
-                    /* printf("LMENU pressed\n"); */
                     modifiersPressed |= LAlt;
                 }
                 if(GetKeyState(VK_RMENU) & 0x8000)
                 {
-                    /* printf("VK_RMENU pressed\n"); */
                     modifiersPressed |= RAlt;
                 }
                 if(GetKeyState(VK_CONTROL) & 0x8000)
                 {
-                    /* printf("VK_CONTROL pressed\n"); */
                     modifiersPressed |= LCtl;
                 }
                 if(GetKeyState(VK_LWIN) & 0x8000)
                 {
-                    /* printf("VK_LWIN pressed\n"); */
                     modifiersPressed |= LWin;
                 }
                 if(GetKeyState(VK_RWIN) & 0x8000)
                 {
-                    /* printf("VK_RWIN pressed\n"); */
                     modifiersPressed |= RWin;
                 }
 
@@ -695,7 +689,6 @@ void CALLBACK handle_windows_event(
                 if(sWindow->client)
                 {
                     free(client);
-                    /* scratch_window_show(sWindow); */
                 }
                 else
                 {
@@ -850,14 +843,6 @@ void windowMnaager_remove_client_if_found_by_hwnd(HWND hwnd)
             workspace_focus_selected_window(selectedMonitor->workspace);
         }
     }
-    /* else if(scratchWindow && hwnd == scratchWindow->data->hwnd) */
-    /* { */
-    /*     client = scratchWindow; */
-    /*     if(scratchWindow->data->isScratchWindow) */
-    /*     { */
-    /*         scratch_window_remove(client); */
-    /*     } */
-    /* } */
     if(client)
     {
         free_client(client);
@@ -1523,14 +1508,6 @@ Workspace* workspace_create(TCHAR *name, WindowFilter windowFilter, WCHAR* tag, 
 void workspace_focus_selected_window(Workspace *workspace)
 {
     keybd_event(0, 0, 0, 0);
-    /* if(scratchWindow) */
-    /* { */
-    /*     if(!scratchWindow->data->isMinimized) */
-    /*     { */
-    /*         scratch_window_focus(); */
-    /*         return; */
-    /*     } */
-    /* } */
 
     if(workspace->clients && workspace->selected)
     {
@@ -3125,31 +3102,10 @@ void start_launcher(CHAR *cmdArgs)
     start_process(cmdLineExe, cmdArgs, CREATE_NO_WINDOW);
 }
 
-/* void start_app_with_args(TCHAR *processExe, TCHAR *args) */
-/* { */
-/*     SHELLEXECUTEINFO ShExecInfo; */
-/*     ShExecInfo.cbSize = sizeof(SHELLEXECUTEINFO); */
-/*     ShExecInfo.fMask = NULL; */
-/*     ShExecInfo.hwnd = NULL; */
-/*     ShExecInfo.lpVerb = NULL; */
-/*     ShExecInfo.lpFile = processExe; */
-/*     ShExecInfo.lpParameters = args; */
-/*     ShExecInfo.lpDirectory = NULL; */
-/*     ShExecInfo.nShow = SW_MAXIMIZE; */
-/*     ShExecInfo.hInstApp = NULL; */
-
-/*     ShellExecuteEx(&ShExecInfo); */
-/* } */
-
 void start_app(TCHAR *processExe)
 {
     ShellExecute(NULL, L"open", processExe, NULL, NULL, SW_SHOWNORMAL);
 }
-
-/* void start_app_non_elevated(TCHAR *processExe) */
-/* { */
-/*     start_not_elevated(processExe, NULL, CREATE_NEW_CONSOLE); */
-/* } */
 
 void launcher_fail(PTSTR lpszFunction)
 { 
@@ -3191,10 +3147,6 @@ static void CALLBACK process_with_stdout_exit_callback(void* context, BOOLEAN is
     BOOL bSuccess = ReadFile(launcherProcess->readFileHandle, chBuf, 1024, &dwRead, NULL);
     if(bSuccess)
     {
-        /* chBuf[dwRead - 1] = 0; */
-        /* char *token = strtok(chBuf, " "); */
-        /* char *token = strtok(chBuf,'\n'); */
-        /* printf( " %s\n", token ); //printing the token */
         launcherProcess->onSuccess(chBuf);
     }
 
@@ -3204,6 +3156,136 @@ static void CALLBACK process_with_stdout_exit_callback(void* context, BOOLEAN is
     CloseHandle(launcherProcess->event);
     CloseHandle(launcherProcess->wait);
     free(launcherProcess);
+}
+
+
+void process_with_stdin_start(TCHAR *cmdArgs, CHAR **lines, int numberOfLines)
+{
+    HANDLE childStdInRead = NULL;
+    HANDLE childStdInWrite = NULL;
+    HANDLE childStdOutRead = NULL;
+    HANDLE childStdOutWrite = NULL;
+
+    SECURITY_ATTRIBUTES saAttr; 
+    saAttr.nLength = sizeof(SECURITY_ATTRIBUTES); 
+    saAttr.bInheritHandle = TRUE; 
+    saAttr.lpSecurityDescriptor = NULL; 
+
+    if(!CreatePipe(&childStdOutRead, &childStdOutWrite, &saAttr, 0))
+    {
+        return;
+    }
+
+    if(!SetHandleInformation(childStdOutRead, HANDLE_FLAG_INHERIT, 0))
+    {
+        return;
+    }
+
+    if(!CreatePipe(&childStdInRead, &childStdInWrite, &saAttr, 0))
+    {
+        return;
+    }
+
+    if(!SetHandleInformation(childStdInWrite, HANDLE_FLAG_INHERIT, 0))
+    {
+        return;
+    }
+
+    PROCESS_INFORMATION piProcInfo; 
+    STARTUPINFO siStartInfo;
+    BOOL bSuccess = FALSE; 
+
+    ZeroMemory( &piProcInfo, sizeof(PROCESS_INFORMATION));
+    ZeroMemory( &siStartInfo, sizeof(STARTUPINFO));
+    siStartInfo.cb = sizeof(STARTUPINFO);
+    siStartInfo.hStdError = childStdOutWrite;
+    siStartInfo.hStdOutput = childStdOutWrite;
+    siStartInfo.hStdInput = childStdInRead;
+    siStartInfo.dwFlags |= STARTF_USESTDHANDLES;
+
+    bSuccess = CreateProcess(
+            NULL,
+            cmdArgs,
+            NULL,
+            NULL,
+            TRUE,
+            CREATE_NO_WINDOW,
+            NULL,
+            NULL,
+            &siStartInfo,
+            &piProcInfo);
+
+    if (!bSuccess)
+    {
+        return;
+    }
+    else
+    {
+        CloseHandle(piProcInfo.hProcess);
+        CloseHandle(piProcInfo.hThread);
+
+        DWORD dwWritten; 
+        for(int i = 0; i < numberOfLines; i++)
+        {
+            WriteFile(childStdInWrite, lines[i], strlen(lines[i]), &dwWritten, NULL);
+            WriteFile(childStdInWrite, "\n", 1, &dwWritten, NULL);
+        }
+
+        CloseHandle(childStdOutRead);
+        CloseHandle(childStdOutWrite);
+        CloseHandle(childStdInRead);
+        CloseHandle(childStdInWrite);
+    }
+}
+
+void show_keybindings(void)
+{
+    CHAR *bindings[256];
+
+    int numberOfBindings = 0;
+
+    KeyBinding *current = headKeyBinding;
+    while(current)
+    {
+        CHAR char2[1024];
+        if(current->cmdArg)
+        {
+            size_t size_needed = WideCharToMultiByte(CP_UTF8, 0, current->cmdArg, wcslen(current->cmdArg), NULL, 0, NULL, NULL);
+            CHAR *multiByteStr = calloc(size_needed, sizeof(CHAR));
+            WideCharToMultiByte(CP_UTF8, 0, current->cmdArg, wcslen(current->cmdArg), multiByteStr, size_needed, NULL, NULL);
+            sprintf_s(char2, 1024, "%c %s", current->key, multiByteStr);
+        }
+        else
+        {
+            sprintf_s(char2, 1024, "%c test", current->key);
+        }
+        bindings[numberOfBindings] = _wcsdup(char2);
+        numberOfBindings++;
+        current = current->next;
+    }
+
+    process_with_stdin_start(L"bin\\RunProcess.exe", bindings, numberOfBindings);
+}
+
+void show_clients(void)
+{
+    CHAR buff[1024];
+    CHAR *clientDisplayStrs[256];
+    int count;
+
+    for(int i = 0; i < numberOfWorkspaces; i++)
+    {
+        Client *currentClient = workspaces[i]->clients;
+        while(currentClient)
+        {
+            sprintf_s(buff, 1024, "%-15ls %ls", workspaces[i]->name, currentClient->data->title);
+            clientDisplayStrs[count] = strdup(buff);
+            count++;
+            currentClient = currentClient->next;
+        }
+    }
+
+    process_with_stdin_start(L"bin\\RunProcess.exe", clientDisplayStrs, count);
 }
 
 void process_with_stdout_start(CHAR *cmdArgs, void (*onSuccess) (CHAR *))
@@ -3279,7 +3361,6 @@ void process_with_stdout_start(CHAR *cmdArgs, void (*onSuccess) (CHAR *))
             CloseHandle(hEvent);
             free(launcherProcess);
             launcher_fail(TEXT("Failed to register wait handle"));
-            /* printf("register wait error = %u\n", GetLastError()); */
         }
     }
 
@@ -3547,17 +3628,13 @@ int run (void)
     monitor_select(monitors[0]);
 
     IWbemLocator *locator  = NULL;
-    /* IWbemServices *services = NULL; */ /* IEnumWbemClassObject *results  = NULL; */
 
     TCHAR *resource = L"ROOT\\CIMV2";
-    /* TCHAR *language = L"WQL"; */
-    /* TCHAR *query = L"SELECT * FROM Win32_Process WHERE ProcessID = 563556"; */
 
     HRESULT hr;
 
     IMMDeviceEnumerator* dev_enumerator = NULL;
     hr = CoInitializeEx(0, COINIT_MULTITHREADED);
-    /* hr = CoInitialize(NULL); */
     if (FAILED(hr)) {
       return 1;
     }
@@ -3589,45 +3666,6 @@ int run (void)
             NULL,
             NULL,
             &services);
-
-    /* hr = services->lpVtbl->ExecQuery(services, */
-    /*         language, */
-    /*         query, */
-    /*         WBEM_FLAG_FORWARD_ONLY | WBEM_FLAG_RETURN_IMMEDIATELY, */
-    /*         NULL, */
-    /*         &results); */
-
-    // issue a WMI query
-    /* hr = services->lpVtbl->ExecQuery(services, language, query, WBEM_FLAG_FORWARD_ONLY | WBEM_FLAG_RETURN_IMMEDIATELY, NULL, &results); */
-
-    /* if (results != NULL) { */
-    /*     IWbemClassObject *result = NULL; */
-    /*     ULONG returnedCount = 0; */
-
-    /*     // enumerate the retrieved objects */
-    /*     while((hr = results->lpVtbl->Next(results, WBEM_INFINITE, 1, &result, &returnedCount)) == S_OK) { */
-    /*         VARIANT ProcessId; */
-    /*         VARIANT CommandLine; */
-    /*         VARIANT ExecutablePath; */
-
-    /*         // access the properties */
-    /*         hr = result->lpVtbl->Get(result, L"Name", 0, &ProcessId, 0, 0); */
-    /*         hr = result->lpVtbl->Get(result, L"CommandLine", 0, &CommandLine, 0, 0); */
-    /*         hr = result->lpVtbl->Get(result, L"ExecutablePath", 0, &ExecutablePath, 0, 0); */
-
-    /*         /1* VARIANT name; *1/ */
-    /*         /1* VARIANT speed; *1/ */
-
-    /*         /1* // obtain the desired properties of the next result and print them out *1/ */
-    /*         /1* hr = result->lpVtbl->Get(result, L"ProcessId", 0, &name, 0, 0); *1/ */
-    /*         /1* hr = result->lpVtbl->Get(result, L"CommandLine", 0, &speed, 0, 0); *1/ */
-    /*         /1* hr = result->lpVtbl->Get(result, L"ExecutablePath", 0, &speed, 0, 0); *1/ */
-    /*         wprintf(L"%s, %s\r\n", ProcessId.bstrVal, CommandLine.bstrVal); */
-
-    /*         // release the current result object */
-    /*         result->lpVtbl->Release(result); */
-    /*     } */
-    /* } */
 
     networkListManager = NULL;
     hr = CoCreateInstance(

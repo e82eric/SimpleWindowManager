@@ -19,6 +19,7 @@
 #define VK_R 0x52
 #define VK_N 0x4E
 #define VK_K 0x4B
+#define VK_C 0x43
 
 #define CHUNK_SIZE 20000
 
@@ -1396,14 +1397,32 @@ int main(int argc, char* argv[])
 
     menuView = calloc(1, sizeof(MenuView));
 
+    NamedCommand *copyCommand = calloc(1, sizeof(NamedCommand));
+    copyCommand->name = "copytoclipboard";
+    copyCommand->expression = "cmd /c echo {} | clip"; 
+    copyCommand->expressionLen = 21;
+    copyCommand->hasReplacement = TRUE;
+    copyCommand->indexOfReplacement = 12;
+    copyCommand->next = NULL;
+
+    KeyBinding *copyKeyBinding = calloc(1, sizeof(KeyBinding));
+    copyKeyBinding->modifier = VK_LCONTROL;
+    copyKeyBinding->key = VK_C;
+    copyKeyBinding->command = copyCommand;
+    copyKeyBinding->next = NULL;
+
     ItemsView *itemsView = calloc(1, sizeof(ItemsView));
     itemsView->maxDisplayItems = 50;
     itemsView->hasHeader = FALSE;
     itemsView->chunks = calloc(1, sizeof(Chunk));
     itemsView->chunks->items = calloc(CHUNK_SIZE, sizeof(Item*));
+    itemsView->namedCommands = copyCommand;
+    itemsView->lastNamedCommand = copyCommand;
 
     SearchView *searchView = calloc(1, sizeof(SearchView));
     searchView->itemsView = itemsView;
+    searchView->keyBindings = copyKeyBinding;
+    searchView->lastKeyBinding = copyKeyBinding;
 
     menuView->itemsView = itemsView;
     menuView->searchView = searchView;
