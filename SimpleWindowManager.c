@@ -688,7 +688,7 @@ void CALLBACK handle_windows_event(
             {
                 if(sWindow->client)
                 {
-                    free(client);
+                    free_client(client);
                 }
                 else
                 {
@@ -801,7 +801,6 @@ void CALLBACK handle_windows_event(
                             client_move_to_location_on_screen(selectedMonitor->scratchWindow->client, hdwp);
                             EndDeferWindowPos(hdwp);
                         }
-                        free(client);
                         return;
                     }
                 }
@@ -2270,7 +2269,8 @@ void scratch_window_remove(ScratchWindow *self)
     {
         selectedMonitor->scratchWindow = NULL;
     }
-    free(self->client);
+
+    free_client(self->client);
     self->client = NULL;
     workspace_focus_selected_window(selectedMonitor->workspace);
 }
@@ -3390,8 +3390,9 @@ void process_with_stdout_start(CHAR *cmdArgs, void (*onSuccess) (CHAR *))
     CloseHandle(pi.hProcess);
     CloseHandle(pi.hThread);
 
-    CloseHandle(si.hStdInput);
-    CloseHandle(si.hStdOutput);
+    //Do not need to close these since they come from GetStdHandle
+    /* CloseHandle(si.hStdInput); */
+    /* CloseHandle(si.hStdOutput); */
 }
 
 void open_program_scratch_callback(char *stdOut)
