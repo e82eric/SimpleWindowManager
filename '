@@ -995,6 +995,7 @@ TCHAR* client_get_command_line(Client *self)
          self->data->commandLine = _wcsdup(commandLine);
     }
 
+    printf("command line: %ls\n", self->data->commandLine);
     return self->data->commandLine;
 }
 
@@ -2152,14 +2153,11 @@ ScratchWindow* scratch_windows_find_from_client(Client *client)
     ScratchWindow *current = scratchWindows;
     while(current)
     {
-        if(current->uniqueStr != NULL)
+        if(current->uniqueStr)
         {
-            if(wcsstr(client->data->title, current->uniqueStr))
+            if(wcsstr(current->uniqueStr, client->data->title))
             {
                 return current;
-            }
-            else
-            {
             }
         }
         BOOL found = current->windowFilter(client);
@@ -2174,7 +2172,7 @@ ScratchWindow* scratch_windows_find_from_client(Client *client)
     return NULL;
 }
 
-void scratch_window_register(CHAR *cmd, CHAR *cmdArgs, void (*stdOutCallback) (CHAR *), WindowFilter windowFilter, int modifiers, int key, TCHAR *uniqueStr)
+void scratch_window_register(CHAR *cmd, CHAR *cmdArgs, void (*stdOutCallback) (CHAR *), WindowFilter windowFilter, int modifiers, int key, CHAR *uniqueStr)
 {
     ScratchWindow *sWindow = calloc(1, sizeof(ScratchWindow));
     sWindow->cmd = cmd;

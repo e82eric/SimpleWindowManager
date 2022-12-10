@@ -91,6 +91,7 @@ struct ScratchWindow
 {
     CHAR *cmd;
     CHAR *cmdArgs;
+    TCHAR *uniqueStr;
     Client *client;
     void (*stdOutCallback) (CHAR *);
     WindowFilter windowFilter;
@@ -191,13 +192,15 @@ void keybinding_create_cmd_args(int modifiers, unsigned int key, void (*action) 
 void keybinding_create_workspace_arg(int modifiers, unsigned int key, void (*action) (Workspace*), Workspace *arg);
 void keybinding_create_scratch_arg(int modifiers, unsigned int key, void (*action) (ScratchWindow*), ScratchWindow *arg);
 
+TCHAR* client_get_command_line(Client *self);
+
 void redraw_focused_window(void);
 void select_next_window(void);
 void select_previous_window(void);
 void monitor_select_next(void);
 void start_launcher(CHAR *cmdArgs);
 void start_scratch_not_elevated(CHAR *cmdArgs);
-void scratch_window_register(CHAR *cmd,  CHAR *cmdArgs, void (*stdOutCallback) (CHAR *), WindowFilter windowFilter, int modifiers, int key);
+void scratch_window_register(CHAR *cmd,  CHAR *cmdArgs, void (*stdOutCallback) (CHAR *), WindowFilter windowFilter, int modifiers, int key, TCHAR* uniqueStr);
 void start_app(TCHAR *processExe);
 void start_app_non_elevated(TCHAR *processExe);
 void toggle_selected_monitor_layout(void);
