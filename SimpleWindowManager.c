@@ -22,6 +22,7 @@
 #include "SimpleWindowManager.h"
 #include <wbemidl.h>
 #include <Assert.h>
+#include <oleauto.h>
 #pragma comment(lib, "user32.lib")
 #pragma comment(lib, "Oleacc.lib")
 #pragma comment(lib, "Gdi32.lib")
@@ -31,6 +32,7 @@
 #pragma comment(lib, "Advapi32.lib")
 #pragma comment(lib, "Dwmapi.lib")
 #pragma comment(lib, "Shell32.lib")
+#pragma comment(lib, "OleAut32.lib")
 
 DEFINE_GUID(IID_IMMDeviceEnumerator, 0xa95664d2, 0x9614, 0x4f35, 0xa7, 0x46, 0xde, 0x8d, 0xb6, 0x36, 0x17, 0xe6);
 DEFINE_GUID(CLSID_MMDeviceEnumerator, 0xbcde0395, 0xe52f, 0x467c, 0x8e, 0x3d, 0xc4, 0x57, 0x92, 0x91, 0x69, 0x2e);
@@ -957,7 +959,7 @@ void windowManager_move_workspace_to_monitor(Monitor *monitor, Workspace *worksp
     EndDeferWindowPos(hdwp);
 }
 
-void get_command_line(DWORD processId, TCHAR* target)
+void get_command_line(DWORD processId, Client *target)
 {
     TCHAR *language = L"WQL";
     TCHAR queryBuff[1024];
@@ -975,10 +977,13 @@ void get_command_line(DWORD processId, TCHAR* target)
         VARIANT CommandLine;
 
         result->lpVtbl->Get(result, L"CommandLine", 0, &CommandLine, 0, 0);
-        wcscpy_s(target, 1024, CommandLine.bstrVal);
+        int commandLineLen = SysStringLen(CommandLine.bstrVal) + 1;
+        target->data->commandLine = calloc(commandLineLen, sizeof(TCHAR));
+        wcscpy_s(target->data->commandLine, commandLineLen, CommandLine.bstrVal);
 
         results->lpVtbl->Next(results, WBEM_INFINITE, 1, &result, &returnedCount);
         assert(0 == returnedCount);
+        VariantClear(&CommandLine);
 
         result->lpVtbl->Release(result);
         results->lpVtbl->Release(results);
@@ -987,11 +992,11 @@ void get_command_line(DWORD processId, TCHAR* target)
 
 TCHAR* client_get_command_line(Client *self)
 {
-    TCHAR commandLine[1024];
+    /* TCHAR commandLine[1024]; */
     if(!self->data->commandLine)
     {
-         get_command_line(self->data->processId, commandLine);
-         self->data->commandLine = _wcsdup(commandLine);
+         get_command_line(self->data->processId, self);
+         /* self->data->commandLine = _wcsdup(commandLine); */
     }
 
     return self->data->commandLine;
@@ -2499,7 +2504,7 @@ void bar_render_times(Bar *bar)
     {
         free(bar->environmentContextText);
     }
-    bar->environmentContextText =  _wcsdup(displayStr);
+    bar->environmentContextText = _wcsdup(displayStr);
     bar->environmentContextTextLen = displayStrLen;
 }
 
@@ -2888,9 +2893,9 @@ static LRESULT border_window_message_loop(HWND h, UINT msg, WPARAM wp, LPARAM lp
     {
         case WM_WINDOWPOSCHANGING:
         {
+            WINDOWPOS* windowPos = (WINDOWPOS*)lp;
             if(!selectedMonitor->scratchWindow)
             {
-                WINDOWPOS* windowPos = (WINDOWPOS*)lp;
                 if(selectedMonitor->workspace->selected)
                 {
                     windowPos->hwndInsertAfter = selectedMonitor->workspace->selected->data->hwnd;
@@ -2900,7 +2905,6 @@ static LRESULT border_window_message_loop(HWND h, UINT msg, WPARAM wp, LPARAM lp
             {
                 if(selectedMonitor->scratchWindow->client)
                 {
-                    WINDOWPOS* windowPos = (WINDOWPOS*)lp;
                     if(selectedMonitor->workspace->selected)
                     {
                         windowPos->hwndInsertAfter = selectedMonitor->scratchWindow->client->data->hwnd;
