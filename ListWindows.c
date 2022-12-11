@@ -227,16 +227,16 @@ int main (void)
 
     size_t cchStringSize;
     TCHAR temp[1024];
-    StringCchPrintf(temp, 1024, TEXT("%-*s %-*s %-*s %s\n"), 16, L"HWND", 8, L"PID", (int)workspace->maxProcessNameLen, L"Name", L"Title");
+    StringCchPrintf(temp, 1024, TEXT("%-*s %-*s %-*s %s\n"), 8, L"HWND", 8, L"PID", (int)workspace->maxProcessNameLen, L"Name", L"Title");
     StringCchLength(temp, 1024, &cchStringSize);
-    printf("%-*s %-*s %-*s %s\n", 16, "HWND", 8, "PID", (int)workspace->maxProcessNameLen, "Name", "Title");
+    printf("%-*s %-*s %-*s %s\n", 8, "HWND", 8, "PID", (int)workspace->maxProcessNameLen, "Name", "Title");
     Client *c = workspace->clients;
     while(c)
     {
-        StringCchPrintf(temp, 1024, TEXT("%p %08d %-*s %s\n"),
+        StringCchPrintf(temp, 1024, TEXT("%08x %08d %-*s %s\n"),
             c->data->hwnd, c->data->processId, (int)workspace->maxProcessNameLen, c->data->processName, c->data->title);
         StringCchLength(temp, 1024, &cchStringSize);
-        printf("%p %08d %-*s %s\n",
+        printf("%08x %08d %-*s %s\n",
             c->data->hwnd, c->data->processId, (int)workspace->maxProcessNameLen, c->data->processName, c->data->title);
         c = c->next;
     }

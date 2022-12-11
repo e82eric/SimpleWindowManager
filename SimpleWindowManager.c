@@ -996,7 +996,6 @@ TCHAR* client_get_command_line(Client *self)
     if(!self->data->commandLine)
     {
          get_command_line(self->data->processId, self);
-         /* self->data->commandLine = _wcsdup(commandLine); */
     }
 
     return self->data->commandLine;
@@ -3422,9 +3421,8 @@ void open_process_list_scratch_callback(char *stdOut)
 
 void open_windows_scratch_exit_callback(char *stdOut)
 {
-    CHAR hwndStr[16];
-    strncpy_s(hwndStr, sizeof(hwndStr), stdOut + 1, 15);
-    HWND hwnd = (HWND)strtoull(hwndStr, '\0', 16);
+    char* lastCharRead;
+    HWND hwnd = (HWND)strtol(stdOut, &lastCharRead, 16);
 
     Client *client = windowManager_find_client_in_workspaces_by_hwnd(hwnd);
     if(client)
