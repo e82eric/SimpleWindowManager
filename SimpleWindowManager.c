@@ -2165,10 +2165,13 @@ ScratchWindow* scratch_windows_find_from_client(Client *client)
             {
             }
         }
-        BOOL found = current->windowFilter(client);
-        if(found)
+        else
         {
-            return current;
+            BOOL found = current->windowFilter(client);
+            if(found)
+            {
+                return current;
+            }
         }
 
         current = current->next;
@@ -3422,7 +3425,7 @@ void open_process_list_scratch_callback(char *stdOut)
 void open_windows_scratch_exit_callback(char *stdOut)
 {
     char* lastCharRead;
-    HWND hwnd = (HWND)strtol(stdOut, &lastCharRead, 16);
+    HWND hwnd = (HWND)strtoll(stdOut, &lastCharRead, 16);
 
     Client *client = windowManager_find_client_in_workspaces_by_hwnd(hwnd);
     if(client)
