@@ -2097,15 +2097,6 @@ void scratch_window_focus(ScratchWindow *self)
     HDWP hdwp = BeginDeferWindowPos(2);
     DeferWindowPos(
             hdwp,
-            borderWindowHwnd,
-            self->client->data->hwnd,
-            self->client->data->x - 4,
-            self->client->data->y - 4,
-            self->client->data->w + 8,
-            self->client->data->h + 8,
-            SWP_SHOWWINDOW);
-    DeferWindowPos(
-            hdwp,
             self->client->data->hwnd,
             HWND_TOPMOST,
             self->client->data->x,
@@ -2113,9 +2104,17 @@ void scratch_window_focus(ScratchWindow *self)
             self->client->data->w,
             self->client->data->h,
             SWP_SHOWWINDOW);
+    DeferWindowPos(
+            hdwp,
+            borderWindowHwnd,
+            self->client->data->hwnd,
+            self->client->data->x - 4,
+            self->client->data->y - 4,
+            self->client->data->w + 8,
+            self->client->data->h + 8,
+            SWP_SHOWWINDOW);
     EndDeferWindowPos(hdwp);
     ShowWindow(self->client->data->hwnd, SW_RESTORE);
-    ShowWindow(borderWindowHwnd, SW_SHOW);
     SetForegroundWindow(borderWindowHwnd);
     SetForegroundWindow(self->client->data->hwnd);
 }
@@ -2155,7 +2154,14 @@ ScratchWindow* scratch_windows_find_from_client(Client *client)
     ScratchWindow *current = scratchWindows;
     while(current)
     {
-        if(current->uniqueStr != NULL)
+        if(current->scratchFilter)
+        {
+            if(current->scratchFilter(current, client))
+            {
+                return current;
+            }
+        }
+        else if(current->uniqueStr != NULL)
         {
             if(wcsstr(client->data->title, current->uniqueStr))
             {
@@ -2180,7 +2186,7 @@ ScratchWindow* scratch_windows_find_from_client(Client *client)
     return NULL;
 }
 
-void scratch_window_register(CHAR *cmd, CHAR *cmdArgs, void (*stdOutCallback) (CHAR *), WindowFilter windowFilter, int modifiers, int key, TCHAR *uniqueStr)
+void scratch_window_register(CHAR *cmd, CHAR *cmdArgs, void (*stdOutCallback) (CHAR *), WindowFilter windowFilter, int modifiers, int key, TCHAR *uniqueStr, ScratchFilter scratchFilter)
 {
     ScratchWindow *sWindow = calloc(1, sizeof(ScratchWindow));
     sWindow->cmd = cmd;
@@ -2188,6 +2194,7 @@ void scratch_window_register(CHAR *cmd, CHAR *cmdArgs, void (*stdOutCallback) (C
     sWindow->cmdArgs = cmdArgs;
     sWindow->windowFilter = windowFilter;
     sWindow->uniqueStr = uniqueStr;
+    sWindow->scratchFilter = scratchFilter;
     sWindow->next = NULL;
 
     if(scratchWindows == NULL)
@@ -2900,7 +2907,8 @@ static LRESULT border_window_message_loop(HWND h, UINT msg, WPARAM wp, LPARAM lp
             {
                 if(selectedMonitor->workspace->selected)
                 {
-                    windowPos->hwndInsertAfter = selectedMonitor->workspace->selected->data->hwnd;
+                    windowPos->hwndInsertAfter = HWND_BOTTOM;
+                    /* windowPos->hwndInsertAfter = selectedMonitor->workspace->selected->data->hwnd; */
                 }
             }
             else
