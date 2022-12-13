@@ -120,8 +120,6 @@ static void button_set_selected(Button *button, BOOL value);
 static void button_set_has_clients(Button *button, BOOL value);
 static void button_press_handle(Button *button);
 static void button_redraw(Button *button);
-static void bar_render_selected_window_description(Bar *bar);
-static void bar_render_times(Bar *bar);
 static void bar_apply_workspace_change(Bar *bar, Workspace *previousWorkspace, Workspace *newWorkspace);
 static void bar_trigger_paint(Bar *bar);
 static void bar_run(Bar *bar, WNDCLASSEX *barWindowClass);
@@ -160,6 +158,10 @@ Bar **bars;
 int numberOfBars;
 
 HFONT font;
+
+HPEN selectPen;
+HBRUSH barSelectedBackgroundBrush;
+HBRUSH backgroundBrush;
 HWND borderWindowHwnd;
 
 Layout deckLayout = {
@@ -268,7 +270,6 @@ void toggle_create_window_in_current_workspace(void)
     {
         if(!monitors[i]->isHidden)
         {
-            bar_render_selected_window_description(monitors[i]->bar);
         }
     }
 }
@@ -287,7 +288,6 @@ void toggle_ignore_workspace_filters(void)
     {
         if(!monitors[i]->isHidden)
         {
-            bar_render_selected_window_description(monitors[i]->bar);
         }
     }
 }
@@ -712,7 +712,10 @@ void CALLBACK handle_windows_event(
             {
                 if(!isToolWindow)
                 {
-                    SetForegroundWindow(hwnd);
+                    if(should_float_be_focused(client))
+                    {
+                        SetForegroundWindow(hwnd);
+                    }
                 }
                 free_client(client);
                 return;
@@ -1191,11 +1194,11 @@ void free_client(Client *client)
         free(client->data->processImageName);
         free(client->data->className);
         free(client->data->title);
-        free(client->data);
         if(client->data->commandLine)
         {
             free(client->data->commandLine);
         }
+        free(client->data);
     }
     free(client);
 }
@@ -1532,7 +1535,6 @@ void workspace_focus_selected_window(Workspace *workspace)
     }
     if(workspace->monitor->bar)
     {
-        bar_render_selected_window_description(workspace->monitor->bar);
         bar_trigger_paint(workspace->monitor->bar);
     }
 
@@ -2295,7 +2297,6 @@ void monitor_set_workspace_and_arrange(Workspace *workspace, Monitor *monitor, H
     workspace_arrange_windows_with_defer_handle(workspace, hdwp);
     if(!monitor->isHidden)
     {
-        bar_render_selected_window_description(monitor->bar);
         bar_trigger_paint(monitor->bar);
     }
 
@@ -2372,7 +2373,6 @@ void monitor_select(Monitor *monitor)
     {
         workspace_focus_selected_window(selectedMonitor->workspace);
     }
-    bar_render_selected_window_description(monitor->bar);
     bar_trigger_paint(monitor->bar);
     if(previousSelectedMonitor)
     {
@@ -2387,7 +2387,6 @@ void monitor_set_layout(Layout *layout)
     workspace_arrange_windows(workspace);
     if(workspace->monitor->bar)
     {
-        bar_render_selected_window_description(workspace->monitor->bar);
         bar_trigger_paint(workspace->monitor->bar);
     }
     workspace_focus_selected_window(workspace);
@@ -2403,7 +2402,7 @@ void bar_trigger_paint(Bar *bar)
     UpdateWindow(bar->hwnd);
 }
 
-void bar_render_selected_window_description(Bar *bar)
+void bar_render_selected_window_description(Bar *bar, HDC hdc, PAINTSTRUCT *ps)
 {
     TCHAR* windowRoutingMode = L"UNKNOWN";
     switch(currentWindowRoutingMode)
@@ -2419,102 +2418,115 @@ void bar_render_selected_window_description(Bar *bar)
             break;
     }
 
+    TCHAR displayStr[MAX_PATH];
+    int displayStrLen;
     if(bar->monitor->workspace->selected)
     {
         int numberOfWorkspaceClients = workspace_get_number_of_clients(bar->monitor->workspace);
         LPCWSTR processShortFileName = PathFindFileName(bar->monitor->workspace->selected->data->processImageName);
 
-        TCHAR displayStr[MAX_PATH];
-        int displayStrLen = swprintf(displayStr, MAX_PATH, L"[%ls:%d] : %ls (%d) (IsAdmin: %d) (Mode: %ls)",
+        displayStrLen = swprintf(displayStr, MAX_PATH, L"[%ls:%d] : %ls (%d) (IsAdmin: %d) (Mode: %ls)",
             bar->monitor->workspace->layout->tag,
             numberOfWorkspaceClients,
             processShortFileName,
             bar->monitor->workspace->selected->data->processId,
             bar->monitor->workspace->selected->data->isElevated,
             windowRoutingMode);
-        if(bar->windowContextText)
-        {
-            free(bar->windowContextText);
-        }
-        bar->windowContextText = _wcsdup(displayStr);
-        bar->windowContextTextLen = displayStrLen;
     }
     else
     {
         int numberOfWorkspaceClients = workspace_get_number_of_clients(bar->monitor->workspace);
 
-        TCHAR displayStr[MAX_PATH];
-        int displayStrLen = swprintf(displayStr, MAX_PATH, L"[%ls:%d] : (Mode: %ls)",
+        displayStrLen = swprintf(displayStr, MAX_PATH, L"[%ls:%d] : (Mode: %ls)",
             bar->monitor->workspace->layout->tag,
             numberOfWorkspaceClients,
             windowRoutingMode);
-        if(bar->windowContextText)
-        {
-            free(bar->windowContextText);
-        }
-        bar->windowContextText = _wcsdup(displayStr);
-        bar->windowContextTextLen = displayStrLen;
     }
+
+    DrawText(
+            hdc,
+            displayStr,
+            displayStrLen,
+            &ps->rcPaint,
+            DT_LEFT | DT_VCENTER | DT_SINGLELINE);
 }
 
-void bar_render_times(Bar *bar)
+void bar_render_times(HDC hdc, PAINTSTRUCT *ps)
 {
-    VARIANT_BOOL isInternetConnected;
-    WCHAR internetUnknown = { 0xf128 };
-    WCHAR internetUp = { 0xf817 };
-    WCHAR internetDown = { 0xf127 };
-    WCHAR internetStatusChar;
+    if(networkListManager)
+    {
+        VARIANT_BOOL isInternetConnected;
+        WCHAR internetUnknown = { 0xf128 };
+        WCHAR internetUp = { 0xf817 };
+        WCHAR internetDown = { 0xf127 };
+        WCHAR internetStatusChar;
 
-    HRESULT hr;
-    hr = INetworkListManager_get_IsConnectedToInternet(networkListManager, &isInternetConnected);
-    if(FAILED(hr))
-    {
-        internetStatusChar = internetUnknown;
-    }
-    else
-    {
-        if(isInternetConnected)
+        HRESULT hr;
+        hr = INetworkListManager_get_IsConnectedToInternet(networkListManager, &isInternetConnected);
+        if(FAILED(hr))
         {
-            internetStatusChar = internetUp;
+            internetStatusChar = internetUnknown;
         }
         else
         {
-            internetStatusChar = internetDown;
+            if(isInternetConnected)
+            {
+                internetStatusChar = internetUp;
+            }
+            else
+            {
+                internetStatusChar = internetDown;
+            }
         }
+
+        float currentVol = -1.0f;
+        IAudioEndpointVolume_GetMasterVolumeLevelScalar(
+                audioEndpointVolume,
+                &currentVol
+                );
+
+        BOOL isVolumeMuted;
+        IAudioEndpointVolume_GetMute(
+                audioEndpointVolume,
+                &isVolumeMuted);
+
+        if(isVolumeMuted)
+        {
+            currentVol = 0.0f;
+        }
+
+        int cpuUsage = get_cpu_usage();
+        int memoryPercent = get_memory_percent();
+
+        SYSTEMTIME st, lt;
+        GetSystemTime(&st);
+        GetLocalTime(&lt);
+        TCHAR displayStr[MAX_PATH];
+        int displayStrLen = swprintf(
+                displayStr,
+                MAX_PATH,
+                L"Internet: %lc | Volume: %.0f %% | Memory %ld %% | CPU: %ld %% | %04d-%02d-%02d %02d:%02d:%02d | %02d:%02d:%02d\n",
+                internetStatusChar,
+                currentVol * 100,
+                memoryPercent,
+                cpuUsage,
+                lt.wYear,
+                lt.wMonth,
+                lt.wDay,
+                lt.wHour,
+                lt.wMinute,
+                lt.wSecond,
+                st.wHour,
+                st.wMinute,
+                st.wSecond);
+
+        DrawText(
+                hdc,
+                displayStr,
+                displayStrLen,
+                &ps->rcPaint,
+                DT_RIGHT | DT_VCENTER | DT_SINGLELINE);
     }
-
-    float currentVol = -1.0f;
-    IAudioEndpointVolume_GetMasterVolumeLevelScalar(
-      audioEndpointVolume,
-      &currentVol
-    );
-
-    BOOL isVolumeMuted;
-    IAudioEndpointVolume_GetMute(
-        audioEndpointVolume,
-        &isVolumeMuted);
-
-    if(isVolumeMuted)
-    {
-        currentVol = 0.0f;
-    }
-
-    int cpuUsage = get_cpu_usage();
-    int memoryPercent = get_memory_percent();
-
-    SYSTEMTIME st, lt;
-    GetSystemTime(&st);
-    GetLocalTime(&lt);
-    TCHAR displayStr[MAX_PATH];
-    int displayStrLen = swprintf(displayStr, MAX_PATH, L"Internet: %lc | Volume: %.0f %% | Memory %ld %% | CPU: %ld %% | %04d-%02d-%02d %02d:%02d:%02d | %02d:%02d:%02d\n",
-        internetStatusChar, currentVol * 100, memoryPercent, cpuUsage, lt.wYear, lt.wMonth, lt.wDay, lt.wHour, lt.wMinute, lt.wSecond,  st.wHour, st.wMinute, st.wSecond);
-
-    if(bar->environmentContextText)
-    {
-        free(bar->environmentContextText);
-    }
-    bar->environmentContextText = _wcsdup(displayStr);
-    bar->environmentContextTextLen = displayStrLen;
 }
 
 LRESULT CALLBACK bar_message_loop(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
@@ -2568,32 +2580,20 @@ LRESULT CALLBACK bar_message_loop(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPa
                 HBRUSH brush;
                 if(msgBar->monitor->selected)
                 {
-                    brush = CreateSolidBrush(barSelectedBackgroundColor);
+                    brush = barSelectedBackgroundBrush;
                 }
                 else
                 {
-                    brush = CreateSolidBrush(barBackgroundColor);
+                    brush = backgroundBrush;
                 }
                 FillRect(hdc, &ps.rcPaint, brush);
-                DeleteObject(brush);
 
                 SelectObject(hdc, font);
                 SetTextColor(hdc, barTextColor);
                 SetBkMode(hdc, TRANSPARENT);
-                DrawText(
-                  hdc,
-                  msgBar->environmentContextText,
-                  msgBar->environmentContextTextLen,
-                  &ps.rcPaint,
-                  DT_RIGHT | DT_VCENTER | DT_SINGLELINE
-                );
-                DrawText(
-                  hdc,
-                  msgBar->windowContextText,
-                  msgBar->windowContextTextLen,
-                  &ps.rcPaint,
-                  DT_LEFT | DT_VCENTER | DT_SINGLELINE
-                );
+
+                bar_render_times(hdc, &ps);
+                bar_render_selected_window_description(msgBar, hdc, &ps);
             }
             EndPaint(hwnd, &ps); 
             return 0;
@@ -2603,7 +2603,6 @@ LRESULT CALLBACK bar_message_loop(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPa
             msgBar = (Bar *) GetWindowLongPtr(hwnd, GWLP_USERDATA);
             RECT rc;
             GetClientRect(msgBar->hwnd, &rc); 
-            bar_render_times(msgBar);
             InvalidateRect(
               msgBar->hwnd,
               &rc,
@@ -2786,7 +2785,6 @@ LRESULT CALLBACK button_message_loop(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM
             PAINTSTRUCT ps;
             HDC hdc = BeginPaint(hWnd, &ps);
             GetClientRect(hWnd, &rc);
-            HBRUSH brush = CreateSolidBrush(barBackgroundColor);
             SetBkColor(hdc, barBackgroundColor);
             if (button->isSelected)
             {
@@ -2803,7 +2801,7 @@ LRESULT CALLBACK button_message_loop(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM
                     SetTextColor(hdc, buttonWithoutWindowsTextColor);
                 }
             }
-            FillRect(hdc, &rc, brush);
+            FillRect(hdc, &rc, backgroundBrush);
             SelectObject(hdc, font);
             DrawTextW(
                 hdc,
@@ -2882,7 +2880,6 @@ void border_window_paint(HWND hWnd)
     {
         PAINTSTRUCT ps;
         HDC hDC = BeginPaint(hWnd, &ps);
-        HPEN selectPen = CreatePen(PS_SOLID, 6, RGB(250, 189, 47));
         HPEN hpenOld = SelectObject(hDC, selectPen);
         HBRUSH hbrushOld = (HBRUSH)(SelectObject(hDC, GetStockObject(NULL_BRUSH)));
         SetDCPenColor(hDC, RGB(255, 0, 0));
@@ -3332,28 +3329,28 @@ void process_with_stdout_start(CHAR *cmdArgs, void (*onSuccess) (CHAR *))
         return;
     }
 
-    HANDLE readfh;
+    HANDLE hChildStd_OUT_Rd;
+    HANDLE hChildStd_OUT_Wr;
+
+    SECURITY_ATTRIBUTES saAttr;
+    saAttr.nLength = sizeof(SECURITY_ATTRIBUTES);
+    saAttr.lpSecurityDescriptor = NULL;
+    saAttr.bInheritHandle = TRUE;
+
+    if (!CreatePipe(&hChildStd_OUT_Rd, &hChildStd_OUT_Wr, &saAttr, 0))
+    {
+        return;
+    }
+
+    if (!SetHandleInformation(hChildStd_OUT_Rd, HANDLE_FLAG_INHERIT, 0))
+    {
+        return;
+    }
 
     STARTUPINFOA si = { 0 };
     si.dwFlags =  STARTF_USESTDHANDLES;
-    si.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
-    si.hStdOutput = GetStdHandle(STD_OUTPUT_HANDLE);
-    si.hStdError = GetStdHandle(STD_ERROR_HANDLE);
-
-    SECURITY_ATTRIBUTES sattr;
-    sattr.nLength = sizeof(SECURITY_ATTRIBUTES);
-    sattr.lpSecurityDescriptor = NULL;
-    sattr.bInheritHandle = TRUE;
-
-    if(!CreatePipe(&readfh, &si.hStdOutput, &sattr, 0))
-    {
-        return;
-    }
-
-    if(SetHandleInformation(&readfh, HANDLE_FLAG_INHERIT, 0))
-    {
-        return;
-    }
+    si.hStdOutput = hChildStd_OUT_Wr;
+    si.hStdError = NULL;
 
     PROCESS_INFORMATION pi = { 0 };
 
@@ -3363,7 +3360,6 @@ void process_with_stdout_start(CHAR *cmdArgs, void (*onSuccess) (CHAR *))
         NULL,
         NULL,
         TRUE,
-        /* 0, */
         CREATE_NO_WINDOW,
         NULL,
         NULL,
@@ -3372,7 +3368,7 @@ void process_with_stdout_start(CHAR *cmdArgs, void (*onSuccess) (CHAR *))
     ) 
     {
         launcher_fail(TEXT("Failed to start process"));
-        CloseHandle(readfh);
+        CloseHandle(hChildStd_OUT_Rd);
         return;
     }
 
@@ -3380,13 +3376,13 @@ void process_with_stdout_start(CHAR *cmdArgs, void (*onSuccess) (CHAR *))
     HANDLE hEvent = CreateEvent(NULL, TRUE, FALSE, NULL);
     if (!hEvent)
     {
-        CloseHandle(readfh);
+        CloseHandle(hChildStd_OUT_Rd);
         launcher_fail(TEXT("Failed to create event"));
     }
     else
     {
         LauncherProcess *launcherProcess = calloc(1, sizeof(LauncherProcess));
-        launcherProcess->readFileHandle = readfh;
+        launcherProcess->readFileHandle = hChildStd_OUT_Rd;
         launcherProcess->processId = pi.dwProcessId;
         launcherProcess->wait = hWait;
         launcherProcess->event = hEvent;
@@ -3394,7 +3390,7 @@ void process_with_stdout_start(CHAR *cmdArgs, void (*onSuccess) (CHAR *))
 
         if (!RegisterWaitForSingleObject(&hWait, pi.hProcess, process_with_stdout_exit_callback, launcherProcess, INFINITE, WT_EXECUTEONLYONCE))
         {
-            CloseHandle(readfh);
+            CloseHandle(hChildStd_OUT_Rd);
             CloseHandle(hEvent);
             free(launcherProcess);
             launcher_fail(TEXT("Failed to register wait handle"));
@@ -3404,9 +3400,7 @@ void process_with_stdout_start(CHAR *cmdArgs, void (*onSuccess) (CHAR *))
     CloseHandle(pi.hProcess);
     CloseHandle(pi.hThread);
 
-    //Do not need to close these since they come from GetStdHandle
-    /* CloseHandle(si.hStdInput); */
-    /* CloseHandle(si.hStdOutput); */
+    CloseHandle(hChildStd_OUT_Wr);
 }
 
 void open_program_scratch_callback(char *stdOut)
@@ -3486,7 +3480,9 @@ int run (void)
     SetProcessDPIAware();
     HINSTANCE moduleHandle = GetModuleHandle(NULL);
     g_main_tid = GetCurrentThreadId ();
-
+    selectPen = CreatePen(PS_SOLID, 6, RGB(250, 189, 47));
+    barSelectedBackgroundBrush = CreateSolidBrush(barSelectedBackgroundColor);
+    backgroundBrush = CreateSolidBrush(barBackgroundColor);
     font = initalize_font();
 
     numberOfDisplayMonitors = 2;
