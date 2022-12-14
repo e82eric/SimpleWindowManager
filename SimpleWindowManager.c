@@ -106,6 +106,7 @@ static ScratchWindow* scratch_windows_find_from_hwnd(HWND hwnd);
 static void scratch_window_toggle(ScratchWindow *self);
 static void scratch_window_show(ScratchWindow *self);
 static void scratch_window_hide(ScratchWindow *self);
+static void scratch_window_run_as_menu(ScratchWindow *self);
 static Client* workspace_find_client_by_hwnd(Workspace *workspace, HWND hwnd);
 static Client* clientFactory_create_from_hwnd(HWND hwnd);
 static void client_move_to_location_on_screen(Client *client, HDWP hdwp);
@@ -2188,12 +2189,22 @@ ScratchWindow* scratch_windows_find_from_client(Client *client)
     return NULL;
 }
 
-void scratch_window_register(CHAR *cmd, CHAR *cmdArgs, void (*stdOutCallback) (CHAR *), WindowFilter windowFilter, int modifiers, int key, TCHAR *uniqueStr, ScratchFilter scratchFilter)
+void scratch_window_register(
+        CHAR *cmd,
+        CHAR *cmdArgs,
+        CHAR *runProcessMenuAdditionalParams,
+        void (*stdOutCallback) (CHAR *),
+        WindowFilter windowFilter,
+        int modifiers,
+        int key,
+        TCHAR *uniqueStr,
+        ScratchFilter scratchFilter)
 {
     ScratchWindow *sWindow = calloc(1, sizeof(ScratchWindow));
     sWindow->cmd = cmd;
     sWindow->stdOutCallback = stdOutCallback;
     sWindow->cmdArgs = cmdArgs;
+    sWindow->runProcessMenuAdditionalParams = runProcessMenuAdditionalParams;
     sWindow->windowFilter = windowFilter;
     sWindow->uniqueStr = uniqueStr;
     sWindow->scratchFilter = scratchFilter;
@@ -2268,6 +2279,11 @@ void scratch_window_toggle(ScratchWindow *self)
             }
         }
 
+        if(self->runProcessMenuAdditionalParams)
+        {
+            scratch_window_run_as_menu(self);
+            return;
+        }
         if(self->stdOutCallback)
         {
             process_with_stdout_start(self->cmd, self->stdOutCallback);
@@ -2289,6 +2305,30 @@ void scratch_window_remove(ScratchWindow *self)
     free_client(self->client);
     self->client = NULL;
     workspace_focus_selected_window(selectedMonitor->workspace);
+}
+
+void scratch_window_run_as_menu(ScratchWindow *self)
+{
+    CHAR cmdBuff[4096];
+    sprintf_s(
+            cmdBuff,
+            4096,
+            "/c bin\\RunProcess.exe --title \"Scratch Window %ls\" -x %d -y %d -w %d -h %d %s",
+            self->uniqueStr,
+            selectedMonitor->xOffset + scratchWindowsScreenPadding,
+            scratchWindowsScreenPadding,
+            selectedMonitor->w - (scratchWindowsScreenPadding * 2),
+            selectedMonitor->h - (scratchWindowsScreenPadding * 2),
+            self->runProcessMenuAdditionalParams);
+
+    if(self->stdOutCallback)
+    {
+        process_with_stdout_start(cmdBuff, self->stdOutCallback);
+    }
+    else
+    {
+        start_process(NULL, cmdBuff, CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS);
+    }
 }
 
 void monitor_set_workspace_and_arrange(Workspace *workspace, Monitor *monitor, HDWP hdwp)

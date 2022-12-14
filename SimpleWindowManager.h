@@ -92,6 +92,7 @@ struct ScratchWindow
 {
     CHAR *cmd;
     CHAR *cmdArgs;
+    CHAR *runProcessMenuAdditionalParams;
     TCHAR *uniqueStr;
     Client *client;
     void (*stdOutCallback) (CHAR *);
@@ -202,7 +203,16 @@ void select_previous_window(void);
 void monitor_select_next(void);
 void start_launcher(CHAR *cmdArgs);
 void start_scratch_not_elevated(CHAR *cmdArgs);
-void scratch_window_register(CHAR *cmd,  CHAR *cmdArgs, void (*stdOutCallback) (CHAR *), WindowFilter windowFilter, int modifiers, int key, TCHAR* uniqueStr, ScratchFilter scratchFilter);
+void scratch_window_register(
+        CHAR *cmd,
+        CHAR *cmdArgs,
+        CHAR *runProcessMenuAdditionalParams,
+        void (*stdOutCallback) (CHAR *),
+        WindowFilter windowFilter,
+        int modifiers,
+        int key,
+        TCHAR* uniqueStr,
+        ScratchFilter scratchFilter);
 void start_app(TCHAR *processExe);
 void start_app_non_elevated(TCHAR *processExe);
 void toggle_selected_monitor_layout(void);
