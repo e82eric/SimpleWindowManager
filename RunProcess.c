@@ -1389,6 +1389,7 @@ int main(int argc, char* argv[])
     UNREFERENCED_PARAMETER(argc);
     UNREFERENCED_PARAMETER(argv);
 
+    SetProcessDPIAware();
     int top = 250;
     int left = 250;
     int height = 940;

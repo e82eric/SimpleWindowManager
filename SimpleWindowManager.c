@@ -2313,7 +2313,7 @@ void scratch_window_run_as_menu(ScratchWindow *self)
     sprintf_s(
             cmdBuff,
             4096,
-            "/c bin\\RunProcess.exe --title \"Scratch Window %ls\" -x %d -y %d -w %d -h %d %s",
+            "/c bin\\RunProcess.exe --title \"Scratch Window %ls\" -l %d -t %d -w %d -h %d %s",
             self->uniqueStr,
             selectedMonitor->xOffset + scratchWindowsScreenPadding,
             scratchWindowsScreenPadding,
