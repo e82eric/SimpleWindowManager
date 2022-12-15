@@ -106,7 +106,7 @@ static ScratchWindow* scratch_windows_find_from_hwnd(HWND hwnd);
 static void scratch_window_toggle(ScratchWindow *self);
 static void scratch_window_show(ScratchWindow *self);
 static void scratch_window_hide(ScratchWindow *self);
-static void scratch_window_run_as_menu(ScratchWindow *self);
+static void scratch_window_run_as_menu(ScratchWindow *self, Monitor *monitor, int padding);
 static Client* workspace_find_client_by_hwnd(Workspace *workspace, HWND hwnd);
 static Client* clientFactory_create_from_hwnd(HWND hwnd);
 static void client_move_to_location_on_screen(Client *client, HDWP hdwp);
@@ -2189,6 +2189,28 @@ ScratchWindow* scratch_windows_find_from_client(Client *client)
     return NULL;
 }
 
+void scratch_windows_add_to_end(ScratchWindow *scratchWindow)
+{
+    if(scratchWindows == NULL)
+    {
+        scratchWindows = scratchWindow;
+    }
+    else
+    {
+        ScratchWindow *current = scratchWindows;
+        while(current)
+        {
+            if(!current->next)
+            {
+                current->next = scratchWindow;
+                break;
+            }
+
+            current = current->next;
+        }
+    }
+}
+
 void scratch_window_register(
         CHAR *cmd,
         CHAR *cmdArgs,
@@ -2210,25 +2232,40 @@ void scratch_window_register(
     sWindow->scratchFilter = scratchFilter;
     sWindow->next = NULL;
 
-    if(scratchWindows == NULL)
-    {
-        scratchWindows = sWindow;
-    }
-    else
-    {
-        ScratchWindow *current = scratchWindows;
-        while(current)
-        {
-            if(!current->next)
-            {
-                current->next = sWindow;
-                break;
-            }
+    scratch_windows_add_to_end(sWindow);
+    keybinding_create_scratch_arg(modifiers, key, scratch_window_toggle, sWindow);
+}
 
-            current = current->next;
-        }
-    }
+void scratch_menu_register2(CHAR *afterMenuCommand, void (*stdOutCallback) (CHAR *), int modifiers, int key, TCHAR *uniqueStr, void (*runFunc)(ScratchWindow*, Monitor *monitor, int))
+{
+    ScratchWindow *sWindow = calloc(1, sizeof(ScratchWindow));
+    sWindow->stdOutCallback = stdOutCallback;
+    sWindow->runProcessMenuAdditionalParams = afterMenuCommand;
+    sWindow->uniqueStr = uniqueStr;
+    sWindow->next = NULL;
+    sWindow->runFunc = runFunc;
 
+    scratch_windows_add_to_end(sWindow);
+    keybinding_create_scratch_arg(modifiers, key, scratch_window_toggle, sWindow);
+}
+
+void scratch_menu_register(CHAR *afterMenuCommand, void (*stdOutCallback) (CHAR *), int modifiers, int key, TCHAR *uniqueStr)
+{
+    scratch_menu_register2(afterMenuCommand, stdOutCallback, modifiers, key, uniqueStr, scratch_window_run_as_menu);
+}
+
+void scratch_terminal_register(CHAR *cmd, int modifiers, int key, TCHAR *uniqueStr, ScratchFilter scratchFilter)
+{
+    CHAR buff[4096];
+    sprintf_s(buff, 4096, "wt.exe --title \"Scratch Window %ls\" %s", uniqueStr, cmd);
+
+    ScratchWindow *sWindow = calloc(1, sizeof(ScratchWindow));
+    sWindow->cmd = _wcsdup(buff);
+    sWindow->uniqueStr = uniqueStr;
+    sWindow->scratchFilter = scratchFilter;
+    sWindow->next = NULL;
+
+    scratch_windows_add_to_end(sWindow);
     keybinding_create_scratch_arg(modifiers, key, scratch_window_toggle, sWindow);
 }
 
@@ -2279,9 +2316,9 @@ void scratch_window_toggle(ScratchWindow *self)
             }
         }
 
-        if(self->runProcessMenuAdditionalParams)
+        if(self->runFunc)
         {
-            scratch_window_run_as_menu(self);
+            self->runFunc(self, selectedMonitor, scratchWindowsScreenPadding);
             return;
         }
         if(self->stdOutCallback)
@@ -2307,7 +2344,7 @@ void scratch_window_remove(ScratchWindow *self)
     workspace_focus_selected_window(selectedMonitor->workspace);
 }
 
-void scratch_window_run_as_menu(ScratchWindow *self)
+void scratch_window_run_as_menu(ScratchWindow *self, Monitor *monitor, int padding)
 {
     CHAR cmdBuff[4096];
     sprintf_s(
@@ -2315,10 +2352,10 @@ void scratch_window_run_as_menu(ScratchWindow *self)
             4096,
             "/c bin\\RunProcess.exe --title \"Scratch Window %ls\" -l %d -t %d -w %d -h %d %s",
             self->uniqueStr,
-            selectedMonitor->xOffset + scratchWindowsScreenPadding,
-            scratchWindowsScreenPadding,
-            selectedMonitor->w - (scratchWindowsScreenPadding * 2),
-            selectedMonitor->h - (scratchWindowsScreenPadding * 2),
+            monitor->xOffset + padding,
+            padding,
+            monitor->w - (padding * 2),
+            monitor->h - (padding * 2),
             self->runProcessMenuAdditionalParams);
 
     if(self->stdOutCallback)
