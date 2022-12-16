@@ -58,6 +58,8 @@ struct KeyBinding
     unsigned int key;
     NamedCommand* command;
     KeyBinding* next;
+    BOOL reloadAfter;
+    BOOL isLoadCommand;
 };
 
 typedef struct ItemsView ItemsView;
@@ -69,6 +71,7 @@ struct ProcessAsyncState
     HANDLE readFileHandle;
     HANDLE processId;
     HANDLE thread;
+    BOOL reloadAfter;
 };
 
 typedef struct Item Item;
@@ -142,6 +145,9 @@ struct ItemsView
     NamedCommand *namedCommands;
     NamedCommand *lastNamedCommand;
     char* selectedString;
+    BOOL hasReturnRange;
+    int returnRangeStart;
+    int returnRangeEnd;
 };
 
 typedef struct ProcessCmdOutputJob
@@ -280,18 +286,9 @@ DWORD WINAPI SearchView_Worker(LPVOID lpParam)
     {
         fzf_free_slab(jobs[i]->fzfSlab);
         fzf_free_pattern(jobs[i]->fzfPattern);
-        /* for(int j = 0; j = jobs[i]->displayItemList->count; j++) */
-        /* { */
-        /*     free(jobs[i]->displayItemList->items[j]); */
-        /* } */
         free(jobs[i]->displayItemList->items);
         free(jobs[i]);
     }
-
-    /* for(int i = 0; i < mergedDisplayItemList->count; i++) */
-    /* { */
-    /*     free(mergedDisplayItemList->items[i]); */
-    /* } */
 
     free(mergedDisplayItemList->items);
     free(mergedDisplayItemList);
@@ -378,7 +375,14 @@ void ItemsView_HandleSelection(ItemsView *self)
         {
             CHAR str[BUF_LEN] = "";
             SendMessageA(self->hwnd, LB_GETTEXT, dwSel, (LPARAM)str);
-            printf("%s", str);
+            if(self->hasReturnRange)
+            {
+                printf("%.*s", self->returnRangeEnd, str + self->returnRangeStart);
+            }
+            else
+            {
+                printf("%s", str);
+            }
         }
     }
     PostQuitMessage(0);
@@ -413,7 +417,7 @@ void ItemsView_SelectPrevious(ItemsView *self)
     }
 }
 
-void ItemsView_StartBindingProcess(ItemsView *itemsView, char *cmdArgs, WAITORTIMERCALLBACK callback)
+void ItemsView_StartBindingProcess(ItemsView *itemsView, char *cmdArgs, WAITORTIMERCALLBACK callback, BOOL reloadAfter)
 {
     PROCESS_INFORMATION pi = { 0 };
 
@@ -444,6 +448,7 @@ void ItemsView_StartBindingProcess(ItemsView *itemsView, char *cmdArgs, WAITORTI
     processAsyncState->thread = pi.hThread;
     processAsyncState->processId = pi.hProcess;
     processAsyncState->itemsView = itemsView;
+    processAsyncState->reloadAfter = reloadAfter;
 
     BOOL result = RegisterWaitForSingleObject(
         &processAsyncState->waitHandle,
@@ -504,6 +509,15 @@ void ItemsView_StartLoadItemsFromStdIn(ItemsView *self)
             &dwThreadIdArray[0]);
 }
 
+void ItemsView_StartLoadItems_FromCommand(ItemsView *self, NamedCommand *namedCommand)
+{
+    UNREFERENCED_PARAMETER(self);
+    ProcessCmdOutputJob *job = calloc(1, sizeof(ProcessCmdOutputJob));
+    job->itemsView = menuView->itemsView;
+
+    ProcessWithItemStreamOutput_Start(namedCommand->expression, job);
+}
+
 void ItemsView_StartLoadItems(ItemsView *self)
 {
     ProcessCmdOutputJob *job = calloc(1, sizeof(ProcessCmdOutputJob));
@@ -514,6 +528,30 @@ void ItemsView_StartLoadItems(ItemsView *self)
     {
         ProcessWithItemStreamOutput_Start(command->expression, job);
     }
+}
+
+void ItemsView_ReloadFromCommand(ItemsView *self, NamedCommand *command)
+{
+    SendMessageA(menuView->itemsView->hwnd, LB_SETCURSEL, 0, -1);
+    SendMessage(menuView->itemsView->hwnd, LB_RESETCONTENT, 0, 0);;
+
+    Chunk *currentChunk = self->chunks;
+    while(currentChunk)
+    {
+        for(int i = 0; i < currentChunk->count; i++)
+        {
+            free(currentChunk->items[i]);
+        }
+
+        Chunk *temp = currentChunk;
+        currentChunk = currentChunk->next;
+        free(temp);
+    }
+
+    self->chunks = calloc(1, sizeof(Chunk));
+    self->chunks->items = calloc(CHUNK_SIZE, sizeof(Item*));
+
+    ItemsView_StartLoadItems_FromCommand(self, command);
 }
 
 void ItemsView_HandleReload(ItemsView *self)
@@ -548,13 +586,16 @@ void CALLBACK BindProcessFinishCallback(void* lpParameter, BOOLEAN isTimeout)
     UNREFERENCED_PARAMETER(isTimeout);
     ProcessAsyncState *asyncState = (ProcessAsyncState*)lpParameter;
 
-    ItemsView_HandleReload(asyncState->itemsView);
+    if(asyncState->reloadAfter)
+    {
+        ItemsView_HandleReload(asyncState->itemsView);
+    }
     UnregisterWait(asyncState->waitHandle);
     CloseHandle(asyncState->thread);
     CloseHandle(asyncState->processId);
 }
 
-void ItemsView_HandleBinding(ItemsView *self, NamedCommand *command)
+void ItemsView_HandleBinding(ItemsView *self, NamedCommand *command, BOOL reloadAfter)
 {
     if(self->namedCommands)
     {
@@ -564,8 +605,21 @@ void ItemsView_HandleBinding(ItemsView *self, NamedCommand *command)
             char newBindCommand[BUF_LEN];
             CHAR curSelStr[BUF_LEN] = "";
             SendMessageA(self->hwnd, LB_GETTEXT, dwSel, (LPARAM)curSelStr);
-            NamedCommand_Parse(newBindCommand, curSelStr, command, BUF_LEN);
-            ItemsView_StartBindingProcess(self, newBindCommand, BindProcessFinishCallback);
+
+            if(self->hasReturnRange)
+            {
+                CHAR selSubStr[BUF_LEN];
+
+                sprintf_s(selSubStr, BUF_LEN, "%.*s\n", self->returnRangeEnd, curSelStr + self->returnRangeStart);
+
+                NamedCommand_Parse(newBindCommand, selSubStr, command, BUF_LEN);
+                ItemsView_StartBindingProcess(self, newBindCommand, BindProcessFinishCallback, reloadAfter);
+            }
+            else
+            {
+                NamedCommand_Parse(newBindCommand, curSelStr, command, BUF_LEN);
+                ItemsView_StartBindingProcess(self, newBindCommand, BindProcessFinishCallback, reloadAfter);
+            }
         }
     }
 }
@@ -629,7 +683,14 @@ LRESULT CALLBACK SearchView_MessageProcessor(HWND hWnd, UINT uMsg, WPARAM wParam
             {
                 if(GetAsyncKeyState(current->modifier) & 0x8000)
                 {
-                    ItemsView_HandleBinding(self->itemsView, current->command);
+                    if(current->isLoadCommand)
+                    {
+                        ItemsView_ReloadFromCommand(self->itemsView, current->command);
+                    }
+                    else
+                    {
+                        ItemsView_HandleBinding(self->itemsView, current->command, current->reloadAfter);
+                    }
                     return 1;
                 }
             }
@@ -826,6 +887,7 @@ BOOL ProcessCmdOutJob_ProcessStream(ProcessCmdOutputJob *self)
     DWORD readBytes = 0;
 
     self->itemsView->numberOfItems = 0;
+    self->itemsView->headerSet = FALSE;
     int searchTriggerCtr = 0;
     int lineIndex = 0;
 
@@ -965,9 +1027,7 @@ void ItemsView_Move(ItemsView *self, int left, int top, int width, int height)
 
     MoveWindow(self->hwnd, left, listTop, width, listHeight, TRUE);
     self->height = listHeight;
-    /* printf("listHeight %d\n", listHeight); */
     self->maxDisplayItems = (listHeight - 3) / listBoxItemHeight;
-    /* printf("maxDisplayItems %d\n", self->maxDisplayItems); */
 }
 
 void MenuView_FitChildControls(MenuView *self)
@@ -1268,7 +1328,7 @@ NamedCommand* ItemsView_FindNamedCommandByName(ItemsView *self, char *name)
     return command;
 }
 
-void SearchView_ParseAndAddKeyBinding(SearchView *self, char *argText)
+void SearchView_ParseAndAddKeyBinding(SearchView *self, char *argText, BOOL reloadAfter, BOOL isLoadCommand)
 {
     size_t len = strlen(argText);
     const int startOfName = 6;
@@ -1288,7 +1348,7 @@ void SearchView_ParseAndAddKeyBinding(SearchView *self, char *argText)
     KeyBinding *binding = calloc(1, sizeof(KeyBinding));
     if(argText[0] == 'c' && argText[1] == 't' && argText[2] == 'l')
     {
-        binding->modifier = VK_LCONTROL;
+        binding->modifier = VK_CONTROL;
     }
     if(argText[0] == 'a' && argText[1] == 't' && argText[2] == 'l')
     {
@@ -1305,6 +1365,8 @@ void SearchView_ParseAndAddKeyBinding(SearchView *self, char *argText)
     NamedCommand *command = ItemsView_FindNamedCommandByName(self->itemsView, nameBuff);
     binding->command = command;
     binding->key = virtualKey;
+    binding->reloadAfter = reloadAfter;
+    binding->isLoadCommand = isLoadCommand;
 
     if(!self->keyBindings)
     {
@@ -1411,6 +1473,7 @@ int main(int argc, char* argv[])
     copyKeyBinding->key = VK_C;
     copyKeyBinding->command = copyCommand;
     copyKeyBinding->next = NULL;
+    copyKeyBinding->reloadAfter = FALSE;
 
     ItemsView *itemsView = calloc(1, sizeof(ItemsView));
     itemsView->maxDisplayItems = 50;
@@ -1486,7 +1549,23 @@ int main(int argc, char* argv[])
             if(i + 1 < argc)
             {
                 i++;
-                SearchView_ParseAndAddKeyBinding(searchView, argv[i]);
+                SearchView_ParseAndAddKeyBinding(searchView, argv[i], TRUE, FALSE);
+            }
+        }
+        if(strcmp(argv[i], "--bindNoReload") == 0)
+        {
+            if(i + 1 < argc)
+            {
+                i++;
+                SearchView_ParseAndAddKeyBinding(searchView, argv[i], FALSE, FALSE);
+            }
+        }
+        if(strcmp(argv[i], "--bindLoadCommand") == 0)
+        {
+            if(i + 1 < argc)
+            {
+                i++;
+                SearchView_ParseAndAddKeyBinding(searchView, argv[i], FALSE, TRUE);
             }
         }
         if(strcmp(argv[i], "--namedCommand") == 0)
@@ -1495,6 +1574,18 @@ int main(int argc, char* argv[])
             {
                 i++;
                 ItemsView_AddNamedCommand(itemsView, argv[i]);
+            }
+        }
+        if(strcmp(argv[i], "--returnRange") == 0)
+        {
+            if(i + 1 < argc)
+            {
+                i++;
+                char* startStr = strtok(argv[i], ",");
+                char* endStr = strtok(NULL, ",");
+                itemsView->hasReturnRange = TRUE;
+                itemsView->returnRangeStart = atoi(startStr);
+                itemsView->returnRangeEnd = atoi(endStr);
             }
         }
         if(strcmp(argv[i], "--hasHeader") == 0)
