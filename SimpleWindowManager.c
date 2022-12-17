@@ -645,6 +645,30 @@ LRESULT CALLBACK handle_key_press(int code, WPARAM w, LPARAM l)
     return CallNextHookEx(g_kb_hook, code, w, l);
 }
 
+BOOL isMaximized(HWND hwnd)
+{
+    WINDOWPLACEMENT windowPlacement = { 0 };
+    windowPlacement.length = sizeof(WINDOWPLACEMENT);
+    GetWindowPlacement(hwnd, &windowPlacement);
+
+    return windowPlacement.showCmd == SW_MAXIMIZE;
+}
+
+BOOL isFullscreen(HWND windowHandle)
+{
+    MONITORINFO monitorInfo = { 0 };
+    monitorInfo.cbSize = sizeof(MONITORINFO);
+    GetMonitorInfo(MonitorFromWindow(windowHandle, MONITOR_DEFAULTTOPRIMARY), &monitorInfo);
+
+    RECT windowRect;
+    GetWindowRect(windowHandle, &windowRect);
+
+    return windowRect.left == monitorInfo.rcMonitor.left
+        && windowRect.right == monitorInfo.rcMonitor.right
+        && windowRect.top == monitorInfo.rcMonitor.top
+        && windowRect.bottom == monitorInfo.rcMonitor.bottom;
+}
+
 void CALLBACK handle_windows_event(
         HWINEVENTHOOK hook,
         DWORD event,
@@ -789,6 +813,15 @@ void CALLBACK handle_windows_event(
                     }
                     else
                     {
+                        if(isFullscreen(hwnd))
+                        {
+                            return;
+                        }
+                        else if(isMaximized(hwnd))
+                        {
+                            return;
+                        }
+
                         HDWP hdwp = BeginDeferWindowPos(1);
                         client_move_to_location_on_screen(client, hdwp);
                         EndDeferWindowPos(hdwp);
@@ -803,6 +836,7 @@ void CALLBACK handle_windows_event(
                     {
                         if(!selectedMonitor->scratchWindow->client->data->isMinimized)
                         {
+
                             HDWP hdwp = BeginDeferWindowPos(1);
                             client_move_to_location_on_screen(selectedMonitor->scratchWindow->client, hdwp);
                             EndDeferWindowPos(hdwp);
