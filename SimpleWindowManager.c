@@ -983,7 +983,8 @@ void windowManager_move_workspace_to_monitor(Monitor *monitor, Workspace *worksp
 
     Workspace *selectedMonitorCurrentWorkspace = monitor->workspace;
 
-    if(currentMonitor == monitor) {
+    if(currentMonitor == monitor)
+    {
         return;
     }
 
@@ -995,6 +996,11 @@ void windowManager_move_workspace_to_monitor(Monitor *monitor, Workspace *worksp
     workspace_focus_selected_window(workspace);
     monitor_set_workspace_and_arrange(selectedMonitorCurrentWorkspace, currentMonitor, hdwp);
     EndDeferWindowPos(hdwp);
+
+    if(monitor->scratchWindow)
+    {
+        scratch_window_hide(monitor->scratchWindow);
+    }
 }
 
 void get_command_line(DWORD processId, Client *target)
