@@ -148,6 +148,7 @@ static INetworkListManager *networkListManager;
 static Monitor *selectedMonitor = NULL;
 static Monitor *hiddenWindowMonitor = NULL;
 
+HWND focusHWNDToIgnore = NULL;
 int numberOfWorkspaces;
 static Workspace **workspaces;
 
@@ -855,11 +856,15 @@ void CALLBACK handle_windows_event(
             Client* client = windowManager_find_client_in_workspaces_by_hwnd(hwnd);
             if(client)
             {
-                if(selectedMonitor->workspace->selected != client)
+                if(focusHWNDToIgnore == hwnd)
+                {
+                }
+                else if(selectedMonitor->workspace->selected != client)
                 {
                     client->workspace->selected = client;
                     monitor_select(client->workspace->monitor);
                 }
+                focusHWNDToIgnore = NULL;
             }
         }
     }
@@ -988,6 +993,11 @@ void windowManager_move_workspace_to_monitor(Monitor *monitor, Workspace *worksp
         return;
     }
 
+    if(monitor->scratchWindow)
+    {
+        scratch_window_hide(monitor->scratchWindow);
+    }
+
     int workspaceNumberOfClients = workspace_get_number_of_clients(workspace);
     int selectedMonitorCurrentWorkspaceNumberOfClients = workspace_get_number_of_clients(selectedMonitorCurrentWorkspace);
 
@@ -996,11 +1006,6 @@ void windowManager_move_workspace_to_monitor(Monitor *monitor, Workspace *worksp
     workspace_focus_selected_window(workspace);
     monitor_set_workspace_and_arrange(selectedMonitorCurrentWorkspace, currentMonitor, hdwp);
     EndDeferWindowPos(hdwp);
-
-    if(monitor->scratchWindow)
-    {
-        scratch_window_hide(monitor->scratchWindow);
-    }
 }
 
 void get_command_line(DWORD processId, Client *target)
@@ -1566,11 +1571,17 @@ void workspace_focus_selected_window(Workspace *workspace)
 {
     keybd_event(0, 0, 0, 0);
 
+    if(workspace->monitor->scratchWindow)
+    {
+        return;
+    }
+
     if(workspace->clients && workspace->selected)
     {
         HWND focusedHwnd = GetForegroundWindow();
         if(workspace->selected->data->hwnd != focusedHwnd)
         {
+            focusHWNDToIgnore = focusedHwnd;
             SetForegroundWindow(workspace->selected->data->hwnd);
         }
     }
