@@ -7,7 +7,7 @@
 (Most features and concepts are copied from these or DWM or I3)
 
 ## Overview
-My general feeling having tried to a bunch of different tiling managers for Microsoft Windows, is that trying to layout every window that gets created by Windows would be a endless battle against all of Windows's different intricasies.  So I created this window manager to target my specific workflow where 99% of the windows that I create come from a few different applications (browser, terminal, IDE, chat, email) and to create rules to manage those applications within workspaces and allow easy movement and navigation with common key bindings and to let any other windows that get created float.
+My general feeling having tried to a bunch of different tiling managers for Microsoft Windows, is that trying to layout every window that gets created by Windows is a endless battle against all of Windows's different intricasies.  So I created this window manager to target my specific workflow where 99% of the windows that I create come from a few different applications (browser, terminal, IDE, chat, email) and to create rules to manage those applications within workspaces and allow easy movement and navigation with common key bindings and to let any other windows that get created float.
 
 ## Features
 - Workspaces
@@ -17,7 +17,9 @@ My general feeling having tried to a bunch of different tiling managers for Micr
   - Monacle
   - Deck (hybrid of Tile and Monacle where the master position is fixed and the windows in the secondary position can be cycled through) 
 - Scratch Windows
-  - Simple short lived terminal application that mapped to key bindings.  (My 2 most common are fzf commands for launching applications and killing processes)
+  - Simple short lived terminal application mapped to key bindings.
+- Scratch Menus
+  - A really simple generic menu/filter is included that works similar to fzf and can be bound to keybindings
 
 ## Some things to note
 - Workspace rules and definitions are set in Config.c
@@ -41,6 +43,8 @@ My general feeling having tried to a bunch of different tiling managers for Micr
 | ALT+[1-9] | Select workspace by number|
 | ALT+Shift+[1-9] | Move selected window to workspace by number |
 | ALT+V         | Toggle Windows Taskbar |
+| ALT+A         | Toggle mode where all windows that match a filter are added to the current workspace |
+| ALT+Z         | Toggle mode where all windows are added to current workspace |
 
 Tile Layout
 
