@@ -709,6 +709,14 @@ void CALLBACK handle_windows_event(
                 return;
             }
 
+            Client *existingClient = windowManager_find_client_in_workspaces_by_hwnd(hwnd);
+            if(existingClient)
+            {
+                workspace_arrange_windows(existingClient->workspace);
+                workspace_focus_selected_window(existingClient->workspace);
+                return;
+            }
+
             Client *client = clientFactory_create_from_hwnd(hwnd);
 
             ScratchWindow *sWindow = scratch_windows_find_from_client(client);
@@ -724,13 +732,6 @@ void CALLBACK handle_windows_event(
                     scratch_window_add(sWindow);
                     scratch_window_show(sWindow);
                 }
-                return;
-            }
-            Client *existingClient = windowManager_find_client_in_workspaces_by_hwnd(hwnd);
-            if(existingClient)
-            {
-                workspace_arrange_windows(existingClient->workspace);
-                workspace_focus_selected_window(existingClient->workspace);
                 return;
             }
 
@@ -826,23 +827,6 @@ void CALLBACK handle_windows_event(
                         HDWP hdwp = BeginDeferWindowPos(1);
                         client_move_to_location_on_screen(client, hdwp);
                         EndDeferWindowPos(hdwp);
-                    }
-                }
-            }
-            else
-            {
-                if(selectedMonitor->scratchWindow)
-                {
-                    if(selectedMonitor->scratchWindow->client)
-                    {
-                        if(!selectedMonitor->scratchWindow->client->data->isMinimized)
-                        {
-
-                            HDWP hdwp = BeginDeferWindowPos(1);
-                            client_move_to_location_on_screen(selectedMonitor->scratchWindow->client, hdwp);
-                            EndDeferWindowPos(hdwp);
-                        }
-                        return;
                     }
                 }
             }
@@ -1041,7 +1025,6 @@ void get_command_line(DWORD processId, Client *target)
 
 TCHAR* client_get_command_line(Client *self)
 {
-    /* TCHAR commandLine[1024]; */
     if(!self->data->commandLine)
     {
          get_command_line(self->data->processId, self);
