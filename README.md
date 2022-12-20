@@ -20,6 +20,8 @@ My general feeling having tried to a bunch of different tiling managers for Micr
   - Simple short lived terminal application mapped to key bindings.
 - Scratch Menus
   - A really simple generic menu/filter is included that works similar to fzf and can be bound to keybindings
+- KeyBindings
+  - Map keybindings to arbitrary commands
 
 ## Some things to note
 - Workspace rules and definitions are set in Config.c
