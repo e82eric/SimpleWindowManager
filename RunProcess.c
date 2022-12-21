@@ -1581,8 +1581,9 @@ int main(int argc, char* argv[])
             if(i + 1 < argc)
             {
                 i++;
-                char* startStr = strtok(argv[i], ",");
-                char* endStr = strtok(NULL, ",");
+                char *nextToken = NULL;
+                char* startStr = strtok_s(argv[i], ",", &nextToken);
+                char* endStr = strtok_s(NULL, ",", &nextToken);
                 itemsView->hasReturnRange = TRUE;
                 itemsView->returnRangeStart = atoi(startStr);
                 itemsView->returnRangeEnd = atoi(endStr);

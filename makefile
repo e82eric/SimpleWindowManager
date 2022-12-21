@@ -29,4 +29,4 @@ runprocess:
 
 publish:
 	rd /s /q $(publishdir)
-	xcopy $(outdir) $(publishdir) /E
+	xcopy $(outdir) $(publishdir)\ /E

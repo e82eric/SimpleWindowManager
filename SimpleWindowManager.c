@@ -368,41 +368,86 @@ void redraw_focused_window(void)
     RedrawWindow(foregroundHwnd, NULL, NULL, RDW_ERASE | RDW_INVALIDATE);
 }
 
+void move_focused_window_right(void)
+{
+    if(selectedMonitor->scratchWindow)
+    {
+        return;
+    }
+    HWND foregroundHwnd = GetForegroundWindow();
+    Client* existingClient = windowManager_find_client_in_workspaces_by_hwnd(foregroundHwnd);
+    if(!existingClient)
+    {
+        float_window_move_right(foregroundHwnd);
+    }
+    else
+    {
+        workspace_increase_master_width_selected_monitor();
+    }
+}
+
+void move_focused_window_left(void)
+{
+    if(selectedMonitor->scratchWindow)
+    {
+        return;
+    }
+    HWND foregroundHwnd = GetForegroundWindow();
+    Client* existingClient = windowManager_find_client_in_workspaces_by_hwnd(foregroundHwnd);
+    if(!existingClient)
+    {
+        float_window_move_left(foregroundHwnd);
+    }
+    else
+    {
+        workspace_decrease_master_width_selected_monitor();
+    }
+}
+
+void move_focused_window_up(void)
+{
+    if(selectedMonitor->scratchWindow)
+    {
+        return;
+    }
+    HWND foregroundHwnd = GetForegroundWindow();
+    Client* existingClient = windowManager_find_client_in_workspaces_by_hwnd(foregroundHwnd);
+    if(!existingClient)
+    {
+        float_window_move_up(foregroundHwnd);
+    }
+}
+
+void move_focused_window_down(void)
+{
+    if(selectedMonitor->scratchWindow)
+    {
+        return;
+    }
+    HWND foregroundHwnd = GetForegroundWindow();
+    Client* existingClient = windowManager_find_client_in_workspaces_by_hwnd(foregroundHwnd);
+    if(!existingClient)
+    {
+        float_window_move_down(foregroundHwnd);
+    }
+}
+
 void select_next_window(void)
 {
     if(selectedMonitor->scratchWindow)
     {
         return;
     }
-    /* HWND foregroundHwnd = GetForegroundWindow(); */
-    /* Client* existingClient = windowManager_find_client_in_workspaces_by_hwnd(foregroundHwnd); */
-    /* if(!existingClient) */
-    /* { */
-    /*     float_window_move_down(foregroundHwnd); */
-    /* } */
-    /* else */
-    /* { */
-        Workspace *workspace = selectedMonitor->workspace;
-        workspace->layout->select_next_window(workspace);
-        workspace_focus_selected_window(workspace);
-    /* } */
+    Workspace *workspace = selectedMonitor->workspace;
+    workspace->layout->select_next_window(workspace);
+    workspace_focus_selected_window(workspace);
 }
 
 void select_previous_window(void)
 {
-    /* HWND foregroundHwnd = GetForegroundWindow(); */
-    /* Client* existingClient = windowManager_find_client_in_workspaces_by_hwnd(foregroundHwnd); */
-    /* if(!existingClient) */
-    /* { */
-    /*     float_window_move_up(foregroundHwnd); */
-    /* } */
-    /* else */
-    /* { */
-        Workspace *workspace = selectedMonitor->workspace;
-        workspace->layout->select_previous_window(workspace);
-        workspace_focus_selected_window(workspace);
-        /* workspace_decrease_master_width(selectedMonitor->workspace); */
-    /* } */
+    Workspace *workspace = selectedMonitor->workspace;
+    workspace->layout->select_previous_window(workspace);
+    workspace_focus_selected_window(workspace);
 }
 
 void toggle_selected_monitor_layout(void)
@@ -817,6 +862,23 @@ void CALLBACK handle_windows_event(
                         HDWP hdwp = BeginDeferWindowPos(1);
                         client_move_to_location_on_screen(client, hdwp);
                         EndDeferWindowPos(hdwp);
+                    }
+                }
+            }
+            else
+            {
+                if(selectedMonitor->scratchWindow)
+                {
+                    if(selectedMonitor->scratchWindow->client)
+                    {
+                        if(!selectedMonitor->scratchWindow->client->data->isMinimized)
+                        {
+
+                            HDWP hdwp = BeginDeferWindowPos(1);
+                            client_move_to_location_on_screen(selectedMonitor->scratchWindow->client, hdwp);
+                            EndDeferWindowPos(hdwp);
+                        }
+                        return;
                     }
                 }
             }
@@ -2284,7 +2346,7 @@ void scratch_terminal_register(CHAR *cmd, int modifiers, int key, TCHAR *uniqueS
     sprintf_s(buff, 4096, "wt.exe --title \"Scratch Window %ls\" %s", uniqueStr, cmd);
 
     ScratchWindow *sWindow = calloc(1, sizeof(ScratchWindow));
-    sWindow->cmd = _wcsdup(buff);
+    sWindow->cmd = _strdup(buff);
     sWindow->uniqueStr = uniqueStr;
     sWindow->scratchFilter = scratchFilter;
     sWindow->next = NULL;
@@ -2785,7 +2847,7 @@ void bar_run(Bar *bar, WNDCLASSEX *barWindowClass)
     SetTimer(
         hwnd,
         0,
-        1000,
+        1500,
         (TIMERPROC) NULL);
 }
 
@@ -3293,7 +3355,6 @@ static void CALLBACK process_with_stdout_exit_callback(void* context, BOOLEAN is
     free(launcherProcess);
 }
 
-
 void process_with_stdin_start(TCHAR *cmdArgs, CHAR **lines, int numberOfLines)
 {
     HANDLE childStdInRead = NULL;
@@ -3362,7 +3423,7 @@ void process_with_stdin_start(TCHAR *cmdArgs, CHAR **lines, int numberOfLines)
         DWORD dwWritten; 
         for(int i = 0; i < numberOfLines; i++)
         {
-            WriteFile(childStdInWrite, lines[i], strlen(lines[i]), &dwWritten, NULL);
+            WriteFile(childStdInWrite, lines[i], (DWORD)strlen(lines[i]), &dwWritten, NULL);
             WriteFile(childStdInWrite, "\n", 1, &dwWritten, NULL);
         }
 
@@ -3373,55 +3434,55 @@ void process_with_stdin_start(TCHAR *cmdArgs, CHAR **lines, int numberOfLines)
     }
 }
 
-void show_keybindings(void)
-{
-    CHAR *bindings[256];
+/* void show_keybindings(void) */
+/* { */
+/*     CHAR *bindings[256]; */
 
-    int numberOfBindings = 0;
+/*     int numberOfBindings = 0; */
 
-    KeyBinding *current = headKeyBinding;
-    while(current)
-    {
-        CHAR char2[1024];
-        if(current->cmdArg)
-        {
-            size_t size_needed = WideCharToMultiByte(CP_UTF8, 0, current->cmdArg, wcslen(current->cmdArg), NULL, 0, NULL, NULL);
-            CHAR *multiByteStr = calloc(size_needed, sizeof(CHAR));
-            WideCharToMultiByte(CP_UTF8, 0, current->cmdArg, wcslen(current->cmdArg), multiByteStr, size_needed, NULL, NULL);
-            sprintf_s(char2, 1024, "%c %s", current->key, multiByteStr);
-        }
-        else
-        {
-            sprintf_s(char2, 1024, "%c test", current->key);
-        }
-        bindings[numberOfBindings] = _wcsdup(char2);
-        numberOfBindings++;
-        current = current->next;
-    }
+/*     KeyBinding *current = headKeyBinding; */
+/*     while(current) */
+/*     { */
+/*         CHAR char2[1024]; */
+/*         if(current->cmdArg) */
+/*         { */
+/*             size_t size_needed = WideCharToMultiByte(CP_UTF8, 0, current->cmdArg, wcslen(current->cmdArg), NULL, 0, NULL, NULL); */
+/*             CHAR *multiByteStr = calloc(size_needed, sizeof(CHAR)); */
+/*             WideCharToMultiByte(CP_UTF8, 0, current->cmdArg, wcslen(current->cmdArg), multiByteStr, size_needed, NULL, NULL); */
+/*             sprintf_s(char2, 1024, "%c %s", current->key, multiByteStr); */
+/*         } */
+/*         else */
+/*         { */
+/*             sprintf_s(char2, 1024, "%c test", current->key); */
+/*         } */
+/*         bindings[numberOfBindings] = _wcsdup(char2); */
+/*         numberOfBindings++; */
+/*         current = current->next; */
+/*     } */
 
-    process_with_stdin_start(L"bin\\RunProcess.exe", bindings, numberOfBindings);
-}
+/*     process_with_stdin_start(L"bin\\RunProcess.exe", bindings, numberOfBindings); */
+/* } */
 
-void show_clients(void)
-{
-    CHAR buff[1024];
-    CHAR *clientDisplayStrs[256];
-    int count = 0;
+/* void show_clients(void) */
+/* { */
+/*     CHAR buff[1024]; */
+/*     CHAR *clientDisplayStrs[256]; */
+/*     int count = 0; */
 
-    for(int i = 0; i < numberOfWorkspaces; i++)
-    {
-        Client *currentClient = workspaces[i]->clients;
-        while(currentClient)
-        {
-            sprintf_s(buff, 1024, "%-15ls %ls", workspaces[i]->name, currentClient->data->title);
-            clientDisplayStrs[count] = strdup(buff);
-            count++;
-            currentClient = currentClient->next;
-        }
-    }
+/*     for(int i = 0; i < numberOfWorkspaces; i++) */
+/*     { */
+/*         Client *currentClient = workspaces[i]->clients; */
+/*         while(currentClient) */
+/*         { */
+/*             sprintf_s(buff, 1024, "%-15ls %ls", workspaces[i]->name, currentClient->data->title); */
+/*             clientDisplayStrs[count] = strdup(buff); */
+/*             count++; */
+/*             currentClient = currentClient->next; */
+/*         } */
+/*     } */
 
-    process_with_stdin_start(L"bin\\RunProcess.exe", clientDisplayStrs, count);
-}
+/*     process_with_stdin_start(L"bin\\RunProcess.exe", clientDisplayStrs, count); */
+/* } */
 
 void process_with_stdout_start(CHAR *cmdArgs, void (*onSuccess) (CHAR *))
 {

@@ -191,6 +191,10 @@ void create_keybindings(Workspace** workspaces)
     keybinding_create_no_args(LAlt, VK_N, arrange_clients_in_selected_workspace);
     keybinding_create_no_args(LAlt, VK_L, workspace_increase_master_width_selected_monitor);
     keybinding_create_no_args(LAlt, VK_H, workspace_decrease_master_width_selected_monitor);
+    keybinding_create_no_args(LAlt | LShift, VK_RIGHT, move_focused_window_right);
+    keybinding_create_no_args(LAlt | LShift, VK_LEFT, move_focused_window_left);
+    keybinding_create_no_args(LAlt | LShift, VK_UP, move_focused_window_up);
+    keybinding_create_no_args(LAlt | LShift, VK_DOWN, move_focused_window_down);
     keybinding_create_no_args(LAlt, VK_RETURN, move_focused_window_to_master);
     keybinding_create_no_args(LShift | LAlt, VK_DOWN, mimimize_focused_window);
 
