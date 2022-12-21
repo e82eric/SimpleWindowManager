@@ -2322,7 +2322,7 @@ void scratch_window_register(
     keybinding_create_scratch_arg(modifiers, key, scratch_window_toggle, sWindow);
 }
 
-void scratch_menu_register2(CHAR *afterMenuCommand, void (*stdOutCallback) (CHAR *), int modifiers, int key, TCHAR *uniqueStr, void (*runFunc)(ScratchWindow*, Monitor *monitor, int))
+void scratch_menu_register_command_from_function(CHAR *afterMenuCommand, void (*stdOutCallback) (CHAR *), int modifiers, int key, TCHAR *uniqueStr, void (*runFunc)(ScratchWindow*, Monitor *monitor, int))
 {
     ScratchWindow *sWindow = calloc(1, sizeof(ScratchWindow));
     sWindow->stdOutCallback = stdOutCallback;
@@ -2337,7 +2337,7 @@ void scratch_menu_register2(CHAR *afterMenuCommand, void (*stdOutCallback) (CHAR
 
 void scratch_menu_register(CHAR *afterMenuCommand, void (*stdOutCallback) (CHAR *), int modifiers, int key, TCHAR *uniqueStr)
 {
-    scratch_menu_register2(afterMenuCommand, stdOutCallback, modifiers, key, uniqueStr, scratch_window_run_as_menu);
+    scratch_menu_register_command_from_function(afterMenuCommand, stdOutCallback, modifiers, key, uniqueStr, scratch_window_run_as_menu);
 }
 
 void scratch_terminal_register(CHAR *cmd, int modifiers, int key, TCHAR *uniqueStr, ScratchFilter scratchFilter)

@@ -215,7 +215,7 @@ void scratch_window_register(
         TCHAR* uniqueStr,
         ScratchFilter scratchFilter);
 void scratch_menu_register(CHAR *afterMenuCommand, void (*stdOutCallback) (CHAR *), int modifiers, int key, TCHAR *uniqueStr);
-void scratch_menu_register2(CHAR *afterMenuCommand, void (*stdOutCallback) (CHAR *), int modifiers, int key, TCHAR *uniqueStr, void (*runFunc)(ScratchWindow*, Monitor*, int));
+void scratch_menu_register_command_from_function(CHAR *afterMenuCommand, void (*stdOutCallback) (CHAR *), int modifiers, int key, TCHAR *uniqueStr, void (*runFunc)(ScratchWindow*, Monitor*, int));
 void scratch_terminal_register(CHAR *cmd, int modifiers, int key, TCHAR *uniqueStr, ScratchFilter scratchFilter);
 void process_with_stdout_start(CHAR *cmdArgs, void (*onSuccess) (CHAR *));
 void start_app(TCHAR *processExe);

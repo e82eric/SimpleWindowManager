@@ -265,7 +265,7 @@ void create_keybindings(Workspace** workspaces)
             VK_SPACE,
             L"127ac0a0-9f30-47ef-b225-1dda332beb19");
 
-    scratch_menu_register2(
+    scratch_menu_register_command_from_function(
             NULL,
             open_program_scratch_callback_not_elevated,
             LAlt,
