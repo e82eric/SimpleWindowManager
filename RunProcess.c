@@ -60,6 +60,7 @@ struct KeyBinding
     KeyBinding* next;
     BOOL reloadAfter;
     BOOL isLoadCommand;
+    BOOL quitAfter;
 };
 
 typedef struct ItemsView ItemsView;
@@ -72,6 +73,7 @@ struct ProcessAsyncState
     HANDLE processId;
     HANDLE thread;
     BOOL reloadAfter;
+    BOOL quitAfter;
 };
 
 typedef struct Item Item;
@@ -417,7 +419,7 @@ void ItemsView_SelectPrevious(ItemsView *self)
     }
 }
 
-void ItemsView_StartBindingProcess(ItemsView *itemsView, char *cmdArgs, WAITORTIMERCALLBACK callback, BOOL reloadAfter)
+void ItemsView_StartBindingProcess(ItemsView *itemsView, char *cmdArgs, WAITORTIMERCALLBACK callback, BOOL reloadAfter, BOOL quitAfter)
 {
     PROCESS_INFORMATION pi = { 0 };
 
@@ -449,6 +451,7 @@ void ItemsView_StartBindingProcess(ItemsView *itemsView, char *cmdArgs, WAITORTI
     processAsyncState->processId = pi.hProcess;
     processAsyncState->itemsView = itemsView;
     processAsyncState->reloadAfter = reloadAfter;
+    processAsyncState->quitAfter = quitAfter;
 
     BOOL result = RegisterWaitForSingleObject(
         &processAsyncState->waitHandle,
@@ -566,6 +569,7 @@ void ItemsView_HandleReload(ItemsView *self)
         {
             for(int i = 0; i < currentChunk->count; i++)
             {
+                free(currentChunk->items[i]->text);
                 free(currentChunk->items[i]);
             }
 
@@ -593,9 +597,13 @@ void CALLBACK BindProcessFinishCallback(void* lpParameter, BOOLEAN isTimeout)
     UnregisterWait(asyncState->waitHandle);
     CloseHandle(asyncState->thread);
     CloseHandle(asyncState->processId);
+    if(asyncState->quitAfter)
+    {
+        PostMessage(menuView->hwnd, WM_CLOSE, 0, 0);
+    }
 }
 
-void ItemsView_HandleBinding(ItemsView *self, NamedCommand *command, BOOL reloadAfter)
+void ItemsView_HandleBinding(ItemsView *self, NamedCommand *command, BOOL reloadAfter, BOOL quitAfter)
 {
     if(self->namedCommands)
     {
@@ -613,12 +621,12 @@ void ItemsView_HandleBinding(ItemsView *self, NamedCommand *command, BOOL reload
                 sprintf_s(selSubStr, BUF_LEN, "%.*s\n", self->returnRangeEnd, curSelStr + self->returnRangeStart);
 
                 NamedCommand_Parse(newBindCommand, selSubStr, command, BUF_LEN);
-                ItemsView_StartBindingProcess(self, newBindCommand, BindProcessFinishCallback, reloadAfter);
+                ItemsView_StartBindingProcess(self, newBindCommand, BindProcessFinishCallback, reloadAfter, quitAfter);
             }
             else
             {
                 NamedCommand_Parse(newBindCommand, curSelStr, command, BUF_LEN);
-                ItemsView_StartBindingProcess(self, newBindCommand, BindProcessFinishCallback, reloadAfter);
+                ItemsView_StartBindingProcess(self, newBindCommand, BindProcessFinishCallback, reloadAfter, quitAfter);
             }
         }
     }
@@ -689,7 +697,7 @@ LRESULT CALLBACK SearchView_MessageProcessor(HWND hWnd, UINT uMsg, WPARAM wParam
                     }
                     else
                     {
-                        ItemsView_HandleBinding(self->itemsView, current->command, current->reloadAfter);
+                        ItemsView_HandleBinding(self->itemsView, current->command, current->reloadAfter, current->quitAfter);
                     }
                     return 1;
                 }
@@ -836,8 +844,7 @@ void ItemsView_AddToEnd(ItemsView *self, char* text)
         current->items[current->count] = item;
         current->count++;
     }
-
-    if(current->count + 1 == CHUNK_SIZE)
+    else if(current->count + 1 == CHUNK_SIZE)
     {
         current->next = calloc(1, sizeof(Chunk));
         current->next->items = calloc(CHUNK_SIZE, sizeof(Item*));
@@ -1328,7 +1335,7 @@ NamedCommand* ItemsView_FindNamedCommandByName(ItemsView *self, char *name)
     return command;
 }
 
-void SearchView_ParseAndAddKeyBinding(SearchView *self, char *argText, BOOL reloadAfter, BOOL isLoadCommand)
+void SearchView_ParseAndAddKeyBinding(SearchView *self, char *argText, BOOL isLoadCommand)
 {
     size_t len = strlen(argText);
     const int startOfName = 6;
@@ -1356,10 +1363,38 @@ void SearchView_ParseAndAddKeyBinding(SearchView *self, char *argText, BOOL relo
     }
 
     char nameBuff[BUF_LEN];
+    BOOL quitAfter = FALSE;
+    BOOL reloadAfter = TRUE;
     for(int i = 6; i < len; i++)
     {
+        if(argText[i] == ':')
+        {
+            nameBuff[i - startOfName] = '\0';
+            if(len - i == 5)
+            {
+                if(argText[len - 4] == 'q' && argText[len - 3] == 'u' && argText[len - 2] == 'i' && argText[len - 1] == 't')
+                {
+                    quitAfter = TRUE;
+                    break;
+                }
+            }
+            else if(len - i == 7)
+            {
+                if(     argText[len - 6] == 'r' &&
+                        argText[len - 5] == 'e' &&
+                        argText[len - 4] == 'l' &&
+                        argText[len - 3] == 'o' &&
+                        argText[len - 2] == 'a' &&
+                        argText[len - 1] == 'd')
+                {
+                    reloadAfter = TRUE;
+                    break;
+                }
+            }
+        }
         nameBuff[i - startOfName] = argText[i];
     }
+
     nameBuff[len - startOfName] = '\0';
 
     NamedCommand *command = ItemsView_FindNamedCommandByName(self->itemsView, nameBuff);
@@ -1367,6 +1402,7 @@ void SearchView_ParseAndAddKeyBinding(SearchView *self, char *argText, BOOL relo
     binding->key = virtualKey;
     binding->reloadAfter = reloadAfter;
     binding->isLoadCommand = isLoadCommand;
+    binding->quitAfter = quitAfter;
 
     if(!self->keyBindings)
     {
@@ -1496,12 +1532,12 @@ int main(int argc, char* argv[])
     {
         if(strcmp(argv[i], "-h") == 0)
             if(i + 1 < argc)
-        {
             {
-                i++;
-                height = atoi(argv[i]);
+                {
+                    i++;
+                    height = atoi(argv[i]);
+                }
             }
-        }
         if(strcmp(argv[i], "-w") == 0)
         {
             if(i + 1 < argc)
@@ -1549,7 +1585,7 @@ int main(int argc, char* argv[])
             if(i + 1 < argc)
             {
                 i++;
-                SearchView_ParseAndAddKeyBinding(searchView, argv[i], TRUE, FALSE);
+                SearchView_ParseAndAddKeyBinding(searchView, argv[i], FALSE);
             }
         }
         if(strcmp(argv[i], "--bindNoReload") == 0)
@@ -1557,7 +1593,7 @@ int main(int argc, char* argv[])
             if(i + 1 < argc)
             {
                 i++;
-                SearchView_ParseAndAddKeyBinding(searchView, argv[i], FALSE, FALSE);
+                SearchView_ParseAndAddKeyBinding(searchView, argv[i], FALSE);
             }
         }
         if(strcmp(argv[i], "--bindLoadCommand") == 0)
@@ -1565,7 +1601,15 @@ int main(int argc, char* argv[])
             if(i + 1 < argc)
             {
                 i++;
-                SearchView_ParseAndAddKeyBinding(searchView, argv[i], FALSE, TRUE);
+                SearchView_ParseAndAddKeyBinding(searchView, argv[i], TRUE);
+            }
+        }
+        if(strcmp(argv[i], "--bindExecuteAndQuit") == 0)
+        {
+            if(i + 1 < argc)
+            {
+                i++;
+                SearchView_ParseAndAddKeyBinding(searchView, argv[i], FALSE);
             }
         }
         if(strcmp(argv[i], "--namedCommand") == 0)
@@ -1659,7 +1703,7 @@ int main(int argc, char* argv[])
     }
 
     MSG Msg;
-    while (GetMessage(&Msg, NULL, 0, 0))
+    while(GetMessage(&Msg, NULL, 0, 0) > 0)
     {
         TranslateMessage(&Msg);
         DispatchMessage(&Msg);

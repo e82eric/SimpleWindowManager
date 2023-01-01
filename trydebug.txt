@@ -1,0 +1,2 @@
+.echo `${$arg1}.c:${$arg2}` "${$arg3};gc"
+bp `${$arg1}.c:${$arg2}` "dx ${$arg3};gc"
