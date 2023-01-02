@@ -156,6 +156,16 @@ HBRUSH barSelectedBackgroundBrush;
 HBRUSH backgroundBrush;
 HWND borderWindowHwnd;
 
+//defualts maybe there is a better way to do this
+long barHeight = 29;
+long gapWidth = 13;
+COLORREF barBackgroundColor = 0x282828;
+COLORREF barSelectedBackgroundColor = RGB(84, 133, 36);
+COLORREF buttonSelectedTextColor = RGB(204, 36, 29);
+COLORREF buttonWithWindowsTextColor = RGB(255, 255, 247);
+COLORREF buttonWithoutWindowsTextColor = 0x504945;
+COLORREF barTextColor =RGB(235, 219, 178);
+
 Layout deckLayout = {
     .select_next_window = deckLayout_select_next_window,
     //using the same function for next and previous since there will only be 2 windows to swicth between.
@@ -204,6 +214,7 @@ enum WindowRoutingMode currentWindowRoutingMode = FilteredAndRoutedToWorkspace;
 int scratchWindowsScreenPadding = 250;
 
 DWORD scratchProcessId;
+Configuration *configuration;
 
 void mimimize_focused_window(void)
 {
@@ -514,6 +525,28 @@ void quit(void)
     ExitProcess(0);
 }
 
+BOOL is_float_window(Client *client, LONG_PTR styles, LONG_PTR exStyles)
+{
+    UNREFERENCED_PARAMETER(client);
+
+    if(exStyles & WS_EX_APPWINDOW)
+    {
+        return FALSE;
+    }
+
+    if(exStyles & WS_EX_TOOLWINDOW)
+    {
+        return TRUE;
+    }
+
+    if(!(styles & WS_SIZEBOX))
+    {
+        return TRUE;
+    }
+
+    return FALSE;
+}
+
 static BOOL CALLBACK enum_windows_callback(HWND hwnd, LPARAM lparam)
 {
     UNREFERENCED_PARAMETER(lparam);
@@ -536,6 +569,14 @@ static BOOL CALLBACK enum_windows_callback(HWND hwnd, LPARAM lparam)
         }
         scratch_window_add(scratchWindow);
         return TRUE;
+    }
+
+    if(configuration->isFloatWindowFunc)
+    {
+        if(configuration->isFloatWindowFunc(client, styles, exStyles))
+        {
+            return TRUE;
+        }
     }
 
     if(is_float_window(client, styles, exStyles))
@@ -774,7 +815,14 @@ void CALLBACK handle_windows_event(
             {
                 if(!isToolWindow)
                 {
-                    if(should_float_be_focused(client))
+                    if(configuration->shouldFloatBeFocusedFunc)
+                    {
+                        if(configuration->shouldFloatBeFocusedFunc(client))
+                        {
+                            SetForegroundWindow(hwnd);
+                        }
+                    }
+                    else
                     {
                         SetForegroundWindow(hwnd);
                     }
@@ -965,12 +1013,43 @@ Client* windowManager_find_client_in_workspaces_by_hwnd(HWND hwnd)
     return NULL;
 }
 
+BOOL windowManager_find_client_workspace_using_filter_data(WorkspaceFilterData *filterData, Client *client)
+{
+    for(int i = 0; i < filterData->numberOfTitles; i++)
+    {
+        if(wcsstr(client->data->title, filterData->titles[i]))
+        {
+            return TRUE;
+        }
+    }
+    for(int i = 0; i < filterData->numberOfClassNames; i++)
+    {
+        if(wcsstr(client->data->className, filterData->classNames[i]))
+        {
+            return TRUE;
+        }
+    }
+    for(int i = 0; i < filterData->numberOfProcessImageNames; i++)
+    {
+        if(wcsstr(client->data->processImageName, filterData->processImageNames[i]))
+        {
+            return TRUE;
+        }
+    }
+
+    return FALSE;
+}
+
 Workspace* windowManager_find_client_workspace_using_filters(Client *client)
 {
     Workspace *workspaceFoundByFilter = NULL;
     Workspace *workspace = NULL;
 
-    BOOL alwaysExclude = should_always_exclude(client);
+    BOOL alwaysExclude = FALSE;
+    if(configuration->shouldAlwaysExcludeFunc)
+    {
+        alwaysExclude = configuration->shouldAlwaysExcludeFunc(client);
+    }
 
     if(alwaysExclude)
     {
@@ -984,7 +1063,15 @@ Workspace* windowManager_find_client_workspace_using_filters(Client *client)
         for(int i = 0; i < numberOfWorkspaces; i++)
         {
             Workspace *currentWorkspace = workspaces[i];
-            BOOL filterResult = currentWorkspace->windowFilter(client);
+            BOOL filterResult = FALSE;
+            if(currentWorkspace->filterData)
+            {
+                filterResult = windowManager_find_client_workspace_using_filter_data(currentWorkspace->filterData, client);
+            }
+            if(currentWorkspace->windowFilter)
+            {
+                filterResult = currentWorkspace->windowFilter(client);
+            }
 
             if(filterResult)
             {
@@ -1202,7 +1289,14 @@ void client_move_to_location_on_screen(Client *client, HDWP hdwp)
         targetLeft = hiddenWindowMonitor->xOffset;
     }
 
-    BOOL useOldMoveLogic = should_use_old_move_logic(client);
+    BOOL useOldMoveLogic = FALSE;
+    if(configuration->useOldMoveLogicFunc)
+    {
+        if(configuration->useOldMoveLogicFunc(client))
+        {
+            useOldMoveLogic = TRUE;
+        }
+    }
     if(useOldMoveLogic)
     {
         MoveWindow(client->data->hwnd, targetLeft, targetTop, targetWidth, targetHeight, FALSE);
@@ -1588,6 +1682,51 @@ void workspace_arrange_windows_with_defer_handle(Workspace *workspace, HDWP hdwp
 {
     workspace->layout->apply_to_workspace(workspace);
     workspace_arrange_clients(workspace, hdwp);
+}
+
+void workspace_register_with_filter_data(
+        TCHAR *name,
+        WCHAR* tag,
+        Layout *layout,
+        TCHAR** filterTitles,
+        int numberOfFilterTitles,
+        TCHAR** filterProcessImageNames,
+        int numberOfFilterProcessImageNames,
+        TCHAR **filterClassNames,
+        int numberOfFilterClassNames)
+{
+    workspaces[numberOfWorkspaces] = workspace_create(name, NULL, tag, layout, numberOfBars);
+
+    WorkspaceFilterData *filterData = calloc(1, sizeof(WorkspaceFilterData));
+    workspaces[numberOfWorkspaces]->filterData = filterData;
+    filterData->titles = calloc(numberOfFilterTitles, sizeof(TCHAR*));
+    filterData->numberOfTitles = numberOfFilterTitles;
+    for(int i = 0; i < numberOfFilterTitles; i++)
+    {
+        filterData->titles[i] = _wcsdup(filterTitles[i]);
+    }
+
+    filterData->classNames = calloc(numberOfFilterClassNames, sizeof(TCHAR*));
+    filterData->numberOfClassNames = numberOfFilterClassNames;
+    for(int i = 0; i < numberOfFilterClassNames; i++)
+    {
+        filterData->classNames[i] = _wcsdup(filterClassNames[i]);
+    }
+
+    filterData->processImageNames = calloc(numberOfFilterProcessImageNames, sizeof(TCHAR*));
+    filterData->numberOfProcessImageNames = numberOfFilterProcessImageNames;
+    for(int i = 0; i < numberOfFilterProcessImageNames; i++)
+    {
+        filterData->processImageNames[i] = _wcsdup(filterProcessImageNames[i]);
+    }
+
+    numberOfWorkspaces++;
+}
+
+void workspace_register(TCHAR *name, WindowFilter windowFilter, WCHAR* tag, Layout *layout)
+{
+    workspaces[numberOfWorkspaces] = workspace_create(name, windowFilter, tag, layout, numberOfBars);
+    numberOfWorkspaces++;
 }
 
 Workspace* workspace_create(TCHAR *name, WindowFilter windowFilter, WCHAR* tag, Layout *layout, int numberOfButtons)
@@ -2338,6 +2477,24 @@ void scratch_menu_register_command_from_function(CHAR *afterMenuCommand, void (*
 void scratch_menu_register(CHAR *afterMenuCommand, void (*stdOutCallback) (CHAR *), int modifiers, int key, TCHAR *uniqueStr)
 {
     scratch_menu_register_command_from_function(afterMenuCommand, stdOutCallback, modifiers, key, uniqueStr, scratch_window_run_as_menu);
+}
+
+BOOL terminal_with_uniqueStr_filter(ScratchWindow *self, Client *client)
+{
+    if(wcsstr(client->data->processImageName, L"WindowsTerminal.exe"))
+    {
+        TCHAR *cmdLine = client_get_command_line(client);
+        if(wcsstr(cmdLine, self->uniqueStr))
+        {
+            return TRUE;
+        }
+    }
+    return FALSE;
+}
+
+void scratch_terminal_register_with_unique_string(CHAR *cmd, int modifiers, int key, TCHAR *uniqueStr)
+{
+    scratch_terminal_register(cmd, modifiers, key, uniqueStr, terminal_with_uniqueStr_filter);
 }
 
 void scratch_terminal_register(CHAR *cmd, int modifiers, int key, TCHAR *uniqueStr, ScratchFilter scratchFilter)
@@ -3162,43 +3319,109 @@ void keybinding_add_to_list(KeyBinding *binding)
     }
 }
 
-void keybinding_create_no_args(int modifiers, unsigned int key, void (*action) (void))
+KeyBinding* keybindings_find_existing_or_create(int modifiers, unsigned int key)
 {
+    KeyBinding *current = headKeyBinding;
+    while(current)
+    {
+        if(current->modifiers == modifiers && current->key == key)
+        {
+            return current;
+        }
+
+        current = current->next;
+    }
+
     KeyBinding *result = calloc(1, sizeof(KeyBinding));
     result->modifiers = modifiers;
     result->key = key;
-    result->action = action;
+
     keybinding_add_to_list(result);
+
+    return result;
+}
+
+void keybinding_create_no_args(int modifiers, unsigned int key, void (*action) (void))
+{
+    KeyBinding *result = keybindings_find_existing_or_create(modifiers, key);
+    result->action = action;
 }
 
 void keybinding_create_cmd_args(int modifiers, unsigned int key, void (*action) (TCHAR*), TCHAR *cmdArg)
 {
-    KeyBinding *result = calloc(1, sizeof(KeyBinding));
-    result->modifiers = modifiers;
-    result->key = key;
+    KeyBinding *result = keybindings_find_existing_or_create(modifiers, key);
     result->cmdAction = action;
     result->cmdArg = cmdArg;
-    keybinding_add_to_list(result);
 }
 
 void keybinding_create_workspace_arg(int modifiers, unsigned int key, void (*action) (Workspace*), Workspace *arg)
 {
-    KeyBinding *result = calloc(1, sizeof(KeyBinding));
-    result->modifiers = modifiers;
-    result->key = key;
+    KeyBinding *result = keybindings_find_existing_or_create(modifiers, key);
     result->workspaceAction = action;
     result->workspaceArg = arg;
-    keybinding_add_to_list(result);
 }
 
 void keybinding_create_scratch_arg(int modifiers, unsigned int key, void (*action) (ScratchWindow*), ScratchWindow *arg)
 {
-    KeyBinding *result = calloc(1, sizeof(KeyBinding));
-    result->modifiers = modifiers;
-    result->key = key;
+    KeyBinding *result = keybindings_find_existing_or_create(modifiers, key);
     result->scratchWindowAction = action;
     result->scratchWindowArg = arg;
-    keybinding_add_to_list(result);
+}
+
+void keybindings_register_defaults(void)
+{
+    keybinding_create_no_args(LAlt, VK_J, select_next_window);
+    keybinding_create_no_args(LAlt, VK_K, select_previous_window);
+    keybinding_create_no_args(LAlt, VK_OEM_COMMA, monitor_select_next);
+    keybinding_create_no_args(LAlt, VK_N, arrange_clients_in_selected_workspace);
+    keybinding_create_no_args(LAlt, VK_L, move_focused_window_right);
+    keybinding_create_no_args(LAlt, VK_H, move_focused_window_left);
+    keybinding_create_no_args(LAlt | LShift, VK_RIGHT, move_focused_window_right);
+    keybinding_create_no_args(LAlt | LShift, VK_LEFT, move_focused_window_left);
+    keybinding_create_no_args(LAlt | LShift, VK_UP, move_focused_window_up);
+    keybinding_create_no_args(LAlt | LShift, VK_DOWN, move_focused_window_down);
+    keybinding_create_no_args(LAlt, VK_RETURN, move_focused_window_to_master);
+    keybinding_create_no_args(LShift | LAlt, VK_DOWN, mimimize_focused_window);
+
+    keybinding_create_workspace_arg(LAlt, VK_1, swap_selected_monitor_to, workspaces[0]);
+    keybinding_create_workspace_arg(LAlt, VK_2, swap_selected_monitor_to, workspaces[1]);
+    keybinding_create_workspace_arg(LAlt, VK_3, swap_selected_monitor_to, workspaces[2]);
+    keybinding_create_workspace_arg(LAlt, VK_4, swap_selected_monitor_to, workspaces[3]);
+    keybinding_create_workspace_arg(LAlt, VK_5, swap_selected_monitor_to, workspaces[4]);
+    keybinding_create_workspace_arg(LAlt, VK_6, swap_selected_monitor_to, workspaces[5]);
+    keybinding_create_workspace_arg(LAlt, VK_7, swap_selected_monitor_to, workspaces[6]);
+    keybinding_create_workspace_arg(LAlt, VK_8, swap_selected_monitor_to, workspaces[7]);
+    keybinding_create_workspace_arg(LAlt, VK_9, swap_selected_monitor_to, workspaces[8]);
+
+    keybinding_create_no_args(LShift | LAlt, VK_J, move_focused_client_next);
+    keybinding_create_no_args(LShift | LAlt, VK_K, move_focused_client_previous);
+
+    keybinding_create_workspace_arg(LShift | LAlt, VK_1, move_focused_window_to_workspace, workspaces[0]);
+    keybinding_create_workspace_arg(LShift | LAlt, VK_2, move_focused_window_to_workspace, workspaces[1]);
+    keybinding_create_workspace_arg(LShift | LAlt, VK_3, move_focused_window_to_workspace, workspaces[2]);
+    keybinding_create_workspace_arg(LShift | LAlt, VK_4, move_focused_window_to_workspace, workspaces[3]);
+    keybinding_create_workspace_arg(LShift | LAlt, VK_5, move_focused_window_to_workspace, workspaces[4]);
+    keybinding_create_workspace_arg(LShift | LAlt, VK_6, move_focused_window_to_workspace, workspaces[5]);
+    keybinding_create_workspace_arg(LShift | LAlt, VK_7, move_focused_window_to_workspace, workspaces[6]);
+    keybinding_create_workspace_arg(LShift | LAlt, VK_8, move_focused_window_to_workspace, workspaces[7]);
+    keybinding_create_workspace_arg(LShift | LAlt, VK_9, move_focused_window_to_workspace, workspaces[8]);
+
+    keybinding_create_no_args(LShift | LAlt, VK_C, close_focused_window);
+    keybinding_create_no_args(LShift | LAlt, VK_C, kill_focused_window);
+    keybinding_create_no_args(LAlt, VK_V, taskbar_toggle);
+
+    keybinding_create_no_args(LAlt, VK_B, toggle_create_window_in_current_workspace);
+    keybinding_create_no_args(LAlt, VK_Z, toggle_ignore_workspace_filters);
+    keybinding_create_no_args(LAlt, VK_F, client_stop_managing);
+
+    keybinding_create_no_args(LAlt, VK_M, swap_selected_monitor_to_monacle_layout);
+    keybinding_create_no_args(LAlt, VK_D, swap_selected_monitor_to_deck_layout);
+    keybinding_create_no_args(LAlt, VK_T, swap_selected_monitor_to_tile_layout);
+    keybinding_create_no_args(LAlt, VK_R, redraw_focused_window);
+
+    /* keybinding_create_cmd_args(LWin, VK_T, start_app, terminalAppPath); */
+
+    keybinding_create_no_args(LAlt, VK_F9, quit);
 }
 
 void start_process(CHAR *processExe, CHAR *cmdArgs, DWORD creationFlags)
@@ -3624,6 +3847,16 @@ void open_windows_scratch_exit_callback(char *stdOut)
     }
 }
 
+HFONT default_initalize_font()
+{
+    HDC hdc = GetDC(NULL);
+    long lfHeight;
+    lfHeight = -MulDiv(14, GetDeviceCaps(hdc, LOGPIXELSY), 72);
+    HFONT result = CreateFontW(lfHeight, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, TEXT("Hack Regular Nerd Font Complete"));
+    DeleteDC(hdc);
+    return result;
+}
+
 int run (void)
 {
     HANDLE hMutex;
@@ -3639,18 +3872,64 @@ int run (void)
          return 0;
     }
 
+    numberOfDisplayMonitors = 2;
+    numberOfBars = numberOfDisplayMonitors;
+
+    workspaces = calloc(10, sizeof(Workspace*));
+
+    configuration = calloc(1, sizeof(Configuration));
+    configure(configuration);
+
+    if(configuration->barHeight)
+    {
+        barHeight = configuration->barHeight;
+    }
+    if(configuration->gapWidth)
+    {
+        gapWidth = configuration->gapWidth;
+    }
+    if(configuration->barBackgroundColor)
+    {
+        barBackgroundColor = configuration->barBackgroundColor;
+    }
+    if(configuration->barSelectedBackgroundColor)
+    {
+        barSelectedBackgroundColor = configuration->barSelectedBackgroundColor;
+    }
+    if(configuration->buttonSelectedTextColor)
+    {
+        buttonSelectedTextColor = configuration->buttonSelectedTextColor;
+    }
+    if(configuration->buttonWithWindowsTextColor)
+    {
+        buttonWithWindowsTextColor = configuration->buttonWithWindowsTextColor;
+    }
+    if(configuration->buttonWithoutWindowsTextColor)
+    {
+        buttonWithoutWindowsTextColor = configuration->buttonWithoutWindowsTextColor;
+    }
+    if(configuration->barTextColor)
+    {
+        barTextColor = configuration->barTextColor;
+    }
+
     SetProcessDPIAware();
     HINSTANCE moduleHandle = GetModuleHandle(NULL);
     g_main_tid = GetCurrentThreadId ();
     selectPen = CreatePen(PS_SOLID, 6, RGB(250, 189, 47));
     barSelectedBackgroundBrush = CreateSolidBrush(barSelectedBackgroundColor);
     backgroundBrush = CreateSolidBrush(barBackgroundColor);
-    font = initalize_font();
 
-    numberOfDisplayMonitors = 2;
-    numberOfBars = numberOfDisplayMonitors;
+    if(configuration->initalizeFontFunc)
+    {
+        font = configuration->initalizeFontFunc();
+    }
+    else
+    {
+        font = default_initalize_font();
+    }
 
-    workspaces = create_workspaces(&numberOfWorkspaces);
+    /* create_workspaces(); */
 
     numberOfMonitors = numberOfWorkspaces;
     monitors = calloc(numberOfMonitors, sizeof(Monitor*));
@@ -3668,7 +3947,8 @@ int run (void)
     hiddenWindowMonitor = calloc(1, sizeof(Monitor));
     monitor_calulate_coordinates(hiddenWindowMonitor, numberOfMonitors);
 
-    create_keybindings(workspaces);
+    /* keybindings_register_defaults(); */
+    /* create_keybindings(workspaces); */
 
     int barTop = 0;
     int barBottom = barHeight;

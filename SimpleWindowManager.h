@@ -1,4 +1,5 @@
 typedef struct Workspace Workspace;
+typedef struct WorkspaceFilterData WorkspaceFilterData;
 typedef struct Client Client;
 typedef struct ClientData ClientData;
 typedef struct Monitor Monitor;
@@ -7,6 +8,7 @@ typedef struct Bar Bar;
 typedef struct Button Button;
 typedef struct KeyBinding KeyBinding;
 typedef struct ScratchWindow ScratchWindow;
+typedef struct Configuration Configuration;
 
 typedef BOOL (*WindowFilter)(Client *client);
 typedef BOOL (*ScratchFilter)(ScratchWindow *self, Client *client);
@@ -61,6 +63,33 @@ enum Modifiers
     LCtl = 0x80
 };
 
+struct Configuration
+{
+    BOOL (*isFloatWindowFunc) (Client *client, LONG_PTR styles, LONG_PTR exStyles);
+    BOOL (*shouldAlwaysExcludeFunc) (Client* client);
+    BOOL (*shouldFloatBeFocusedFunc) (Client *client);
+    BOOL (*useOldMoveLogicFunc) (Client *client);
+    HFONT (*initalizeFontFunc) (void);
+    long barHeight;
+    long gapWidth;
+    COLORREF barBackgroundColor;
+    COLORREF barSelectedBackgroundColor;
+    COLORREF buttonSelectedTextColor;
+    COLORREF buttonWithWindowsTextColor;
+    COLORREF buttonWithoutWindowsTextColor;
+    COLORREF barTextColor;
+};
+
+struct WorkspaceFilterData
+{
+    TCHAR **titles;
+    int numberOfTitles;
+    TCHAR **processImageNames;
+    int numberOfProcessImageNames;
+    TCHAR **classNames;
+    int numberOfClassNames;
+};
+
 struct Workspace
 {
     TCHAR* name;
@@ -77,6 +106,7 @@ struct Workspace
     Layout *layout;
     Client *lastClient;
     int numberOfClients;
+    WorkspaceFilterData *filterData;
 };
 
 struct Client
@@ -189,6 +219,18 @@ extern int numberOfBars;
 
 extern TCHAR *scratchWindowTitle;
 
+void configure(Configuration *configuration);
+void workspace_register(TCHAR *name, WindowFilter windowFilter, WCHAR* tag, Layout *layout);
+void workspace_register_with_filter_data(
+        TCHAR *name,
+        WCHAR* tag,
+        Layout *layout,
+        TCHAR** filterTitles,
+        int numberOfFilterTitles,
+        TCHAR** filterProcessImageNames,
+        int numberOfFilterProcessImageNames,
+        TCHAR **filterClassNames,
+        int numberOfFilterClassNames);
 Workspace* workspace_create(TCHAR *name, WindowFilter windowFilter, WCHAR* tag, Layout *layout, int numberOfButtons);
 
 void keybinding_create_no_args(int modifiers, unsigned int key, void (*action) (void));
@@ -216,6 +258,7 @@ void scratch_window_register(
         ScratchFilter scratchFilter);
 void scratch_menu_register(CHAR *afterMenuCommand, void (*stdOutCallback) (CHAR *), int modifiers, int key, TCHAR *uniqueStr);
 void scratch_menu_register_command_from_function(CHAR *afterMenuCommand, void (*stdOutCallback) (CHAR *), int modifiers, int key, TCHAR *uniqueStr, void (*runFunc)(ScratchWindow*, Monitor*, int));
+void scratch_terminal_register_with_unique_string(CHAR *cmd, int modifiers, int key, TCHAR *uniqueStr);
 void scratch_terminal_register(CHAR *cmd, int modifiers, int key, TCHAR *uniqueStr, ScratchFilter scratchFilter);
 void process_with_stdout_start(CHAR *cmdArgs, void (*onSuccess) (CHAR *));
 void start_app(TCHAR *processExe);
@@ -260,11 +303,12 @@ void quit(void);
 void show_clients(void);
 void show_keybindings(void);
 /* Everything below is what Config.c must implement */
-Workspace** create_workspaces(int* outSize);
-void create_keybindings(Workspace** workspaces);
+/* void create_workspaces(void); */
+void keybindings_register_defaults(void);
+/* void create_keybindings(Workspace** workspaces); */
 BOOL should_use_old_move_logic(Client* client);
-BOOL should_always_exclude(Client* client);
-BOOL should_float_be_focused(Client *client);
+/* BOOL should_always_exclude(Client* client); */
+/* BOOL should_float_be_focused(Client *client); */
 BOOL is_float_window(Client *client, LONG_PTR styles, LONG_PTR exStyles);
 HFONT initalize_font();
 
