@@ -24,6 +24,8 @@
 #include <Assert.h>
 #include <oleauto.h>
 
+#define MAX_WORKSPACES 9
+
 DEFINE_GUID(IID_IMMDeviceEnumerator, 0xa95664d2, 0x9614, 0x4f35, 0xa7, 0x46, 0xde, 0x8d, 0xb6, 0x36, 0x17, 0xe6);
 DEFINE_GUID(CLSID_MMDeviceEnumerator, 0xbcde0395, 0xe52f, 0x467c, 0x8e, 0x3d, 0xc4, 0x57, 0x92, 0x91, 0x69, 0x2e);
 DEFINE_GUID(IID_IAudioEndpointVolume, 0x5cdf2c82, 0x841e, 0x4546, 0x97, 0x22, 0x0c, 0xf7, 0x40, 0x78, 0x22, 0x9a);
@@ -1695,50 +1697,64 @@ void workspace_register_with_filter_data(
         TCHAR **filterClassNames,
         int numberOfFilterClassNames)
 {
-    workspaces[numberOfWorkspaces] = workspace_create(name, NULL, tag, layout, numberOfBars);
+    Workspace *workspace = workspace_create(name, NULL, tag, layout, numberOfBars);
 
-    WorkspaceFilterData *filterData = calloc(1, sizeof(WorkspaceFilterData));
-    workspaces[numberOfWorkspaces]->filterData = filterData;
-    filterData->titles = calloc(numberOfFilterTitles, sizeof(TCHAR*));
-    filterData->numberOfTitles = numberOfFilterTitles;
-    for(int i = 0; i < numberOfFilterTitles; i++)
+    if(workspace)
     {
-        filterData->titles[i] = _wcsdup(filterTitles[i]);
-    }
+        workspaces[numberOfWorkspaces] = workspace;
 
-    filterData->classNames = calloc(numberOfFilterClassNames, sizeof(TCHAR*));
-    filterData->numberOfClassNames = numberOfFilterClassNames;
-    for(int i = 0; i < numberOfFilterClassNames; i++)
-    {
-        filterData->classNames[i] = _wcsdup(filterClassNames[i]);
-    }
+        WorkspaceFilterData *filterData = calloc(1, sizeof(WorkspaceFilterData));
+        workspaces[numberOfWorkspaces]->filterData = filterData;
+        filterData->titles = calloc(numberOfFilterTitles, sizeof(TCHAR*));
+        filterData->numberOfTitles = numberOfFilterTitles;
+        for(int i = 0; i < numberOfFilterTitles; i++)
+        {
+            filterData->titles[i] = _wcsdup(filterTitles[i]);
+        }
 
-    filterData->processImageNames = calloc(numberOfFilterProcessImageNames, sizeof(TCHAR*));
-    filterData->numberOfProcessImageNames = numberOfFilterProcessImageNames;
-    for(int i = 0; i < numberOfFilterProcessImageNames; i++)
-    {
-        filterData->processImageNames[i] = _wcsdup(filterProcessImageNames[i]);
-    }
+        filterData->classNames = calloc(numberOfFilterClassNames, sizeof(TCHAR*));
+        filterData->numberOfClassNames = numberOfFilterClassNames;
+        for(int i = 0; i < numberOfFilterClassNames; i++)
+        {
+            filterData->classNames[i] = _wcsdup(filterClassNames[i]);
+        }
 
-    numberOfWorkspaces++;
+        filterData->processImageNames = calloc(numberOfFilterProcessImageNames, sizeof(TCHAR*));
+        filterData->numberOfProcessImageNames = numberOfFilterProcessImageNames;
+        for(int i = 0; i < numberOfFilterProcessImageNames; i++)
+        {
+            filterData->processImageNames[i] = _wcsdup(filterProcessImageNames[i]);
+        }
+
+        numberOfWorkspaces++;
+    }
 }
 
 void workspace_register(TCHAR *name, WindowFilter windowFilter, WCHAR* tag, Layout *layout)
 {
-    workspaces[numberOfWorkspaces] = workspace_create(name, windowFilter, tag, layout, numberOfBars);
-    numberOfWorkspaces++;
+    Workspace *workspace = workspace_create(name, windowFilter, tag, layout, numberOfBars);
+    if(workspace)
+    {
+        workspaces[numberOfWorkspaces] = workspace;
+        numberOfWorkspaces++;
+    }
 }
 
 Workspace* workspace_create(TCHAR *name, WindowFilter windowFilter, WCHAR* tag, Layout *layout, int numberOfButtons)
 {
-    Button ** buttons = (Button **) calloc(numberOfButtons, sizeof(Button *));
-    Workspace *result = calloc(1, sizeof(Workspace));
-    result->name = _wcsdup(name);
-    result->windowFilter = windowFilter;
-    result->buttons = buttons;
-    result->tag = _wcsdup(tag);
-    result->layout = layout;
-    return result;
+    if(numberOfWorkspaces < MAX_WORKSPACES)
+    {
+        Button ** buttons = (Button **) calloc(numberOfButtons, sizeof(Button *));
+        Workspace *result = calloc(1, sizeof(Workspace));
+        result->name = _wcsdup(name);
+        result->windowFilter = windowFilter;
+        result->buttons = buttons;
+        result->tag = _wcsdup(tag);
+        result->layout = layout;
+        return result;
+    }
+
+    return NULL;
 }
 
 void workspace_focus_selected_window(Workspace *workspace)
@@ -3875,7 +3891,7 @@ int run (void)
     numberOfDisplayMonitors = 2;
     numberOfBars = numberOfDisplayMonitors;
 
-    workspaces = calloc(10, sizeof(Workspace*));
+    workspaces = calloc(MAX_WORKSPACES, sizeof(Workspace*));
 
     configuration = calloc(1, sizeof(Configuration));
     configure(configuration);
@@ -3928,8 +3944,6 @@ int run (void)
     {
         font = default_initalize_font();
     }
-
-    /* create_workspaces(); */
 
     numberOfMonitors = numberOfWorkspaces;
     monitors = calloc(numberOfMonitors, sizeof(Monitor*));
