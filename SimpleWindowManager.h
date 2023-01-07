@@ -84,10 +84,16 @@ struct WorkspaceFilterData
 {
     TCHAR **titles;
     int numberOfTitles;
+    TCHAR **notTitles;
+    int numberOfNotTitles;
     TCHAR **processImageNames;
     int numberOfProcessImageNames;
+    TCHAR **notProcessImageNames;
+    int numberOfNotProcessImageNames;
     TCHAR **classNames;
     int numberOfClassNames;
+    TCHAR **notClassNames;
+    int numberOfNotClassNames;
 };
 
 struct Workspace
@@ -220,17 +226,11 @@ extern int numberOfBars;
 extern TCHAR *scratchWindowTitle;
 
 void configure(Configuration *configuration);
-void workspace_register(TCHAR *name, WindowFilter windowFilter, WCHAR* tag, Layout *layout);
-void workspace_register_with_filter_data(
-        TCHAR *name,
-        WCHAR* tag,
-        Layout *layout,
-        TCHAR** filterTitles,
-        int numberOfFilterTitles,
-        TCHAR** filterProcessImageNames,
-        int numberOfFilterProcessImageNames,
-        TCHAR **filterClassNames,
-        int numberOfFilterClassNames);
+Workspace* workspace_register(TCHAR *name, WCHAR* tag, Layout *layout);
+void workspace_register_processimagename_contains_filter(Workspace *workspace, TCHAR *className);
+void workspace_register_classname_contains_filter(Workspace *workspace, TCHAR *className);
+void workspace_register_title_contains_filter(Workspace *workspace, TCHAR *title);
+void workspace_register_title_not_contains_filter(Workspace *workspace, TCHAR *title);
 Workspace* workspace_create(TCHAR *name, WindowFilter windowFilter, WCHAR* tag, Layout *layout, int numberOfButtons);
 
 void keybinding_create_no_args(int modifiers, unsigned int key, void (*action) (void));

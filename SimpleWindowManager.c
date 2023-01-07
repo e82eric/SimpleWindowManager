@@ -1021,6 +1021,13 @@ BOOL windowManager_find_client_workspace_using_filter_data(WorkspaceFilterData *
     {
         if(wcsstr(client->data->title, filterData->titles[i]))
         {
+            for(int j = 0; j < filterData->numberOfNotTitles; j++)
+            {
+                if(wcsstr(client->data->title, filterData->notTitles[j]))
+                {
+                    return FALSE;
+                }
+            }
             return TRUE;
         }
     }
@@ -1028,6 +1035,13 @@ BOOL windowManager_find_client_workspace_using_filter_data(WorkspaceFilterData *
     {
         if(wcsstr(client->data->className, filterData->classNames[i]))
         {
+            for(int j = 0; j <filterData->numberOfNotClassNames; j++)
+            {
+                if(wcsstr(client->data->className, filterData->notClassNames[j]))
+                {
+                    return FALSE;
+                }
+            }
             return TRUE;
         }
     }
@@ -1035,6 +1049,13 @@ BOOL windowManager_find_client_workspace_using_filter_data(WorkspaceFilterData *
     {
         if(wcsstr(client->data->processImageName, filterData->processImageNames[i]))
         {
+            for(int j = 0; j <filterData->numberOfNotProcessImageNames; j++)
+            {
+                if(wcsstr(client->data->processImageName, filterData->notProcessImageNames[j]))
+                {
+                    return FALSE;
+                }
+            }
             return TRUE;
         }
     }
@@ -1686,58 +1707,59 @@ void workspace_arrange_windows_with_defer_handle(Workspace *workspace, HDWP hdwp
     workspace_arrange_clients(workspace, hdwp);
 }
 
-void workspace_register_with_filter_data(
-        TCHAR *name,
-        WCHAR* tag,
-        Layout *layout,
-        TCHAR** filterTitles,
-        int numberOfFilterTitles,
-        TCHAR** filterProcessImageNames,
-        int numberOfFilterProcessImageNames,
-        TCHAR **filterClassNames,
-        int numberOfFilterClassNames)
+void workspace_register_classname_contains_filter(Workspace *workspace, TCHAR *className)
 {
-    Workspace *workspace = workspace_create(name, NULL, tag, layout, numberOfBars);
-
-    if(workspace)
-    {
-        workspaces[numberOfWorkspaces] = workspace;
-
-        WorkspaceFilterData *filterData = calloc(1, sizeof(WorkspaceFilterData));
-        workspaces[numberOfWorkspaces]->filterData = filterData;
-        filterData->titles = calloc(numberOfFilterTitles, sizeof(TCHAR*));
-        filterData->numberOfTitles = numberOfFilterTitles;
-        for(int i = 0; i < numberOfFilterTitles; i++)
-        {
-            filterData->titles[i] = _wcsdup(filterTitles[i]);
-        }
-
-        filterData->classNames = calloc(numberOfFilterClassNames, sizeof(TCHAR*));
-        filterData->numberOfClassNames = numberOfFilterClassNames;
-        for(int i = 0; i < numberOfFilterClassNames; i++)
-        {
-            filterData->classNames[i] = _wcsdup(filterClassNames[i]);
-        }
-
-        filterData->processImageNames = calloc(numberOfFilterProcessImageNames, sizeof(TCHAR*));
-        filterData->numberOfProcessImageNames = numberOfFilterProcessImageNames;
-        for(int i = 0; i < numberOfFilterProcessImageNames; i++)
-        {
-            filterData->processImageNames[i] = _wcsdup(filterProcessImageNames[i]);
-        }
-
-        numberOfWorkspaces++;
-    }
+    workspace->filterData->numberOfClassNames++;
+    workspace->filterData->classNames = realloc(workspace->filterData->classNames, workspace->filterData->numberOfClassNames);
+    workspace->filterData->classNames[workspace->filterData->numberOfClassNames - 1] = _wcsdup(className);
 }
 
-void workspace_register(TCHAR *name, WindowFilter windowFilter, WCHAR* tag, Layout *layout)
+void workspace_register_classname_not_contains_filter(Workspace *workspace, TCHAR *className)
 {
-    Workspace *workspace = workspace_create(name, windowFilter, tag, layout, numberOfBars);
+    workspace->filterData->numberOfNotClassNames++;
+    workspace->filterData->notClassNames = realloc(workspace->filterData->notClassNames, workspace->filterData->numberOfNotClassNames);
+    workspace->filterData->notClassNames[workspace->filterData->numberOfNotClassNames - 1] = _wcsdup(className);
+}
+
+void workspace_register_processimagename_contains_filter(Workspace *workspace, TCHAR *processImageName)
+{
+    workspace->filterData->numberOfProcessImageNames++;
+    workspace->filterData->processImageNames = realloc(workspace->filterData->processImageNames, workspace->filterData->numberOfProcessImageNames * sizeof(TCHAR*));
+    workspace->filterData->processImageNames[workspace->filterData->numberOfProcessImageNames - 1] = _wcsdup(processImageName);
+}
+
+void workspace_register_processimagename_not_contains_filter(Workspace *workspace, TCHAR *processImageName)
+{
+    workspace->filterData->numberOfNotProcessImageNames++;
+    workspace->filterData->notProcessImageNames = realloc(workspace->filterData->notProcessImageNames, workspace->filterData->numberOfNotProcessImageNames * sizeof(TCHAR*));
+    workspace->filterData->notProcessImageNames[workspace->filterData->numberOfNotProcessImageNames - 1] = _wcsdup(processImageName);
+}
+
+void workspace_register_title_contains_filter(Workspace *workspace, TCHAR *title)
+{
+    workspace->filterData->numberOfTitles++;
+    workspace->filterData->titles = realloc(workspace->filterData->titles, workspace->filterData->numberOfTitles * sizeof(TCHAR*));
+    workspace->filterData->titles[workspace->filterData->numberOfTitles - 1] = _wcsdup(title);
+}
+
+void workspace_register_title_not_contains_filter(Workspace *workspace, TCHAR *title)
+{
+    workspace->filterData->numberOfNotTitles++;
+    workspace->filterData->notTitles = realloc(workspace->filterData->notTitles, workspace->filterData->numberOfNotTitles * sizeof(TCHAR*));
+    workspace->filterData->notTitles[workspace->filterData->numberOfNotTitles - 1] = _wcsdup(title);
+}
+
+Workspace* workspace_register(TCHAR *name, WCHAR* tag, Layout *layout)
+{
+    Workspace *workspace = workspace_create(name, NULL, tag, layout, numberOfBars);
     if(workspace)
     {
         workspaces[numberOfWorkspaces] = workspace;
         numberOfWorkspaces++;
+        return workspace;
     }
+
+    return NULL;
 }
 
 Workspace* workspace_create(TCHAR *name, WindowFilter windowFilter, WCHAR* tag, Layout *layout, int numberOfButtons)
@@ -1751,6 +1773,7 @@ Workspace* workspace_create(TCHAR *name, WindowFilter windowFilter, WCHAR* tag, 
         result->buttons = buttons;
         result->tag = _wcsdup(tag);
         result->layout = layout;
+        result->filterData = calloc(1, sizeof(WorkspaceFilterData));
         return result;
     }
 
@@ -2754,19 +2777,32 @@ void bar_render_selected_window_description(Bar *bar, HDC hdc, PAINTSTRUCT *ps)
             break;
     }
 
+    HWND foregroundHwnd = GetForegroundWindow();
+    Client* focusedClient = windowManager_find_client_in_workspaces_by_hwnd(foregroundHwnd);
+    Client* clientToRender;
+
+    if(!focusedClient)
+    {
+        clientToRender = clientFactory_create_from_hwnd(foregroundHwnd);
+    }
+    else
+    {
+        clientToRender = focusedClient;
+    }
+
     TCHAR displayStr[MAX_PATH];
     int displayStrLen;
     if(bar->monitor->workspace->selected)
     {
         int numberOfWorkspaceClients = workspace_get_number_of_clients(bar->monitor->workspace);
-        LPCWSTR processShortFileName = PathFindFileName(bar->monitor->workspace->selected->data->processImageName);
+        LPCWSTR processShortFileName = PathFindFileName(clientToRender->data->processImageName);
 
         displayStrLen = swprintf(displayStr, MAX_PATH, L"[%ls:%d] : %ls (%d) (IsAdmin: %d) (Mode: %ls)",
             bar->monitor->workspace->layout->tag,
             numberOfWorkspaceClients,
             processShortFileName,
-            bar->monitor->workspace->selected->data->processId,
-            bar->monitor->workspace->selected->data->isElevated,
+            clientToRender->data->processId,
+            clientToRender->data->isElevated,
             windowRoutingMode);
     }
     else
@@ -2777,6 +2813,11 @@ void bar_render_selected_window_description(Bar *bar, HDC hdc, PAINTSTRUCT *ps)
             bar->monitor->workspace->layout->tag,
             numberOfWorkspaceClients,
             windowRoutingMode);
+    }
+
+    if(!focusedClient)
+    {
+        free(clientToRender);
     }
 
     DrawText(
