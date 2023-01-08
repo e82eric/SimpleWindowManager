@@ -590,7 +590,7 @@ void CALLBACK BindProcessFinishCallback(void* lpParameter, BOOLEAN isTimeout)
     UNREFERENCED_PARAMETER(isTimeout);
     ProcessAsyncState *asyncState = (ProcessAsyncState*)lpParameter;
 
-    if(asyncState->reloadAfter)
+    if(asyncState->reloadAfter && !asyncState->quitAfter)
     {
         ItemsView_HandleReload(asyncState->itemsView);
     }
