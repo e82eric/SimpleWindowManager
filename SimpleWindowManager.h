@@ -228,6 +228,7 @@ extern TCHAR *scratchWindowTitle;
 
 void configure(Configuration *configuration);
 Workspace* workspace_register(TCHAR *name, WCHAR* tag, Layout *layout);
+Workspace* workspace_register_with_window_filter(TCHAR *name, WindowFilter windowFilter, WCHAR* tag, Layout *layout);
 void workspace_register_processimagename_contains_filter(Workspace *workspace, TCHAR *className);
 void workspace_register_classname_contains_filter(Workspace *workspace, TCHAR *className);
 void workspace_register_title_contains_filter(Workspace *workspace, TCHAR *title);

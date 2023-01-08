@@ -1017,45 +1017,45 @@ Client* windowManager_find_client_in_workspaces_by_hwnd(HWND hwnd)
 
 BOOL windowManager_find_client_workspace_using_filter_data(WorkspaceFilterData *filterData, Client *client)
 {
+    for(int j = 0; j < filterData->numberOfNotTitles; j++)
+    {
+        if(wcsstr(client->data->title, filterData->notTitles[j]))
+        {
+            return FALSE;
+        }
+    }
     for(int i = 0; i < filterData->numberOfTitles; i++)
     {
         if(wcsstr(client->data->title, filterData->titles[i]))
         {
-            for(int j = 0; j < filterData->numberOfNotTitles; j++)
-            {
-                if(wcsstr(client->data->title, filterData->notTitles[j]))
-                {
-                    return FALSE;
-                }
-            }
             return TRUE;
+        }
+    }
+    for(int j = 0; j <filterData->numberOfNotClassNames; j++)
+    {
+        if(wcsstr(client->data->className, filterData->notClassNames[j]))
+        {
+            return FALSE;
         }
     }
     for(int i = 0; i < filterData->numberOfClassNames; i++)
     {
         if(wcsstr(client->data->className, filterData->classNames[i]))
         {
-            for(int j = 0; j <filterData->numberOfNotClassNames; j++)
-            {
-                if(wcsstr(client->data->className, filterData->notClassNames[j]))
-                {
-                    return FALSE;
-                }
-            }
             return TRUE;
+        }
+    }
+    for(int j = 0; j <filterData->numberOfNotProcessImageNames; j++)
+    {
+        if(wcsstr(client->data->processImageName, filterData->notProcessImageNames[j]))
+        {
+            return FALSE;
         }
     }
     for(int i = 0; i < filterData->numberOfProcessImageNames; i++)
     {
         if(wcsstr(client->data->processImageName, filterData->processImageNames[i]))
         {
-            for(int j = 0; j <filterData->numberOfNotProcessImageNames; j++)
-            {
-                if(wcsstr(client->data->processImageName, filterData->notProcessImageNames[j]))
-                {
-                    return FALSE;
-                }
-            }
             return TRUE;
         }
     }
@@ -1751,7 +1751,13 @@ void workspace_register_title_not_contains_filter(Workspace *workspace, TCHAR *t
 
 Workspace* workspace_register(TCHAR *name, WCHAR* tag, Layout *layout)
 {
-    Workspace *workspace = workspace_create(name, NULL, tag, layout, numberOfBars);
+    Workspace *workspace = workspace_register_with_window_filter(name, NULL, tag, layout);
+    return workspace;
+}
+
+Workspace* workspace_register_with_window_filter(TCHAR *name, WindowFilter windowFilter, WCHAR* tag, Layout *layout)
+{
+    Workspace *workspace = workspace_create(name, windowFilter, tag, layout, numberOfBars);
     if(workspace)
     {
         workspaces[numberOfWorkspaces] = workspace;
@@ -3921,6 +3927,20 @@ void open_windows_scratch_exit_callback(char *stdOut)
         SetForegroundWindow(hwnd);
         ShowWindow(hwnd, SW_SHOWDEFAULT);
         BringWindowToTop(hwnd);
+        RECT focusedRect;
+        GetWindowRect(hwnd, &focusedRect);
+        
+        if(focusedRect.left > selectedMonitor->xOffset + selectedMonitor->w ||
+                focusedRect.left < selectedMonitor->xOffset)
+        {
+            MoveWindow(
+                    hwnd,
+                    selectedMonitor->xOffset + (configuration->gapWidth * 2),
+                    focusedRect.top,
+                    focusedRect.right - focusedRect.left,
+                    focusedRect.bottom - focusedRect.top,
+                    TRUE);
+        }
     }
 }
 
