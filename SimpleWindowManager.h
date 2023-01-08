@@ -136,6 +136,7 @@ struct ScratchWindow
     ScratchFilter scratchFilter;
     ScratchWindow *next;
     void (*runFunc) (ScratchWindow *, Monitor *monitor, int);
+    ULONGLONG timeout;
 };
 
 struct ClientData

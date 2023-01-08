@@ -2388,6 +2388,10 @@ void scratch_window_focus(ScratchWindow *self)
 
 void scratch_window_add(ScratchWindow *self)
 {
+    if(self->timeout > 0)
+    {
+        self->timeout = 0;
+    }
     self->client->isVisible = TRUE;
     self->client->data->isScratchWindow = TRUE;
     self->client->data->isMinimized = TRUE;
@@ -2566,6 +2570,16 @@ void scratch_window_hide(ScratchWindow *self)
     workspace_focus_selected_window(selectedMonitor->workspace);
 }
 
+unsigned __int64 ConvertFileTimeToInt64(FILETIME *fileTime)
+{
+    ULARGE_INTEGER result;
+
+    result.LowPart  = fileTime->dwLowDateTime;
+    result.HighPart = fileTime->dwHighDateTime;
+
+    return result.QuadPart;
+}
+
 void scratch_window_toggle(ScratchWindow *self)
 {
     if(self->client)
@@ -2598,18 +2612,26 @@ void scratch_window_toggle(ScratchWindow *self)
             }
         }
 
-        if(self->runFunc)
+        FILETIME now;
+        GetSystemTimeAsFileTime(&now);
+        ULONGLONG nowLong = ConvertFileTimeToInt64(&now);
+
+        if(nowLong > self->timeout)
         {
-            self->runFunc(self, selectedMonitor, scratchWindowsScreenPadding);
-            return;
-        }
-        if(self->stdOutCallback)
-        {
-            process_with_stdout_start(self->cmd, self->stdOutCallback);
-        }
-        else
-        {
-            start_process(NULL, self->cmd, CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS);
+            self->timeout = nowLong + 50000000;
+            if(self->runFunc)
+            {
+                self->runFunc(self, selectedMonitor, scratchWindowsScreenPadding);
+                return;
+            }
+            if(self->stdOutCallback)
+            {
+                process_with_stdout_start(self->cmd, self->stdOutCallback);
+            }
+            else
+            {
+                start_process(NULL, self->cmd, CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS);
+            }
         }
     }
 }
@@ -2623,7 +2645,6 @@ void scratch_window_remove(ScratchWindow *self)
 
     free_client(self->client);
     self->client = NULL;
-    workspace_focus_selected_window(selectedMonitor->workspace);
 }
 
 void scratch_window_run_as_menu(ScratchWindow *self, Monitor *monitor, int padding)
@@ -3898,9 +3919,8 @@ void open_windows_scratch_exit_callback(char *stdOut)
     else
     {
         SetForegroundWindow(hwnd);
-        SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOSIZE | SWP_NOMOVE);
-        SetWindowPos(hwnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_SHOWWINDOW | SWP_NOSIZE | SWP_NOMOVE);
         ShowWindow(hwnd, SW_SHOWDEFAULT);
+        BringWindowToTop(hwnd);
     }
 }
 
