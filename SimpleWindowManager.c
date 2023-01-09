@@ -2844,7 +2844,7 @@ void bar_render_selected_window_description(Bar *bar, HDC hdc, PAINTSTRUCT *ps)
 
     if(!focusedClient)
     {
-        free(clientToRender);
+        free_client(clientToRender);
     }
 
     DrawText(
