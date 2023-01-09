@@ -3741,56 +3741,6 @@ void process_with_stdin_start(TCHAR *cmdArgs, CHAR **lines, int numberOfLines)
     }
 }
 
-/* void show_keybindings(void) */
-/* { */
-/*     CHAR *bindings[256]; */
-
-/*     int numberOfBindings = 0; */
-
-/*     KeyBinding *current = headKeyBinding; */
-/*     while(current) */
-/*     { */
-/*         CHAR char2[1024]; */
-/*         if(current->cmdArg) */
-/*         { */
-/*             size_t size_needed = WideCharToMultiByte(CP_UTF8, 0, current->cmdArg, wcslen(current->cmdArg), NULL, 0, NULL, NULL); */
-/*             CHAR *multiByteStr = calloc(size_needed, sizeof(CHAR)); */
-/*             WideCharToMultiByte(CP_UTF8, 0, current->cmdArg, wcslen(current->cmdArg), multiByteStr, size_needed, NULL, NULL); */
-/*             sprintf_s(char2, 1024, "%c %s", current->key, multiByteStr); */
-/*         } */
-/*         else */
-/*         { */
-/*             sprintf_s(char2, 1024, "%c test", current->key); */
-/*         } */
-/*         bindings[numberOfBindings] = _wcsdup(char2); */
-/*         numberOfBindings++; */
-/*         current = current->next; */
-/*     } */
-
-/*     process_with_stdin_start(L"bin\\RunProcess.exe", bindings, numberOfBindings); */
-/* } */
-
-/* void show_clients(void) */
-/* { */
-/*     CHAR buff[1024]; */
-/*     CHAR *clientDisplayStrs[256]; */
-/*     int count = 0; */
-
-/*     for(int i = 0; i < numberOfWorkspaces; i++) */
-/*     { */
-/*         Client *currentClient = workspaces[i]->clients; */
-/*         while(currentClient) */
-/*         { */
-/*             sprintf_s(buff, 1024, "%-15ls %ls", workspaces[i]->name, currentClient->data->title); */
-/*             clientDisplayStrs[count] = strdup(buff); */
-/*             count++; */
-/*             currentClient = currentClient->next; */
-/*         } */
-/*     } */
-
-/*     process_with_stdin_start(L"bin\\RunProcess.exe", clientDisplayStrs, count); */
-/* } */
-
 void process_with_stdout_start(CHAR *cmdArgs, void (*onSuccess) (CHAR *))
 {
     if(selectedMonitor->scratchWindow)
