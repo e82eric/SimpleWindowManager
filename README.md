@@ -9,6 +9,24 @@
 ## Overview
 My general feeling having tried to a bunch of different tiling managers for Microsoft Windows, is that trying to layout every window that gets created by Windows is a endless battle against all of Windows's different intricasies.  So I created this window manager to target my specific workflow where 99% of the windows that I create come from a few different applications (browser, terminal, IDE, chat, email) and to create rules to manage those applications within workspaces and allow easy movement and navigation with common key bindings and to let any other windows that get created float.
 
+## Instalation
+- You will need to compile the application to install it
+-- Make sure that MSVC (C compiler) is installed
+-- Run setvccars.bar to add nmake and cl.exe to the path.  (You make need to adjust the paths in the batch depending one where MSVC is installed)
+-- Make any configuration/customizations
+-- Run nmake
+-- Run nmake publish
+-- Run bin\SimpleWindowManager.exe (to run the application)
+
+## Configuration/Customization
+- Configuration is done in C and is compiled into the binary
+- You will need to a Config.c
+-- You will need to implement a void configure(Configuration *configuration) functio
+--- This is where you can adjust bar color/bar height etc on the configuration structure
+--- This is also where you will define workspaces, keybindings, scratch windows and menu commands
+
+There is a SampleConfig.c provided in the repository
+- The makefile currently looks for this in ..\SimpleWindowManagerConfig\config.c but can be updated in the make file
 ## Features
 - Workspaces
   - Define up to 9 different workspaces along with rules about which windows will be managed by the workspace.  (Usually defined by the process name, window class, window title or any combination of those).  Windows matching these rules will automatically be layed out by the workspace in its current layout
