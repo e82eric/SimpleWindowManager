@@ -78,33 +78,36 @@ void configure(Configuration *configuration)
     WCHAR chromeTag = { 0xfa9e };
     WCHAR terminalTag = { 0xf120 };
     WCHAR riderTag = { 0xf668 };
+    WCHAR archTag = { 0xf303 };
+    WCHAR windows10Tag = { 0xe70f };
     WCHAR teamsTag = { 0xf865 };
 
-    TCHAR *browserProcessImageNames[4] = { L"chrome.exe", L"brave.exe", L"firefox.exe", L"msedge.exe" };
-    workspace_register_with_filter_data(L"Chrome", &chromeTag, &tileLayout, NULL, 0, browserProcessImageNames, 4, NULL, 0);
+    Workspace *browserWorkspace = workspace_register(L"Chrome", &chromeTag, &tileLayout);
+    workspace_register_processimagename_contains_filter(browserWorkspace, L"chrome.exe");
+    workspace_register_processimagename_contains_filter(browserWorkspace, L"brave.exe");
+    workspace_register_processimagename_contains_filter(browserWorkspace, L"firefox.exe");
+    workspace_register_processimagename_contains_filter(browserWorkspace, L"msedge.exe");
 
-    TCHAR *terminalProcessImageName[1] = { L"WindowsTerminal.exe" };
-    workspace_register_with_filter_data(L"Terminal", &terminalTag, &deckLayout, NULL, 0, terminalProcessImageName, 1, NULL, 0);
+    Workspace *terminalWorkspace = workspace_register(L"Terminal", &terminalTag, &deckLayout);
+    workspace_register_processimagename_contains_filter(terminalWorkspace, L"WindowsTerminal.exe");
 
-    TCHAR *riderTitles[2] = { L"rider64.exe", L"Code.exe" };
-    workspace_register_with_filter_data(L"Rider", &riderTag, &monacleLayout, NULL, 0, riderTitles, 2, NULL, 0);
+    Workspace *ideWorkspace = workspace_register(L"Rider", &riderTag, &monacleLayout);
+    workspace_register_processimagename_contains_filter(ideWorkspace, L"rider64.exe");
+    workspace_register_processimagename_contains_filter(ideWorkspace, L"Code.exe");
 
-    TCHAR *teamsProcessImageName[1] = { L"Teams.exe" };
-    workspace_register_with_filter_data(L"Teams", &teamsTag, &tileLayout, NULL, 0, teamsProcessImageName, 1, NULL, 0);
+    Workspace *windows10VmWorkspace = workspace_register(L"Windows10", &windows10Tag, &tileLayout);
+    workspace_register_title_contains_filter(windows10VmWorkspace, L"NewWindows10");
 
-    workspace_register(L"5", NULL, L"5", &tileLayout);
-    workspace_register(L"6", NULL, L"6", &tileLayout);
-    workspace_register(L"7", NULL, L"7", &tileLayout);
+    Workspace *teamsWorkspace = workspace_register(L"Teams", &teamsTag, &tileLayout);
+    workspace_register_processimagename_contains_filter(teamsWorkspace, L"Teams.exe");
+
+    workspace_register(L"7", L"7", &tileLayout);
+    workspace_register(L"8", L"8", &tileLayout);
+    workspace_register(L"9", L"9", &tileLayout);
 
     keybindings_register_defaults();
 
     keybinding_create_cmd_args(LWin, VK_T, start_app, L"wt.exe");
-
-    scratch_terminal_register_with_unique_string(
-            "cmd /c vifm",
-            LAlt,
-            VK_Q,
-            L"4d237b71-4df7-4d2e-a60f-f9d7f69e80a7");
 
     scratch_terminal_register_with_unique_string(
             "cmd /c powershell -nologo",
@@ -140,7 +143,7 @@ void configure(Configuration *configuration)
             \"\"%USERPROFILE%\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\"\" \
             \"\"C:\\ProgramData\\Microsoft\\Windows\\Start Menu\"\" \
             \"\"%USERPROFILE%\\AppData\\Local\\Microsoft\\WindowsApps\"\" \
-            --loadCommand \"ld\"",
+            \"\"%USERPROFILE%\\Utilites\"\"\" --loadCommand \"ld\"",
             open_program_scratch_callback,
             LAlt | LShift,
             VK_P,
