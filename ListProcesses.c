@@ -5,6 +5,7 @@
 #include <processthreadsapi.h>
 #include <shlwapi.h>
 #include <locale.h>
+#include <tlhelp32.h>
 
 #pragma comment(lib, "Advapi32.lib")
 #pragma comment(lib, "Shlwapi.lib")
@@ -13,34 +14,6 @@ NUMBERFMT numFmt = { 0 };
 BOOL sort = FALSE;
 int sortColumn = -1;
 char *unknownProcessShortName = "<UNKNOWN>";
-
-BOOL sm_EnableTokenPrivilege(LPCTSTR pszPrivilege)
-{
-    HANDLE hToken = 0;
-    TOKEN_PRIVILEGES tkp = {0}; 
-
-    if (!OpenProcessToken(GetCurrentProcess(), TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY, &hToken))
-    {
-        return FALSE;
-    }
-
-    if(LookupPrivilegeValue(NULL, pszPrivilege, &tkp.Privileges[0].Luid)) 
-    {
-        tkp.PrivilegeCount = 1;
-        tkp.Privileges[0].Attributes = SE_PRIVILEGE_ENABLED;
-
-        AdjustTokenPrivileges(hToken, FALSE, &tkp, 0, (PTOKEN_PRIVILEGES)NULL, 0); 
-
-        if (GetLastError() != ERROR_SUCCESS)
-        {
-           return FALSE;
-        }
-
-        return TRUE;
-    }
-
-    return FALSE;
-}
 
 void FormatNumber(WCHAR *buf, size_t toFormat, NUMBERFMT* fmt)
 {
@@ -60,6 +33,7 @@ typedef struct Process
     size_t workingSet;
     size_t privateBytes;
     __int64 cpu;
+    TCHAR *fileName;
 } Process;
 
 void FillProcessStats(Process *process)
@@ -83,13 +57,13 @@ void FillProcessStats(Process *process)
     process->cpu = totalSeconds;
 }
 
-void PrintProcessNameAndID(DWORD processID)
+void PrintProcessNameAndID(PROCESSENTRY32 *p32)
 {
     TCHAR lpImageFileName[MAX_PATH] = TEXT("<unknown>");
     LPCWSTR processShortFileName = TEXT("<unknown>");
     PROCESS_MEMORY_COUNTERS_EX pmc;
 
-    HANDLE hProcess = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, processID );
+    HANDLE hProcess = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, p32->th32ProcessID);
 
     if(NULL != hProcess)
     {
@@ -119,7 +93,7 @@ void PrintProcessNameAndID(DWORD processID)
     WCHAR cpuSecondsStrFormated[MAX_PATH];
     FormatNumber(cpuSecondsStrFormated, totalSeconds, &numFmt);
 
-    _tprintf( TEXT("%-45s %08d %20ls %20ls %10ls\n"), processShortFileName, processID, workingSetFormatedStr, privateBytesFormatedStr, cpuSecondsStrFormated);
+    _tprintf( TEXT("%-45ls %08d %20ls %20ls %10ls\n"), p32->szExeFile, p32->th32ProcessID, workingSetFormatedStr, privateBytesFormatedStr, cpuSecondsStrFormated);
 
     CloseHandle( hProcess );
 }
@@ -150,20 +124,6 @@ int CompareProcessPrivateBytes(const void *a, const void *b)
 
 void PrintProcess(Process *process)
 {
-    TCHAR lpImageFileName[MAX_PATH] = TEXT("<unknown>");
-    LPCWSTR processShortFileName = TEXT("<unknown>");
-
-    HANDLE hProcess = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, process->pid);
-
-    if(NULL != hProcess)
-    {
-        GetProcessImageFileName(
-            hProcess,
-            lpImageFileName,
-            MAX_PATH);
-        processShortFileName = PathFindFileName(lpImageFileName);
-    }
-
     WCHAR privateBytesFormatedStr[MAX_PATH];
     FormatNumber(privateBytesFormatedStr, process->privateBytes, &numFmt);
 
@@ -173,7 +133,7 @@ void PrintProcess(Process *process)
     WCHAR cpuSecondsStrFormated[MAX_PATH];
     FormatNumber(cpuSecondsStrFormated, process->cpu, &numFmt);
 
-    printf("%-45ls %08d %20ls %20ls %10ls\n", processShortFileName, process->pid, workingSetFormatedStr, privateBytesFormatedStr, cpuSecondsStrFormated);
+    printf("%-45ls %08d %20ls %20ls %10ls\n", process->fileName, process->pid, workingSetFormatedStr, privateBytesFormatedStr, cpuSecondsStrFormated);
 }
 
 int main(int argc, char* argv[])
@@ -222,41 +182,33 @@ int main(int argc, char* argv[])
     numFmt.lpThousandSep = L",";
     numFmt.NegativeOrder = 1;
 
-    sm_EnableTokenPrivilege(SE_DEBUG_NAME);
-    DWORD aProcesses[1024], cbNeeded, cProcesses;
-    unsigned int i;
+    HANDLE hSnapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
 
-    if(!EnumProcesses(aProcesses, sizeof(aProcesses), &cbNeeded))
-    {
-        return 1;
-    }
-
-    cProcesses = cbNeeded / sizeof(DWORD);
+    PROCESSENTRY32 pEntry;
+    pEntry.dwSize = sizeof(PROCESSENTRY32);
 
     _tprintf( TEXT("%-45s %8ls %20ls %20ls %10ls\n"), L"Name", L"PID", L"WorkingSet(kb)", L"PrivateBytes(kb)", L"CPU(s)");
     if(!sort)
     {
-        for(i = 0; i < cProcesses; i++)
+        if(Process32First(hSnapshot, &pEntry))
         {
-            if(aProcesses[i] != 0)
+            do
             {
-                PrintProcessNameAndID(aProcesses[i]);
-            }
+                PrintProcessNameAndID(&pEntry);
+            } while(Process32Next(hSnapshot, &pEntry));
         }
     }
     else
     {
         unsigned int count = 0;
         Process processes[1024];
-        for(unsigned int j = 0; j < cProcesses; j++)
+        do
         {
-            if(aProcesses[j] != 0)
-            {
-                processes[count].pid = aProcesses[j];
-                FillProcessStats(&processes[count]);
-                count++;
-            }
-        }
+            processes[count].fileName = _wcsdup(pEntry.szExeFile);
+            processes[count].pid = pEntry.th32ProcessID;
+            FillProcessStats(&processes[count]);
+            count++;
+        } while(Process32Next(hSnapshot, &pEntry));
 
         qsort(processes, count + 1, sizeof(Process), CompareProcessPrivateBytes);
 

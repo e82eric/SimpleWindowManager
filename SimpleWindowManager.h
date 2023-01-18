@@ -126,6 +126,7 @@ struct Client
 
 struct ScratchWindow
 {
+    CHAR *name;
     CHAR *cmd;
     CHAR *cmdArgs;
     CHAR *runProcessMenuAdditionalParams;
@@ -206,6 +207,7 @@ struct Bar
 
 struct KeyBinding
 {
+    CHAR *name;
     int modifiers;
     unsigned int key;
     void (*action) (void);
@@ -216,6 +218,8 @@ struct KeyBinding
     KeyBinding *next;
     void (*scratchWindowAction) (ScratchWindow*);
     ScratchWindow *scratchWindowArg;
+    void (*menuAction) (MenuDefinition*);
+    MenuDefinition *menuArg;
 };
 
 extern Layout deckLayout;
@@ -235,10 +239,11 @@ void workspace_register_title_contains_filter(Workspace *workspace, TCHAR *title
 void workspace_register_title_not_contains_filter(Workspace *workspace, TCHAR *title);
 Workspace* workspace_create(TCHAR *name, WindowFilter windowFilter, WCHAR* tag, Layout *layout, int numberOfButtons);
 
-void keybinding_create_no_args(int modifiers, unsigned int key, void (*action) (void));
-void keybinding_create_cmd_args(int modifiers, unsigned int key, void (*action) (TCHAR*), TCHAR *cmdArg);
-void keybinding_create_workspace_arg(int modifiers, unsigned int key, void (*action) (Workspace*), Workspace *arg);
-void keybinding_create_scratch_arg(int modifiers, unsigned int key, void (*action) (ScratchWindow*), ScratchWindow *arg);
+void keybinding_create_no_args(CHAR *name, int modifiers, unsigned int key, void (*action) (void));
+void keybinding_create_cmd_args(CHAR *name, int modifiers, unsigned int key, void (*action) (TCHAR*), TCHAR *cmdArg);
+void keybinding_create_workspace_arg(CHAR *name, int modifiers, unsigned int key, void (*action) (Workspace*), Workspace *arg);
+void keybinding_create_scratch_arg(CHAR *name, int modifiers, unsigned int key, void (*action) (ScratchWindow*), ScratchWindow *arg);
+void keybinding_create_menu_arg(CHAR *name, int modifiers, unsigned int key, void (*action) (MenuDefinition*), MenuDefinition *arg);
 
 TCHAR* client_get_command_line(Client *self);
 
@@ -258,10 +263,12 @@ void scratch_window_register(
         int key,
         TCHAR* uniqueStr,
         ScratchFilter scratchFilter);
-void scratch_menu_register(CHAR *afterMenuCommand, void (*stdOutCallback) (CHAR *), int modifiers, int key, TCHAR *uniqueStr);
-void scratch_menu_register_command_from_function(CHAR *afterMenuCommand, void (*stdOutCallback) (CHAR *), int modifiers, int key, TCHAR *uniqueStr, void (*runFunc)(ScratchWindow*, Monitor*, int));
+ScratchWindow *scratch_menu_register(CHAR *name, CHAR *afterMenuCommand, void (*stdOutCallback) (CHAR *), TCHAR *uniqueStr);
+ScratchWindow *scratch_menu_register_command_from_function(CHAR *name, CHAR *afterMenuCommand, void (*stdOutCallback) (CHAR *), TCHAR *uniqueStr, void (*runFunc)(ScratchWindow*, Monitor*, int));
 void scratch_terminal_register_with_unique_string(CHAR *cmd, int modifiers, int key, TCHAR *uniqueStr);
 void scratch_terminal_register(CHAR *cmd, int modifiers, int key, TCHAR *uniqueStr, ScratchFilter scratchFilter);
+ScratchWindow *register_scratch_terminal_with_unique_string(CHAR *name, char *cmd, TCHAR *uniqueStr);
+void assign_key_binding_to_scratch_window(ScratchWindow *scratchWindow, int modifiers, int key);
 void process_with_stdout_start(CHAR *cmdArgs, void (*onSuccess) (CHAR *));
 void start_app(TCHAR *processExe);
 void start_app_non_elevated(TCHAR *processExe);
@@ -302,11 +309,17 @@ void open_process_list_scratch_callback(char *stdOut);
 void open_process_list(void);
 void quit(void);
 
+void menu_defintion_register(MenuDefinition *definition);
+void menu_on_escape(void);
+
+MenuDefinition* menu_create_and_register(void);
+void menu_run(MenuDefinition *definition);
 void show_clients(void);
-void show_keybindings(void);
+void show_keybindings(ScratchWindow *self, Monitor *monitor, int scratchWindowsScreenPadding);
 /* Everything below is what Config.c must implement */
 /* void create_workspaces(void); */
 void keybindings_register_defaults(void);
+void register_default_scratch_windows(void);
 /* void create_keybindings(Workspace** workspaces); */
 BOOL should_use_old_move_logic(Client* client);
 /* BOOL should_always_exclude(Client* client); */
