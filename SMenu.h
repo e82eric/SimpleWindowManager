@@ -38,6 +38,7 @@ struct MenuKeyBinding
     MenuKeyBinding* next;
     BOOL reloadAfter;
     BOOL isLoadCommand;
+    int (*loadAction)(CHAR** items);
     BOOL quitAfter;
 };
 
@@ -158,3 +159,4 @@ MenuView *menu_create(int left, int top, int width, int height, TCHAR *title);
 void menu_run_definition(MenuView *self, MenuDefinition *menuDefinition);
 void MenuDefinition_ParseAndAddLoadCommand(MenuDefinition *self, char *argText);
 void MenuDefinition_ParseAndSetRange(MenuDefinition *self, char *argText);
+void MenuDefinition_AddLoadActionKeyBinding(MenuDefinition *self, unsigned int modifier, unsigned int key, int (*loadAction)(CHAR**));

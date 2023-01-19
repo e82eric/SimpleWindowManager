@@ -443,6 +443,7 @@ void ItemsView_LoadFromAction(ItemsView *self, int (itemsAction)(CHAR **items))
     for(int i = 0; i < numberOfItems; i++)
     {
         ItemsView_AddToEnd(self, itemsBuf[i]);
+        free(itemsBuf[i]);
     }
 
     TriggerSearch(self->searchView);
@@ -593,7 +594,14 @@ LRESULT CALLBACK SearchView_MessageProcessor(HWND hWnd, UINT uMsg, WPARAM wParam
                 {
                     if(current->isLoadCommand)
                     {
-                        ItemsView_ReloadFromCommand(self->itemsView, current->command);
+                        if(current->loadAction)
+                        {
+                            ItemsView_LoadFromAction(self->itemsView, current->loadAction);
+                        }
+                        else
+                        {
+                            ItemsView_ReloadFromCommand(self->itemsView, current->command);
+                        }
                     }
                     else
                     {
@@ -1267,6 +1275,28 @@ NamedCommand* MenuDefinition_FindNamedCommandByName(MenuDefinition *self, char *
         currentCommand = currentCommand->next;
     }
     return command;
+}
+
+void MenuDefinition_AddLoadActionKeyBinding(MenuDefinition *self, unsigned int modifier, unsigned int key, int (*loadAction)(CHAR**))
+{
+    MenuKeyBinding *binding = calloc(1, sizeof(MenuKeyBinding));
+    binding->modifier = modifier;
+    binding->key = key;
+    binding->reloadAfter = TRUE;
+    binding->isLoadCommand = TRUE;
+    binding->quitAfter = FALSE;
+    binding->loadAction = loadAction;
+
+    if(!self->keyBindings)
+    {
+        self->keyBindings = binding;
+        self->lastKeyBinding = binding;
+    }
+    else
+    {
+        self->lastKeyBinding->next = binding;
+        self->lastKeyBinding = binding;
+    }
 }
 
 void MenuDefinition_ParseAndAddKeyBinding(MenuDefinition *self, char *argText, BOOL isLoadCommand)
