@@ -1,32 +1,26 @@
 #include <windows.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include "..\\SimpleWindowManager2\\fzf\\fzf.h"
+#include "..\\SimpleWindowManager2\\SMenu.h"
 #include "..\\SimpleWindowManager2\\SimpleWindowManager.h"
+#include "..\\SimpleWindowManager2\\ListWindows.h"
+#include "..\\SimpleWindowManager2\\ListProcesses.h"
 
-void search_all_drives_command_run(ScratchWindow *self, Monitor *monitor, int scratchWindowsScreenPadding)
+void search_drive(char* stdOut)
 {
-    CHAR cmdBuff[4096];
+    MenuDefinition definition = {0};
+    CHAR cmdBuf[MAX_PATH];
     sprintf_s(
-            cmdBuff,
-            4096,
-            "cmd /c powershell -c \
-            \"$drive = (Get-PSDrive -PSProvider FileSystem).Root \
-            | bin\\RunProcess.exe --title ScratchMenu%ls -l %d -t %d -w %d -h %d; \
-            if($drive -eq $null) { exit }; \
-            bin\\RunProcess.exe --namedCommand \"\"\"ld:fd . $($drive)\\\\\"\"\" \
-            --loadCommand ld\" --title ScratchMenu%ls\" -l %d -t %d -w %d -h %d",
-            self->uniqueStr,
-            monitor->xOffset + scratchWindowsScreenPadding,
-            scratchWindowsScreenPadding,
-            monitor->w - (scratchWindowsScreenPadding * 2),
-            monitor->h - (scratchWindowsScreenPadding * 2),
-            self->uniqueStr,
-            monitor->xOffset + scratchWindowsScreenPadding,
-            scratchWindowsScreenPadding,
-            monitor->w - (scratchWindowsScreenPadding * 2),
-            monitor->h - (scratchWindowsScreenPadding * 2));
+            cmdBuf,
+            MAX_PATH,
+            "ld:cmd /c fd . %s\\",
+            stdOut);
 
-    process_with_stdout_start(cmdBuff, self->stdOutCallback);
+    MenuDefinition_AddNamedCommand(&definition, cmdBuf);
+    MenuDefinition_ParseAndAddLoadCommand(&definition, "ld");
+    definition.onSelection = open_program_scratch_callback_not_elevated;
+    menu_run(&definition);
 }
 
 BOOL should_float_be_focused(Client *client)
@@ -77,9 +71,7 @@ void configure(Configuration *configuration)
 
     WCHAR chromeTag = { 0xfa9e };
     WCHAR terminalTag = { 0xf120 };
-    WCHAR riderTag = { 0xf668 };
-    WCHAR archTag = { 0xf303 };
-    WCHAR windows10Tag = { 0xe70f };
+    WCHAR ideTag = { 0xf668 };
     WCHAR teamsTag = { 0xf865 };
 
     Workspace *browserWorkspace = workspace_register(L"Chrome", &chromeTag, &tileLayout);
@@ -91,91 +83,86 @@ void configure(Configuration *configuration)
     Workspace *terminalWorkspace = workspace_register(L"Terminal", &terminalTag, &deckLayout);
     workspace_register_processimagename_contains_filter(terminalWorkspace, L"WindowsTerminal.exe");
 
-    Workspace *ideWorkspace = workspace_register(L"Rider", &riderTag, &monacleLayout);
+    Workspace *ideWorkspace = workspace_register(L"Rider", &ideTag, &monacleLayout);
     workspace_register_processimagename_contains_filter(ideWorkspace, L"rider64.exe");
     workspace_register_processimagename_contains_filter(ideWorkspace, L"Code.exe");
-
-    Workspace *windows10VmWorkspace = workspace_register(L"Windows10", &windows10Tag, &tileLayout);
-    workspace_register_title_contains_filter(windows10VmWorkspace, L"NewWindows10");
 
     Workspace *teamsWorkspace = workspace_register(L"Teams", &teamsTag, &tileLayout);
     workspace_register_processimagename_contains_filter(teamsWorkspace, L"Teams.exe");
 
+    workspace_register(L"5", L"5", &tileLayout);
+    workspace_register(L"6", L"6", &tileLayout);
     workspace_register(L"7", L"7", &tileLayout);
     workspace_register(L"8", L"8", &tileLayout);
     workspace_register(L"9", L"9", &tileLayout);
 
     keybindings_register_defaults();
 
-    keybinding_create_cmd_args(LWin, VK_T, start_app, L"wt.exe");
+    keybinding_create_with_shell_arg("NewTerminalWindow", LWin, VK_T, start_app, L"wt.exe");
 
-    scratch_terminal_register_with_unique_string(
+    register_default_scratch_windows();
+
+    ScratchWindow *vifmScratch = register_scratch_terminal_with_unique_string(
+            "VIFM",
+            "cmd /c vifm",
+            L"4d237b71-4df7-4d2e-a60f-f9d7f69e80a7");
+    keybinding_create_with_scratchwindow_arg("VIFMScratchWindow", LAlt, VK_Q, vifmScratch);
+
+    ScratchWindow *powershellScratch = register_scratch_terminal_with_unique_string(
+            "Powershell",
             "cmd /c powershell -nologo",
-            LAlt | LShift,
-            VK_W,
             L"ea3f98ca-973f-4154-9a7b-dc7a9377b768");
+    keybinding_create_with_scratchwindow_arg("PowershellScratchWindow", LAlt | LShift, VK_W, powershellScratch);
 
-    scratch_terminal_register_with_unique_string(
+    ScratchWindow *nPowershellScratch = register_scratch_terminal_with_unique_string(
+            "Nvim Powershell",
             "cmd /c nvim -c \"terminal powershell -nologo\"",
-            LAlt,
-            VK_W,
             L"643763f5-f5cd-416e-a5c9-bef1f516863c");
+    keybinding_create_with_scratchwindow_arg("NvimPowershellScratchWindow", LAlt, VK_W, nPowershellScratch);
 
-    scratch_menu_register(
-            "--namedCommand \"ld:bin\\ListWindows.exe\" --loadCommand \"ld\"",
-            open_windows_scratch_exit_callback,
-            LAlt,
-            VK_SPACE,
-            L"127ac0a0-9f30-47ef-b225-1dda332beb19");
+    MenuDefinition *listWindowsMenu2 = menu_create_and_register();
+    listWindowsMenu2->hasHeader = TRUE;
+    listWindowsMenu2->itemsAction = list_windows_run;
+    listWindowsMenu2->onSelection = open_windows_scratch_exit_callback;
+    keybinding_create_with_menu_arg("ListWindowsMenu", LAlt, VK_SPACE, menu_run, listWindowsMenu2);
 
-    scratch_menu_register_command_from_function(
-            NULL,
-            open_program_scratch_callback_not_elevated,
-            LAlt,
-            VK_E,
-            L"8f631b05-9d5d-4c19-b3b7-f285835785ea",
-            search_all_drives_command_run);
+    MenuDefinition *programLauncher = menu_create_and_register();
+    MenuDefinition_AddNamedCommand(programLauncher, "ld:fd -t f -g \"*{.lnk,.exe}\" \
+            \"%USERPROFILE%\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\" \
+            \"C:\\ProgramData\\Microsoft\\Windows\\Start Menu\" \
+            \"%USERPROFILE%\\AppData\\Local\\Microsoft\\WindowsApps\" \
+            \"%USERPROFILE%\\Utilites\"");
+    MenuDefinition_ParseAndAddLoadCommand(programLauncher, "ld");
+    programLauncher->onSelection = open_program_scratch_callback;
+    keybinding_create_with_menu_arg("ProgramLauncherNotElevatedMenu", LAlt | LShift, VK_P, menu_run, programLauncher);
 
-    scratch_menu_register(
-            "--namedCommand \"ld:fd -t f -g \"\"*{.lnk,.exe}\"\" \
-            \"\"%PROGRAMFILES%\"\" \
-            \"\"%PROGRAMFILES(X86)%\"\" \
-            \"\"%USERPROFILE%\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\"\" \
-            \"\"C:\\ProgramData\\Microsoft\\Windows\\Start Menu\"\" \
-            \"\"%USERPROFILE%\\AppData\\Local\\Microsoft\\WindowsApps\"\" \
-            \"\"%USERPROFILE%\\Utilites\"\"\" --loadCommand \"ld\"",
-            open_program_scratch_callback,
-            LAlt | LShift,
-            VK_P,
-            L"dd07e19f-5d2f-427e-9c8f-ad548ef0acfb");
+    MenuDefinition *programLauncherNotElevatedMenu = menu_create_and_register();
+    MenuDefinition_AddNamedCommand(programLauncherNotElevatedMenu, "ld:cmd /c fd -t f -g \"*{.lnk,.exe}\" \
+            \"%USERPROFILE%\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\" \
+            \"C:\\ProgramData\\Microsoft\\Windows\\Start Menu\" \
+            \"%USERPROFILE%\\AppData\\Local\\Microsoft\\WindowsApps\" \
+            \"%USERPROFILE%\\Utilites\"");
+    MenuDefinition_ParseAndAddLoadCommand(programLauncherNotElevatedMenu, "ld");
+    programLauncherNotElevatedMenu->onSelection = open_program_scratch_callback_not_elevated;
+    keybinding_create_with_menu_arg("ProgramLauncherNotElevatedMenu", LAlt, VK_P, menu_run, programLauncherNotElevatedMenu);
 
-    scratch_menu_register(
-            "--namedCommand \"ld:fd -t f -g \"\"*{.lnk,.exe}\"\" \
-            \"\"%USERPROFILE%\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\"\" \
-            \"\"C:\\ProgramData\\Microsoft\\Windows\\Start Menu\"\" \
-            \"\"%USERPROFILE%\\AppData\\Local\\Microsoft\\WindowsApps\"\" \
-            \"\"%USERPROFILE%\\Utilites\"\"\" --loadCommand \"ld\"",
-            open_program_scratch_callback_not_elevated,
-            LAlt,
-            VK_P,
-            L"8f6579ce-727c-4d5b-9e76-2cdd1db52e52");
+    MenuDefinition *listProcessMenu = menu_create_and_register();
+    listProcessMenu->itemsAction = list_processes_run_no_sort;
+    MenuDefinition_AddNamedCommand(listProcessMenu, "procKill:cmd /c taskkill /f /pid {}");
+    MenuDefinition_AddNamedCommand(listProcessMenu, "windbg:powershell.exe -C '{}' -match '\\d{8}';windbg -p \"\"\"$([int]$Matches[0])\"\"\"");
+    MenuDefinition_AddLoadActionKeyBinding(listProcessMenu, VK_CONTROL, VK_1, list_processes_run_sorted_by_private_bytes);
+    MenuDefinition_AddLoadActionKeyBinding(listProcessMenu, VK_CONTROL, VK_2, list_processes_run_sorted_by_working_set);
+    MenuDefinition_AddLoadActionKeyBinding(listProcessMenu, VK_CONTROL, VK_3, list_processes_run_sorted_by_cpu);
+    MenuDefinition_AddLoadActionKeyBinding(listProcessMenu, VK_CONTROL, VK_4, list_processes_run_sorted_by_pid);
+    MenuDefinition_ParseAndSetRange(listProcessMenu, "46,8");
+    MenuDefinition_ParseAndAddKeyBinding(listProcessMenu, "ctl-k:procKill:reload", FALSE);
+    MenuDefinition_ParseAndAddKeyBinding(listProcessMenu, "ctl-d:windbg:quit", FALSE);
+    listProcessMenu->hasHeader = TRUE;
+    keybinding_create_with_menu_arg("ProcessListMenu", LWin, VK_9, menu_run, listProcessMenu);
 
-    scratch_menu_register(
-            "--hasHeader \
-            --loadCommand \"ld\" --namedCommand \"ld:bin\\ListProcesses.exe\" \
-            --namedCommand \"procKill:cmd /c taskkill /f /pid {}\" \
-            --bind \"ctl-k:procKill:reload\" \
-            --returnRange 46,8 \
-            --namedCommand \"windbg:powershell.exe -C '{}' -match '\\d{8}';windbg -p \"\"\"$([int]$Matches[0])\"\"\"\" \
-            --namedCommand \"sortPvtBytes:bin\\ListProcesses.exe --sort privateBytes\" \
-            --namedCommand \"sortWrkSet:bin\\ListProcesses.exe --sort workingSet\" \
-            --namedCommand \"sortCpu:bin\\ListProcesses.exe --sort cpu\" \
-            --bindLoadCommand \"ctl-1:sortPvtBytes:reload\" \
-            --bindLoadCommand \"ctl-2:sortWrkSet:reload\" \
-            --bindLoadCommand \"ctl-3:sortCpu:reload\" \
-            --bindExecuteAndQuit \"ctl-d:windbg:quit\"",
-            open_process_list_scratch_callback,
-            LWin,
-            VK_9,
-            L"1a19cef1-1d1c-47b5-84c3-e5e2d1ffe141");
+    MenuDefinition *searchAllDrivesMenu = menu_create_and_register();
+    MenuDefinition_AddNamedCommand(searchAllDrivesMenu, "ld:powershell -c \"(Get-PSDrive -PSProvider FileSystem).Root\"");
+    MenuDefinition_ParseAndAddLoadCommand(searchAllDrivesMenu, "ld");
+    searchAllDrivesMenu->onSelection = search_drive;
+    keybinding_create_with_menu_arg("SearchAllDrivesMenu", LAlt, VK_E, menu_run, searchAllDrivesMenu);
 }
