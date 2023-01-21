@@ -7,11 +7,11 @@
 #include <locale.h>
 #include <tlhelp32.h>
 
-#include "SListProcesses.h"
+#include "ListProcesses.h"
 
 int main(int argc, char* argv[])
 {
-    int (*linesFunc)(CHAR **linesToFill) = list_processes_run_no_sort;
+    int (*linesFunc)(int maxItems, CHAR **linesToFill) = list_processes_run_no_sort;
 
     for(int i = 0; i < argc; i++)
     {
@@ -41,7 +41,7 @@ int main(int argc, char* argv[])
     }
 
     CHAR *lines[4096];
-    int numberOfResults = linesFunc(lines);
+    int numberOfResults = linesFunc(4096, lines);
 
     for(int i = 0; i < numberOfResults; i++)
     {

@@ -28,6 +28,7 @@
 #include "SimpleWindowManager.h"
 
 #define MAX_WORKSPACES 9
+#define MAX_COMMANDS 256
 
 DEFINE_GUID(IID_IMMDeviceEnumerator, 0xa95664d2, 0x9614, 0x4f35, 0xa7, 0x46, 0xde, 0x8d, 0xb6, 0x36, 0x17, 0xe6);
 DEFINE_GUID(CLSID_MMDeviceEnumerator, 0xbcde0395, 0xe52f, 0x467c, 0x8e, 0x3d, 0xc4, 0x57, 0x92, 0x91, 0x69, 0x2e);
@@ -96,12 +97,12 @@ static void workspace_remove_client_and_arrange(Workspace *workspace, Client *cl
 static void workspace_focus_selected_window(Workspace *workspace);
 static int workspace_update_client_counts(Workspace *workspace);
 static int workspace_get_number_of_clients(Workspace *workspace);
+static KeyBinding* keybindings_find_existing_or_create(CHAR* name, int modifiers, unsigned int key);
 static ScratchWindow* scratch_windows_find_from_client(Client *client);
 static ScratchWindow* scratch_windows_find_from_hwnd(HWND hwnd);
 static void scratch_window_toggle(ScratchWindow *self);
 static void scratch_window_show(ScratchWindow *self);
 static void scratch_window_hide(ScratchWindow *self);
-static void scratch_window_run_as_menu(ScratchWindow *self, Monitor *monitor, int padding);
 static Client* workspace_find_client_by_hwnd(Workspace *workspace, HWND hwnd);
 static Client* clientFactory_create_from_hwnd(HWND hwnd);
 static void client_move_to_location_on_screen(Client *client, HDWP hdwp);
@@ -216,6 +217,8 @@ KeyBinding *headKeyBinding;
 ScratchWindow *scratchWindows;
 MenuView * mView;
 BOOL menuVisible;
+Command *commands[MAX_COMMANDS];
+int numberOfCommands = 0;
 
 enum WindowRoutingMode currentWindowRoutingMode = FilteredAndRoutedToWorkspace;
 int scratchWindowsScreenPadding = 250;
@@ -229,301 +232,107 @@ void run_command_from_menu(char *stdOut)
     char *next_token = NULL;
     char* name = strtok_s(stdOut, deli, &next_token);
 
-    KeyBinding *current = headKeyBinding;
-    while(current)
+    for(int i = 0; i < numberOfCommands; i++)
     {
-        if(current->scratchWindowArg)
+        if(strcmp(name, commands[i]->name) == 0)
         {
-            if(strcmp(name, current->scratchWindowArg->name) == 0)
-            {
-                if(current->action)
-                {
-                    current->action();
-                }
-                else if(current->cmdAction)
-                {
-                    current->cmdAction(current->cmdArg);
-                }
-                else if(current->workspaceAction)
-                {
-                    current->workspaceAction(current->workspaceArg);
-                }
-                else if(current->scratchWindowAction)
-                {
-                    current->scratchWindowAction(current->scratchWindowArg);
-                }
-                else if(current->menuAction)
-                {
-                    current->menuAction(current->menuArg);
-                }
-            }
+            commands[i]->execute(commands[i]);
+            return;
         }
-        if(current->menuAction)
-        {
-            if(strcmp(name, current->name) == 0)
-            {
-                if(current->menuAction)
-                {
-                    current->menuAction(current->menuArg);
-                }
-            }
-        }
-
-        current = current->next;
     }
 }
 
-int keybindings_list(CHAR **lines)
+int commands_list(int maxItems, CHAR **lines)
 {
     CHAR header[1024];
     sprintf_s(
             header,
             1024,
-            "%-45s %-15s %s",
+            "%-45s %-25s %-15s %s",
             "Name",
+            "Type",
             "KeyBinding",
-            "Shell Command");
+            "Description");
 
     lines[0] = _strdup(header);
 
     int numberOfBindings = 1;
 
-    KeyBinding *current = headKeyBinding;
-    while(current)
+    for(int i = 0; i < numberOfCommands && numberOfCommands < maxItems; i++)
     {
-        CHAR modifiersKeyName[50];
-        if(current->modifiers & LAlt && current->modifiers & LShift)
-        {
-            memcpy(modifiersKeyName, "ALT+SHIFT", 50);
-        }
-        else if(current->modifiers & LAlt)
-        {
-            memcpy(modifiersKeyName, "ALT", 50);
-        }
-        else if(current->modifiers & LWin)
-        {
-            memcpy(modifiersKeyName, "WIN", 50);
-        }
+        Command *command = commands[i];
+        CHAR keyBindingStr[MAX_PATH];
 
-        unsigned int scanCode = MapVirtualKey(current->key, MAPVK_VK_TO_VSC);
-
-        switch (current->key)
+        if(command->keyBinding)
         {
-            case VK_LEFT: case VK_UP: case VK_RIGHT: case VK_DOWN:
-            case VK_PRIOR: case VK_NEXT:
-            case VK_END: case VK_HOME:
-            case VK_INSERT: case VK_DELETE:
-            case VK_DIVIDE:
-            case VK_NUMLOCK:
-                {
-                    scanCode |= 0x100;
-                    break;
-                }
-        }
-
-        CHAR keyStrBuff[1024];
-        GetKeyNameTextA(scanCode << 16, keyStrBuff, 1024);
-
-        CHAR keyBindingStr[50];
-        sprintf_s(
-                keyBindingStr,
-                50,
-                "%s+%s",
-                modifiersKeyName,
-                keyStrBuff);
-
-        CHAR bindingStringToAdd[1024];
-        if(current->scratchWindowArg)
-        {
-            if(current->scratchWindowArg->name)
+            CHAR modifiersKeyName[MAX_PATH];
+            if(command->keyBinding->modifiers & LAlt && command->keyBinding->modifiers & LShift)
             {
-                if(current->cmdArg)
-                {
-                    sprintf_s(
-                            bindingStringToAdd,
-                            1024,
-                            "%45s %-15s %ls %s",
-                            current->scratchWindowArg->name,
-                            keyBindingStr,
-                            current->cmdArg,
-                            current->scratchWindowArg->cmd);
-                }
-                else if(current->scratchWindowArg->runProcessMenuAdditionalParams)
-                {
-                    sprintf_s(
-                            bindingStringToAdd,
-                            1024,
-                            "%-45s %-15s %s",
-                            current->scratchWindowArg->name,
-                            keyBindingStr,
-                            current->scratchWindowArg->runProcessMenuAdditionalParams);
-                }
-                else
-                {
-                    sprintf_s(
-                            bindingStringToAdd,
-                            1024,
-                            "%-45s %-15s %s",
-                            current->scratchWindowArg->name,
-                            keyBindingStr,
-                            current->scratchWindowArg->cmd);
-                }
-                lines[numberOfBindings] = _strdup(bindingStringToAdd);
-                numberOfBindings++;
+                memcpy(modifiersKeyName, "ALT+SHIFT", 50);
             }
-        }
-        else if(current->name)
-        {
+            else if(command->keyBinding->modifiers & LAlt)
+            {
+                memcpy(modifiersKeyName, "ALT", 50);
+            }
+            else if(command->keyBinding->modifiers & LWin)
+            {
+                memcpy(modifiersKeyName, "WIN", 50);
+            }
+
+            unsigned int scanCode = MapVirtualKey(command->keyBinding->key, MAPVK_VK_TO_VSC);
+
+            switch (command->keyBinding->key)
+            {
+                case VK_LEFT: case VK_UP: case VK_RIGHT: case VK_DOWN:
+                case VK_PRIOR: case VK_NEXT:
+                case VK_END: case VK_HOME:
+                case VK_INSERT: case VK_DELETE:
+                case VK_DIVIDE:
+                case VK_NUMLOCK:
+                    {
+                        scanCode |= 0x100;
+                        break;
+                    }
+            }
+
+            CHAR keyStrBuff[MAX_PATH];
+            GetKeyNameTextA(scanCode << 16, keyStrBuff, MAX_PATH);
+
             sprintf_s(
-                    bindingStringToAdd,
-                    1024,
-                    "%-45s %-15s",
-                    current->name,
-                    keyBindingStr);
-            lines[numberOfBindings] = _strdup(bindingStringToAdd);
-            numberOfBindings++;
+                    keyBindingStr,
+                    50,
+                    "%s+%s",
+                    modifiersKeyName,
+                    keyStrBuff);
         }
-        current = current->next;
+
+        CHAR stringToAdd[MAX_PATH];
+        CHAR commandDescription[MAX_PATH];
+        command->getDescription(command, MAX_PATH, commandDescription);
+
+        sprintf_s(
+                stringToAdd,
+                1024,
+                "%-45s %-25s %-15s %s",
+                command->name,
+                command->type,
+                keyBindingStr,
+                commandDescription);
+
+        lines[numberOfBindings] = _strdup(stringToAdd);
+        numberOfBindings++;
     }
 
     return numberOfBindings;
 }
 
-void show_keybindings(ScratchWindow *self, Monitor *monitor, int scratchWindowsScreenPaddingArg)
-{
-    UNREFERENCED_PARAMETER(self);
-    UNREFERENCED_PARAMETER(monitor);
-    UNREFERENCED_PARAMETER(scratchWindowsScreenPaddingArg);
-
-    CHAR *bindings[256];
-    CHAR header[1024];
-    sprintf_s(
-            header,
-            1024,
-            "%-45s %-15s %s",
-            "Name",
-            "KeyBinding",
-            "Shell Command");
-
-    bindings[0] = _strdup(header);
-
-    int numberOfBindings = 1;
-
-    KeyBinding *current = headKeyBinding;
-    while(current)
-    {
-        CHAR modifiersKeyName[50];
-        if(current->modifiers & LAlt && current->modifiers & LShift)
-        {
-            memcpy(modifiersKeyName, "ALT+SHIFT", 50);
-        }
-        else if(current->modifiers & LAlt)
-        {
-            memcpy(modifiersKeyName, "ALT", 50);
-        }
-        else if(current->modifiers & LWin)
-        {
-            memcpy(modifiersKeyName, "WIN", 50);
-        }
-
-        unsigned int scanCode = MapVirtualKey(current->key, MAPVK_VK_TO_VSC);
-
-        switch (current->key)
-        {
-            case VK_LEFT: case VK_UP: case VK_RIGHT: case VK_DOWN:
-            case VK_PRIOR: case VK_NEXT:
-            case VK_END: case VK_HOME:
-            case VK_INSERT: case VK_DELETE:
-            case VK_DIVIDE:
-            case VK_NUMLOCK:
-                {
-                    scanCode |= 0x100;
-                    break;
-                }
-        }
-
-        CHAR keyStrBuff[1024];
-        GetKeyNameTextA(scanCode << 16, keyStrBuff, 1024);
-
-        CHAR keyBindingStr[50];
-        sprintf_s(
-                keyBindingStr,
-                50,
-                "%s+%s",
-                modifiersKeyName,
-                keyStrBuff);
-
-        CHAR bindingStringToAdd[1024];
-        if(current->scratchWindowArg)
-        {
-            if(current->scratchWindowArg->name)
-            {
-                if(current->cmdArg)
-                {
-                    sprintf_s(
-                            bindingStringToAdd,
-                            1024,
-                            "%45s %-15s %ls %s",
-                            current->scratchWindowArg->name,
-                            keyBindingStr,
-                            current->cmdArg,
-                            current->scratchWindowArg->cmd);
-                }
-                else if(current->scratchWindowArg->runProcessMenuAdditionalParams)
-                {
-                    sprintf_s(
-                            bindingStringToAdd,
-                            1024,
-                            "%-45s %-15s %s",
-                            current->scratchWindowArg->name,
-                            keyBindingStr,
-                            current->scratchWindowArg->runProcessMenuAdditionalParams);
-                }
-                else
-                {
-                    sprintf_s(
-                            bindingStringToAdd,
-                            1024,
-                            "%-45s %-15s %s",
-                            current->scratchWindowArg->name,
-                            keyBindingStr,
-                            current->scratchWindowArg->cmd);
-                }
-                bindings[numberOfBindings] = _strdup(bindingStringToAdd);
-                numberOfBindings++;
-            }
-        }
-        else if(current->name)
-        {
-            sprintf_s(
-                    bindingStringToAdd,
-                    1024,
-                    "%-45s %-15s",
-                    current->name,
-                    keyBindingStr);
-            bindings[numberOfBindings] = _strdup(bindingStringToAdd);
-            numberOfBindings++;
-        }
-        current = current->next;
-    }
-
-    TCHAR cmdBuff[MAX_PATH];
-    swprintf_s(
-            cmdBuff,
-            MAX_PATH,
-            L"bin\\RunProcess.exe --hasHeader --title \"%ls\"",
-            self->uniqueStr);
-
-    process_with_stdin_start(cmdBuff, bindings, numberOfBindings, self->stdOutCallback);
-}
-
 void register_default_scratch_windows(void)
 {
     MenuDefinition *definition = menu_create_and_register();
-    definition->itemsAction = keybindings_list;
+    definition->itemsAction = commands_list;
     definition->hasHeader = TRUE;
     definition->onSelection = run_command_from_menu;
-    keybinding_create_menu_arg("ListKeyBindings", LAlt, VK_X, menu_run, definition);
+    keybinding_create_with_menu_arg("ListKeyBindings", LAlt, VK_X, menu_run, definition);
 }
 
 void mimimize_focused_window(void)
@@ -1006,25 +815,9 @@ LRESULT CALLBACK handle_key_press(int code, WPARAM w, LPARAM l)
 
                 if(keyBinding->modifiers == modifiersPressed)
                 {
-                    if(keyBinding->action)
+                    if(keyBinding->command)
                     {
-                        keyBinding->action();
-                    }
-                    else if(keyBinding->cmdAction)
-                    {
-                        keyBinding->cmdAction(keyBinding->cmdArg);
-                    }
-                    else if(keyBinding->workspaceAction)
-                    {
-                        keyBinding->workspaceAction(keyBinding->workspaceArg);
-                    }
-                    else if(keyBinding->scratchWindowAction)
-                    {
-                        keyBinding->scratchWindowAction(keyBinding->scratchWindowArg);
-                    }
-                    else if(keyBinding->menuAction)
-                    {
-                        keyBinding->menuAction(keyBinding->menuArg);
+                        keyBinding->command->execute(keyBinding->command);
                     }
                     return 1;
                 }
@@ -2859,52 +2652,6 @@ void menu_run(MenuDefinition *definition)
     menu_focus(mView);
 }
 
-void scratch_window_register(
-        CHAR *cmd,
-        CHAR *cmdArgs,
-        CHAR *runProcessMenuAdditionalParams,
-        void (*stdOutCallback) (CHAR *),
-        WindowFilter windowFilter,
-        int modifiers,
-        int key,
-        TCHAR *uniqueStr,
-        ScratchFilter scratchFilter)
-{
-    ScratchWindow *sWindow = calloc(1, sizeof(ScratchWindow));
-    sWindow->cmd = cmd;
-    sWindow->stdOutCallback = stdOutCallback;
-    sWindow->cmdArgs = cmdArgs;
-    sWindow->runProcessMenuAdditionalParams = runProcessMenuAdditionalParams;
-    sWindow->windowFilter = windowFilter;
-    sWindow->uniqueStr = uniqueStr;
-    sWindow->scratchFilter = scratchFilter;
-    sWindow->next = NULL;
-
-    scratch_windows_add_to_end(sWindow);
-    keybinding_create_scratch_arg(NULL, modifiers, key, scratch_window_toggle, sWindow);
-}
-
-ScratchWindow *scratch_menu_register_command_from_function(CHAR *name, CHAR *afterMenuCommand, void (*stdOutCallback) (CHAR *), TCHAR *uniqueStr, void (*runFunc)(ScratchWindow*, Monitor *monitor, int))
-{
-    ScratchWindow *sWindow = calloc(1, sizeof(ScratchWindow));
-    sWindow->name = _strdup(name);
-    sWindow->stdOutCallback = stdOutCallback;
-    sWindow->runProcessMenuAdditionalParams = afterMenuCommand;
-    sWindow->uniqueStr = uniqueStr;
-    sWindow->next = NULL;
-    sWindow->runFunc = runFunc;
-
-    scratch_windows_add_to_end(sWindow);
-    /* keybinding_create_scratch_arg(modifiers, key, scratch_window_toggle, sWindow); */
-    return sWindow;
-}
-
-ScratchWindow *scratch_menu_register(CHAR *name, CHAR *afterMenuCommand, void (*stdOutCallback) (CHAR *), TCHAR *uniqueStr)
-{
-    ScratchWindow *result = scratch_menu_register_command_from_function(name, afterMenuCommand, stdOutCallback, uniqueStr, scratch_window_run_as_menu);
-    return result;
-}
-
 BOOL terminal_with_uniqueStr_filter(ScratchWindow *self, Client *client)
 {
     if(wcsstr(client->data->processImageName, L"WindowsTerminal.exe"))
@@ -2916,11 +2663,6 @@ BOOL terminal_with_uniqueStr_filter(ScratchWindow *self, Client *client)
         }
     }
     return FALSE;
-}
-
-void scratch_terminal_register_with_unique_string(CHAR *cmd, int modifiers, int key, TCHAR *uniqueStr)
-{
-    scratch_terminal_register(cmd, modifiers, key, uniqueStr, terminal_with_uniqueStr_filter);
 }
 
 ScratchWindow *register_scratch_terminal_with_unique_string(CHAR *name, char *cmd, TCHAR *uniqueStr)
@@ -2937,26 +2679,6 @@ ScratchWindow *register_scratch_terminal_with_unique_string(CHAR *name, char *cm
 
     scratch_windows_add_to_end(sWindow);
     return sWindow;
-}
-
-void assign_key_binding_to_scratch_window(ScratchWindow *scratchWindow, int modifiers, int key)
-{
-    keybinding_create_scratch_arg(NULL, modifiers, key, scratch_window_toggle, scratchWindow);
-}
-
-void scratch_terminal_register(CHAR *cmd, int modifiers, int key, TCHAR *uniqueStr, ScratchFilter scratchFilter)
-{
-    CHAR buff[4096];
-    sprintf_s(buff, 4096, "wt.exe --title \"Scratch Window %ls\" %s", uniqueStr, cmd);
-
-    ScratchWindow *sWindow = calloc(1, sizeof(ScratchWindow));
-    sWindow->cmd = _strdup(buff);
-    sWindow->uniqueStr = uniqueStr;
-    sWindow->scratchFilter = scratchFilter;
-    sWindow->next = NULL;
-
-    scratch_windows_add_to_end(sWindow);
-    keybinding_create_scratch_arg(NULL, modifiers, key, scratch_window_toggle, sWindow);
 }
 
 void scratch_window_show(ScratchWindow *self)
@@ -3049,30 +2771,6 @@ void scratch_window_remove(ScratchWindow *self)
 
     free_client(self->client);
     self->client = NULL;
-}
-
-void scratch_window_run_as_menu(ScratchWindow *self, Monitor *monitor, int padding)
-{
-    CHAR cmdBuff[4096];
-    sprintf_s(
-            cmdBuff,
-            4096,
-            "/c bin\\RunProcess.exe --title \"Scratch Window %ls\" -l %d -t %d -w %d -h %d %s",
-            self->uniqueStr,
-            monitor->xOffset + padding,
-            padding,
-            monitor->w - (padding * 2),
-            monitor->h - (padding * 2),
-            self->runProcessMenuAdditionalParams);
-
-    if(self->stdOutCallback)
-    {
-        process_with_stdout_start(cmdBuff, self->stdOutCallback);
-    }
-    else
-    {
-        start_process(NULL, cmdBuff, CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS);
-    }
 }
 
 void monitor_set_workspace_and_arrange(Workspace *workspace, Monitor *monitor, HDWP hdwp)
@@ -3307,7 +3005,7 @@ void bar_render_times(HDC hdc, PAINTSTRUCT *ps)
         int displayStrLen = swprintf(
                 displayStr,
                 MAX_PATH,
-                L"Internet: %lc | Volume: %.0f %% | Memory %ld %% | CPU: %ld %% | %04d-%02d-%02d %02d:%02d:%02d | %02d:%02d:%02d\n",
+                L"Internet: %lc | Volume: %3.0f %% | Memory: %3ld %% | CPU: %3ld %% | %04d-%02d-%02d %02d:%02d:%02d | %02d:%02d:%02d\n",
                 internetStatusChar,
                 currentVol * 100,
                 memoryPercent,
@@ -3788,6 +3486,232 @@ void border_window_run(WNDCLASSEX *windowClass)
     }
 }
 
+void command_execute_no_arg(Command *self)
+{
+    if(self->action)
+    {
+        self->action();
+    }
+}
+
+void command_no_arg_get_description(Command *self, int maxLen, CHAR *toFill)
+{
+    UNREFERENCED_PARAMETER(self);
+    UNREFERENCED_PARAMETER(maxLen);
+    UNREFERENCED_PARAMETER(toFill);
+
+    toFill[0] = '\0';
+}
+
+void command_execute_workspace_arg(Command *self)
+{
+    if(self->workspaceArg && self->workspaceAction)
+    {
+        self->workspaceAction(self->workspaceArg);
+    }
+}
+
+void command_workspace_arg_get_description(Command *self, int maxLen, CHAR *toFill)
+{
+    sprintf_s(
+            toFill,
+            maxLen,
+            "%.*ls",
+            maxLen - 1,
+            self->workspaceArg->name);
+}
+
+void command_execute_scratchwindow_arg(Command *self)
+{
+    if(self->scratchWindowArg && self->scratchWindowAction)
+    {
+        self->scratchWindowAction(self->scratchWindowArg);
+    }
+}
+
+void command_scratch_arg_get_description(Command *self, int maxLen, CHAR *toFill)
+{
+    sprintf_s(
+            toFill,
+            maxLen,
+            "%.*s",
+            maxLen - 1,
+            self->scratchWindowArg->cmd);
+}
+
+void command_execute_menu_arg(Command *self)
+{
+    if(self->menuArg && self->menuAction)
+    {
+        self->menuAction(self->menuArg);
+    }
+}
+
+void command_menu_arg_get_description(Command *self, int maxLen, CHAR *toFill)
+{
+    if(self->menuArg->loadCommand)
+    {
+        sprintf_s(
+                toFill,
+                maxLen,
+                "%.*s",
+                maxLen - 1,
+                self->menuArg->loadCommand->expression);
+    }
+}
+
+void command_execute_shell_arg(Command *self)
+{
+    if(self->shellArg && self->shellAction)
+    {
+        self->shellAction(self->shellArg);
+    }
+}
+
+void command_shell_arg_get_description(Command *self, int maxLen, CHAR *toFill)
+{
+    sprintf_s(
+            toFill,
+            maxLen,
+            "%.*ls",
+            maxLen -1,
+            self->shellArg);
+}
+
+void command_register(Command *self)
+{
+    commands[numberOfCommands] = self;
+    numberOfCommands++;
+}
+
+Command *command_create(CHAR *name)
+{
+    if(numberOfCommands < MAX_COMMANDS)
+    {
+        Command *result = calloc(1, sizeof(Command));
+        result->name = name;
+        command_register(result);
+        return result;
+    }
+
+    return NULL;
+}
+
+Command *command_create_with_no_arg(CHAR *name, void (*action) (void))
+{
+    Command *result = command_create(name);
+    if(result)
+    {
+        result->type = "Function";
+        result->action = action;
+        result->execute = command_execute_no_arg;
+        result->getDescription = command_no_arg_get_description;
+    }
+
+    return result;
+}
+
+Command *command_create_with_workspace_arg(CHAR *name, Workspace *arg, void (*action) (Workspace *arg))
+{
+    Command *result = command_create(name);
+    if(result)
+    {
+        result->type = "WorkspaceFunction";
+        result->workspaceArg = arg;
+        result->workspaceAction = action;
+        result->execute = command_execute_workspace_arg;
+        result->getDescription = command_workspace_arg_get_description;
+    }
+
+    return result;
+}
+
+Command *command_create_with_scratchwindow_arg(CHAR *name, ScratchWindow *arg, void (*action) (ScratchWindow *arg))
+{
+    Command *result = command_create(name);
+    if(result)
+    {
+        result->type = "ScratchWindow";
+        result->scratchWindowArg = arg;
+        result->scratchWindowAction = action;
+        result->execute = command_execute_scratchwindow_arg;
+        result->getDescription = command_scratch_arg_get_description;
+    }
+
+    return result;
+}
+
+Command *command_create_with_menu_arg(CHAR *name, MenuDefinition *arg, void (*action) (MenuDefinition *arg))
+{
+    Command *result = command_create(name);
+    if(result)
+    {
+        result->type = "Menu";
+        result->menuArg = arg;
+        result->menuAction = action;
+        result->execute = command_execute_menu_arg;
+        result->getDescription = command_menu_arg_get_description;
+    }
+
+    return result;
+}
+
+Command *command_create_with_shell_arg(CHAR *name, TCHAR *arg, void (*action) (TCHAR *arg))
+{
+    Command *result = command_create(name);
+    if(result)
+    {
+        result->type = "Shell";
+        result->shellArg = arg;
+        result->shellAction = action;
+        result->execute = command_execute_shell_arg;
+        result->getDescription = command_shell_arg_get_description;
+    }
+
+    return result;
+}
+
+void keybinding_assign_to_command(KeyBinding *keyBinding, Command *command)
+{
+    keyBinding->command = command;
+    command->keyBinding = keyBinding;
+}
+
+void keybinding_create_with_no_arg(CHAR *name, int modifiers, unsigned int key, void (*action) (void))
+{
+    KeyBinding *keyBinding = keybindings_find_existing_or_create(name, modifiers, key);
+    Command *command = command_create_with_no_arg(name, action);
+    keybinding_assign_to_command(keyBinding, command);
+}
+
+void keybinding_create_with_workspace_arg(CHAR *name, int modifiers, unsigned int key, void (*action) (Workspace*), Workspace *arg)
+{
+    KeyBinding *keyBinding = keybindings_find_existing_or_create(name, modifiers, key);
+    Command *command = command_create_with_workspace_arg(name, arg, action);
+    keybinding_assign_to_command(keyBinding, command);
+}
+
+void keybinding_create_with_scratchwindow_arg(CHAR *name, int modifiers, unsigned int key, ScratchWindow *arg)
+{
+    KeyBinding *keyBinding = keybindings_find_existing_or_create(name, modifiers, key);
+    Command *command = command_create_with_scratchwindow_arg(name, arg, scratch_window_toggle);
+    keybinding_assign_to_command(keyBinding, command);
+}
+
+void keybinding_create_with_shell_arg(CHAR *name, int modifiers, unsigned int key, void (*action) (TCHAR*), TCHAR *arg)
+{
+    KeyBinding *keyBinding = keybindings_find_existing_or_create(name, modifiers, key);
+    Command *command = command_create_with_shell_arg(name, arg, action);
+    keybinding_assign_to_command(keyBinding, command);
+}
+
+void keybinding_create_with_menu_arg(CHAR *name, int modifiers, unsigned int key, void (*action) (MenuDefinition*), MenuDefinition *arg)
+{
+    KeyBinding *keyBinding = keybindings_find_existing_or_create(name, modifiers, key);
+    Command *command = command_create_with_menu_arg(name, arg, action);
+    keybinding_assign_to_command(keyBinding, command);
+}
+
 void keybinding_add_to_list(KeyBinding *binding)
 {
     if(!headKeyBinding)
@@ -3828,94 +3752,60 @@ KeyBinding* keybindings_find_existing_or_create(CHAR* name, int modifiers, unsig
     return result;
 }
 
-void keybinding_create_no_args(CHAR *name, int modifiers, unsigned int key, void (*action) (void))
-{
-    KeyBinding *result = keybindings_find_existing_or_create(name, modifiers, key);
-    result->action = action;
-}
-
-void keybinding_create_cmd_args(CHAR *name, int modifiers, unsigned int key, void (*action) (TCHAR*), TCHAR *cmdArg)
-{
-    KeyBinding *result = keybindings_find_existing_or_create(name, modifiers, key);
-    result->cmdAction = action;
-    result->cmdArg = cmdArg;
-}
-
-void keybinding_create_menu_arg(CHAR *name, int modifiers, unsigned int key, void (*action) (MenuDefinition*), MenuDefinition *arg)
-{
-    KeyBinding *result = keybindings_find_existing_or_create(name, modifiers, key);
-    result->menuAction = action;
-    result->menuArg = arg;
-}
-
-void keybinding_create_workspace_arg(CHAR *name, int modifiers, unsigned int key, void (*action) (Workspace*), Workspace *arg)
-{
-    KeyBinding *result = keybindings_find_existing_or_create(name, modifiers, key);
-    result->workspaceAction = action;
-    result->workspaceArg = arg;
-}
-
-void keybinding_create_scratch_arg(CHAR *name, int modifiers, unsigned int key, void (*action) (ScratchWindow*), ScratchWindow *arg)
-{
-    KeyBinding *result = keybindings_find_existing_or_create(name, modifiers, key);
-    result->scratchWindowAction = action;
-    result->scratchWindowArg = arg;
-}
-
 void keybindings_register_defaults(void)
 {
-    keybinding_create_no_args("select_next_window", LAlt, VK_J, select_next_window);
-    keybinding_create_no_args("select_previous_window", LAlt, VK_K, select_previous_window);
-    keybinding_create_no_args("monitor_select_next", LAlt, VK_OEM_COMMA, monitor_select_next);
-    keybinding_create_no_args("arrange_clients_in_selected_workspace", LAlt, VK_N, arrange_clients_in_selected_workspace);
-    keybinding_create_no_args("move_focused_window_right", LAlt, VK_L, move_focused_window_right);
-    keybinding_create_no_args("move_focused_window_left", LAlt, VK_H, move_focused_window_left);
-    keybinding_create_no_args("move_focused_window_right", LAlt | LShift, VK_RIGHT, move_focused_window_right);
-    keybinding_create_no_args("move_focused_window_right", LAlt | LShift, VK_LEFT, move_focused_window_left);
-    keybinding_create_no_args("move_focused_window_up", LAlt | LShift, VK_UP, move_focused_window_up);
-    keybinding_create_no_args("move_focused_window_down", LAlt | LShift, VK_DOWN, move_focused_window_down);
-    keybinding_create_no_args("move_focused_window_to_master", LAlt, VK_RETURN, move_focused_window_to_master);
-    keybinding_create_no_args("mimimize_focused_window", LShift | LAlt, VK_DOWN, mimimize_focused_window);
+    keybinding_create_with_no_arg("select_next_window", LAlt, VK_J, select_next_window);
+    keybinding_create_with_no_arg("select_previous_window", LAlt, VK_K, select_previous_window);
+    keybinding_create_with_no_arg("monitor_select_next", LAlt, VK_OEM_COMMA, monitor_select_next);
+    keybinding_create_with_no_arg("arrange_clients_in_selected_workspace", LAlt, VK_N, arrange_clients_in_selected_workspace);
+    keybinding_create_with_no_arg("move_focused_window_right", LAlt, VK_L, move_focused_window_right);
+    keybinding_create_with_no_arg("move_focused_window_left", LAlt, VK_H, move_focused_window_left);
+    keybinding_create_with_no_arg("move_focused_window_right", LAlt | LShift, VK_RIGHT, move_focused_window_right);
+    keybinding_create_with_no_arg("move_focused_window_right", LAlt | LShift, VK_LEFT, move_focused_window_left);
+    keybinding_create_with_no_arg("move_focused_window_up", LAlt | LShift, VK_UP, move_focused_window_up);
+    keybinding_create_with_no_arg("move_focused_window_down", LAlt | LShift, VK_DOWN, move_focused_window_down);
+    keybinding_create_with_no_arg("move_focused_window_to_master", LAlt, VK_RETURN, move_focused_window_to_master);
+    keybinding_create_with_no_arg("mimimize_focused_window", LShift | LAlt, VK_DOWN, mimimize_focused_window);
 
-    keybinding_create_workspace_arg("swap_selected_monitor_to[1]", LAlt, VK_1, swap_selected_monitor_to, workspaces[0]);
-    keybinding_create_workspace_arg("swap_selected_monitor_to[2]", LAlt, VK_2, swap_selected_monitor_to, workspaces[1]);
-    keybinding_create_workspace_arg("swap_selected_monitor_to[3]", LAlt, VK_3, swap_selected_monitor_to, workspaces[2]);
-    keybinding_create_workspace_arg("swap_selected_monitor_to[4]", LAlt, VK_4, swap_selected_monitor_to, workspaces[3]);
-    keybinding_create_workspace_arg("swap_selected_monitor_to[5]", LAlt, VK_5, swap_selected_monitor_to, workspaces[4]);
-    keybinding_create_workspace_arg("swap_selected_monitor_to[6]", LAlt, VK_6, swap_selected_monitor_to, workspaces[5]);
-    keybinding_create_workspace_arg("swap_selected_monitor_to[7]", LAlt, VK_7, swap_selected_monitor_to, workspaces[6]);
-    keybinding_create_workspace_arg("swap_selected_monitor_to[8]", LAlt, VK_8, swap_selected_monitor_to, workspaces[7]);
-    keybinding_create_workspace_arg("swap_selected_monitor_to[9]", LAlt, VK_9, swap_selected_monitor_to, workspaces[8]);
+    keybinding_create_with_workspace_arg("swap_selected_monitor_to[1]", LAlt, VK_1, swap_selected_monitor_to, workspaces[0]);
+    keybinding_create_with_workspace_arg("swap_selected_monitor_to[2]", LAlt, VK_2, swap_selected_monitor_to, workspaces[1]);
+    keybinding_create_with_workspace_arg("swap_selected_monitor_to[3]", LAlt, VK_3, swap_selected_monitor_to, workspaces[2]);
+    keybinding_create_with_workspace_arg("swap_selected_monitor_to[4]", LAlt, VK_4, swap_selected_monitor_to, workspaces[3]);
+    keybinding_create_with_workspace_arg("swap_selected_monitor_to[5]", LAlt, VK_5, swap_selected_monitor_to, workspaces[4]);
+    keybinding_create_with_workspace_arg("swap_selected_monitor_to[6]", LAlt, VK_6, swap_selected_monitor_to, workspaces[5]);
+    keybinding_create_with_workspace_arg("swap_selected_monitor_to[7]", LAlt, VK_7, swap_selected_monitor_to, workspaces[6]);
+    keybinding_create_with_workspace_arg("swap_selected_monitor_to[8]", LAlt, VK_8, swap_selected_monitor_to, workspaces[7]);
+    keybinding_create_with_workspace_arg("swap_selected_monitor_to[9]", LAlt, VK_9, swap_selected_monitor_to, workspaces[8]);
 
-    keybinding_create_no_args("move_focused_client_next", LShift | LAlt, VK_J, move_focused_client_next);
-    keybinding_create_no_args("move_focused_client_previous", LShift | LAlt, VK_K, move_focused_client_previous);
+    keybinding_create_with_no_arg("move_focused_client_next", LShift | LAlt, VK_J, move_focused_client_next);
+    keybinding_create_with_no_arg("move_focused_client_previous", LShift | LAlt, VK_K, move_focused_client_previous);
 
-    keybinding_create_workspace_arg("move_focused_window_to_workspace[1]", LShift | LAlt, VK_1, move_focused_window_to_workspace, workspaces[0]);
-    keybinding_create_workspace_arg("move_focused_window_to_workspace[2]", LShift | LAlt, VK_2, move_focused_window_to_workspace, workspaces[1]);
-    keybinding_create_workspace_arg("move_focused_window_to_workspace[3]", LShift | LAlt, VK_3, move_focused_window_to_workspace, workspaces[2]);
-    keybinding_create_workspace_arg("move_focused_window_to_workspace[4]", LShift | LAlt, VK_4, move_focused_window_to_workspace, workspaces[3]);
-    keybinding_create_workspace_arg("move_focused_window_to_workspace[5]", LShift | LAlt, VK_5, move_focused_window_to_workspace, workspaces[4]);
-    keybinding_create_workspace_arg("move_focused_window_to_workspace[6]", LShift | LAlt, VK_6, move_focused_window_to_workspace, workspaces[5]);
-    keybinding_create_workspace_arg("move_focused_window_to_workspace[7]", LShift | LAlt, VK_7, move_focused_window_to_workspace, workspaces[6]);
-    keybinding_create_workspace_arg("move_focused_window_to_workspace[8]", LShift | LAlt, VK_8, move_focused_window_to_workspace, workspaces[7]);
-    keybinding_create_workspace_arg("move_focused_window_to_workspace[9]", LShift | LAlt, VK_9, move_focused_window_to_workspace, workspaces[8]);
+    keybinding_create_with_workspace_arg("move_focused_window_to_workspace[1]", LShift | LAlt, VK_1, move_focused_window_to_workspace, workspaces[0]);
+    keybinding_create_with_workspace_arg("move_focused_window_to_workspace[2]", LShift | LAlt, VK_2, move_focused_window_to_workspace, workspaces[1]);
+    keybinding_create_with_workspace_arg("move_focused_window_to_workspace[3]", LShift | LAlt, VK_3, move_focused_window_to_workspace, workspaces[2]);
+    keybinding_create_with_workspace_arg("move_focused_window_to_workspace[4]", LShift | LAlt, VK_4, move_focused_window_to_workspace, workspaces[3]);
+    keybinding_create_with_workspace_arg("move_focused_window_to_workspace[5]", LShift | LAlt, VK_5, move_focused_window_to_workspace, workspaces[4]);
+    keybinding_create_with_workspace_arg("move_focused_window_to_workspace[6]", LShift | LAlt, VK_6, move_focused_window_to_workspace, workspaces[5]);
+    keybinding_create_with_workspace_arg("move_focused_window_to_workspace[7]", LShift | LAlt, VK_7, move_focused_window_to_workspace, workspaces[6]);
+    keybinding_create_with_workspace_arg("move_focused_window_to_workspace[8]", LShift | LAlt, VK_8, move_focused_window_to_workspace, workspaces[7]);
+    keybinding_create_with_workspace_arg("move_focused_window_to_workspace[9]", LShift | LAlt, VK_9, move_focused_window_to_workspace, workspaces[8]);
 
-    keybinding_create_no_args("close_focused_window", LShift | LAlt, VK_C, close_focused_window);
-    keybinding_create_no_args("kill_focused_window", LShift | LAlt, VK_C, kill_focused_window);
-    keybinding_create_no_args("taskbar_toggle", LAlt, VK_V, taskbar_toggle);
+    keybinding_create_with_no_arg("close_focused_window", LShift | LAlt, VK_C, close_focused_window);
+    keybinding_create_with_no_arg("kill_focused_window", LShift | LAlt, VK_C, kill_focused_window);
+    keybinding_create_with_no_arg("taskbar_toggle", LAlt, VK_V, taskbar_toggle);
 
-    keybinding_create_no_args("toggle_create_window_in_current_workspace", LAlt, VK_B, toggle_create_window_in_current_workspace);
-    keybinding_create_no_args("toggle_ignore_workspace_filters", LAlt, VK_Z, toggle_ignore_workspace_filters);
-    keybinding_create_no_args("client_stop_managing", LAlt, VK_F, client_stop_managing);
+    keybinding_create_with_no_arg("toggle_create_window_in_current_workspace", LAlt, VK_B, toggle_create_window_in_current_workspace);
+    keybinding_create_with_no_arg("toggle_ignore_workspace_filters", LAlt, VK_Z, toggle_ignore_workspace_filters);
+    keybinding_create_with_no_arg("client_stop_managing", LAlt, VK_F, client_stop_managing);
 
-    keybinding_create_no_args("swap_selected_monitor_to_monacle_layout", LAlt, VK_M, swap_selected_monitor_to_monacle_layout);
-    keybinding_create_no_args("swap_selected_monitor_to_deck_layout", LAlt, VK_D, swap_selected_monitor_to_deck_layout);
-    keybinding_create_no_args("swap_selected_monitor_to_tile_layout", LAlt, VK_T, swap_selected_monitor_to_tile_layout);
-    keybinding_create_no_args("redraw_focused_window", LAlt, VK_R, redraw_focused_window);
+    keybinding_create_with_no_arg("swap_selected_monitor_to_monacle_layout", LAlt, VK_M, swap_selected_monitor_to_monacle_layout);
+    keybinding_create_with_no_arg("swap_selected_monitor_to_deck_layout", LAlt, VK_D, swap_selected_monitor_to_deck_layout);
+    keybinding_create_with_no_arg("swap_selected_monitor_to_tile_layout", LAlt, VK_T, swap_selected_monitor_to_tile_layout);
+    keybinding_create_with_no_arg("redraw_focused_window", LAlt, VK_R, redraw_focused_window);
 
     /* keybinding_create_cmd_args(LWin, VK_T, start_app, terminalAppPath); */
 
-    keybinding_create_no_args("quit", LAlt, VK_F9, quit);
+    keybinding_create_with_no_arg("quit", LAlt, VK_F9, quit);
 }
 
 void start_process(CHAR *processExe, CHAR *cmdArgs, DWORD creationFlags)
@@ -4435,9 +4325,6 @@ int run (void)
     hiddenWindowMonitor = calloc(1, sizeof(Monitor));
     monitor_calulate_coordinates(hiddenWindowMonitor, numberOfMonitors);
 
-    /* keybindings_register_defaults(); */
-    /* create_keybindings(workspaces); */
-
     int barTop = 0;
     int barBottom = barHeight;
     int buttonWidth = 30;
@@ -4514,10 +4401,6 @@ int run (void)
     int menuTop = scratchWindowsScreenPadding;
     int menuWidth = selectedMonitor->w - (scratchWindowsScreenPadding * 2);
     int menuHeight = selectedMonitor->h - (scratchWindowsScreenPadding * 2);
-    /* int menuTop = 250; */
-    /* int menuLeft = 250; */
-    /* int menuHeight = 940; */
-    /* int menuWidth = 2050; */
     TCHAR menuTitle[BUF_LEN] = L"Blah";
 
     mView = menu_create(menuTop, menuLeft, menuWidth, menuHeight, menuTitle);

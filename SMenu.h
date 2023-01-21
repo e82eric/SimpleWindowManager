@@ -17,7 +17,7 @@ typedef struct MenuDefinition
     BOOL hasReturnRange;
     void (*onSelection)(char* stdOut);
     void (*onEscape)(void);
-    int (*itemsAction)(CHAR** items);
+    int (*itemsAction)(int maxItems, CHAR** items);
 } MenuDefinition;
 
 struct NamedCommand
@@ -38,7 +38,7 @@ struct MenuKeyBinding
     MenuKeyBinding* next;
     BOOL reloadAfter;
     BOOL isLoadCommand;
-    int (*loadAction)(CHAR** items);
+    int (*loadAction)(int maxItems, CHAR** items);
     BOOL quitAfter;
 };
 
@@ -159,4 +159,4 @@ MenuView *menu_create(int left, int top, int width, int height, TCHAR *title);
 void menu_run_definition(MenuView *self, MenuDefinition *menuDefinition);
 void MenuDefinition_ParseAndAddLoadCommand(MenuDefinition *self, char *argText);
 void MenuDefinition_ParseAndSetRange(MenuDefinition *self, char *argText);
-void MenuDefinition_AddLoadActionKeyBinding(MenuDefinition *self, unsigned int modifier, unsigned int key, int (*loadAction)(CHAR**));
+void MenuDefinition_AddLoadActionKeyBinding(MenuDefinition *self, unsigned int modifier, unsigned int key, int (*loadAction)(int maxItems, CHAR**));

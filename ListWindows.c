@@ -3,11 +3,6 @@
 #include <windows.h>
 #include <shlwapi.h>
 #include <strsafe.h>
-#pragma comment(lib, "user32.lib")
-#pragma comment(lib, "Advapi32.lib")
-#pragma comment(lib, "Dwmapi.lib")
-#pragma comment(lib, "Shlwapi.lib")
-#pragma comment(lib, "Shell32.lib")
 
 typedef struct Client Client;
 typedef struct Workspace Workspace;
@@ -35,11 +30,10 @@ struct ClientData
     CHAR *processName;
     CHAR *className;
     CHAR *title;
-    BOOL isElevated;
     BOOL isMinimized;
 };
 
-BOOL is_alt_tab_window(HWND hwnd)
+BOOL list_windows_is_alt_tab_window(HWND hwnd)
 {
     // Start at the root owner
     HWND hwndWalk = GetAncestor(hwnd, GA_ROOTOWNER);
@@ -85,7 +79,7 @@ BOOL is_root_window(HWND hwnd, LONG styles, LONG exStyles)
         return FALSE;
     }
 
-    BOOL isAltTabWindow = is_alt_tab_window(hwnd);
+    BOOL isAltTabWindow = list_windows_is_alt_tab_window(hwnd);
 
     if(!isAltTabWindow)
     {
@@ -102,22 +96,6 @@ Client* clientFactory_create_from_hwnd(HWND hwnd)
 
     HANDLE hProcess;
     hProcess = OpenProcess( PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, FALSE, processId);
-
-    BOOL isElevated = FALSE;
-    HANDLE hToken = NULL;
-    if(OpenProcessToken(hProcess ,TOKEN_QUERY,&hToken))
-    {
-        TOKEN_ELEVATION Elevation;
-        DWORD cbSize = sizeof(TOKEN_ELEVATION);
-        if(GetTokenInformation(hToken, TokenElevation, &Elevation, sizeof(Elevation), &cbSize))
-        {
-            isElevated = Elevation.TokenIsElevated;
-        }
-    }
-    if(hToken)
-    {
-        CloseHandle( hToken );
-    }
 
     CHAR processImageFileName[1024] = {0};
     DWORD dwFileSize = 1024;
@@ -155,7 +133,6 @@ Client* clientFactory_create_from_hwnd(HWND hwnd)
     clientData->className = _strdup(className);
     clientData->processName = _strdup(processShortFileName);
     clientData->title = _strdup(title);
-    clientData->isElevated = isElevated;
     clientData->isMinimized = isMinimized;
 
     Client *c;
@@ -220,7 +197,7 @@ static BOOL CALLBACK enum_windows_callback(HWND hwnd, LPARAM lparam)
     return TRUE;
 }
 
-int main (void)
+int list_windows_run(int maxItems, CHAR** toFill)
 {
     Workspace *workspace = calloc(1, sizeof(Workspace));
     EnumWindows(enum_windows_callback, (LPARAM)workspace);
@@ -229,17 +206,33 @@ int main (void)
     TCHAR temp[1024];
     StringCchPrintf(temp, 1024, TEXT("%-*s %-*s %-*s %s\n"), 8, L"HWND", 8, L"PID", (int)workspace->maxProcessNameLen, L"Name", L"Title");
     StringCchLength(temp, 1024, &cchStringSize);
-    printf("%-*s %-*s %-*s %s\n", 8, "HWND", 8, "PID", (int)workspace->maxProcessNameLen, "Name", "Title");
+
+    CHAR header[1024];
+    sprintf_s(
+            header,
+            1024,
+            "%-*s %-*s %-*s %s\n", 8, "HWND", 8, "PID", (int)workspace->maxProcessNameLen, "Name", "Title");
+    toFill[0] = _strdup(header);
+
     Client *c = workspace->clients;
-    while(c)
+
+    int numberOfResults = 1;
+    CHAR lineBuf[1024];
+    while(c && numberOfResults <= maxItems)
     {
         StringCchPrintf(temp, 1024, TEXT("%08x %08d %-*s %s\n"),
             c->data->hwnd, c->data->processId, (int)workspace->maxProcessNameLen, c->data->processName, c->data->title);
         StringCchLength(temp, 1024, &cchStringSize);
-        printf("%08x %08d %-*s %s\n",
-            c->data->hwnd, c->data->processId, (int)workspace->maxProcessNameLen, c->data->processName, c->data->title);
+        sprintf_s(
+                lineBuf,
+                1024,
+                "%08x %08d %-*s %s\n",
+                c->data->hwnd, c->data->processId, (int)workspace->maxProcessNameLen, c->data->processName, c->data->title);
+
+        toFill[numberOfResults] = _strdup(lineBuf);
         c = c->next;
+        numberOfResults++;
     }
 
-    return 0;
+    return numberOfResults;
 }

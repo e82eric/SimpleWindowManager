@@ -429,7 +429,7 @@ void ItemsView_Clear(ItemsView *self)
     self->headerSet = FALSE;
 }
 
-void ItemsView_LoadFromAction(ItemsView *self, int (itemsAction)(CHAR **items))
+void ItemsView_LoadFromAction(ItemsView *self, int (itemsAction)(int maxItems, CHAR **items))
 {
     ItemsView_Clear(self);
 
@@ -438,7 +438,7 @@ void ItemsView_LoadFromAction(ItemsView *self, int (itemsAction)(CHAR **items))
     self->chunks->items = calloc(CHUNK_SIZE, sizeof(Item*));
 
     CHAR *itemsBuf[CHUNK_SIZE];
-    int numberOfItems = itemsAction(itemsBuf);
+    int numberOfItems = itemsAction(CHUNK_SIZE, itemsBuf);
 
     for(int i = 0; i < numberOfItems; i++)
     {
@@ -1277,7 +1277,7 @@ NamedCommand* MenuDefinition_FindNamedCommandByName(MenuDefinition *self, char *
     return command;
 }
 
-void MenuDefinition_AddLoadActionKeyBinding(MenuDefinition *self, unsigned int modifier, unsigned int key, int (*loadAction)(CHAR**))
+void MenuDefinition_AddLoadActionKeyBinding(MenuDefinition *self, unsigned int modifier, unsigned int key, int (*loadAction)(int, CHAR**))
 {
     MenuKeyBinding *binding = calloc(1, sizeof(MenuKeyBinding));
     binding->modifier = modifier;

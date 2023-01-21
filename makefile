@@ -1,55 +1,32 @@
 outdir = tmp
 publishdir = bin
+winlibs = Gdi32.lib user32.lib ComCtl32.lib
+nowarncflags = /c /EHsc /nologo /DUNICODE /D_UNICODE /Zi
+cflags = $(nowarncflags) /c /W4 /EHsc /nologo /DUNICODE /D_UNICODE /Zi
 
-build: clean ListWindows ListProcesses RunProcess SimpleWindowmanager
-
-setup:
+all: clean SimpleWindowManager.exe ListWindows.exe ListProcesses.exe
 
 clean:
 	if exist "$(outdir)" rd /s /q $(outdir)
 	mkdir $(outdir)
 
-SimpleWindowmanager: SListWindows SMenu SListProcesses fzf
-	CL /c /W4 /EHsc /nologo ..\simplewindowmanagerconfig\Config.c /DUNICODE /D_UNICODE /Zi /Fd"$(outdir)\Config.pdb" /Fo"$(outdir)\Config.obj"
-	CL /c /W4 /EHsc /nologo SimpleWindowManager.c /DUNICODE /D_UNICODE /Zi /Fd"$(outdir)\SimpleWindowManager.pdb" /Fo"$(outdir)\SimpleWindowManager.obj"
-	LINK /DEBUG $(outdir)\SListProcesses.obj $(outdir)\SListWindows.obj $(outdir)\fzf.obj $(outdir)\SMenu.obj $(outdir)\SimpleWindowManager.obj $(outdir)\Config.obj user32.lib Oleacc.lib Gdi32.lib ComCtl32.lib Shlwapi.lib OLE32.lib Advapi32.lib Dwmapi.lib Shell32.lib OleAut32.lib /OUT:$(outdir)\SimpleWindowManager.exe
+Config.obj:
+	CL $(cflags) ..\simplewindowmanagerconfig\Config.c /Fd"$(outdir)\Config.pdb" /Fo"$(outdir)\Config.obj"
 
-ListWindows:
-	CL /c /W4 /EHsc /nologo ListWindows.c /DUNICODE /D_UNICODE /Zi /Fd"$(outdir)\ListWindows.pdb" /Fo"$(outdir)\ListWindows.obj"
-	LINK /DEBUG $(outdir)\ListWindows.obj /OUT:$(outdir)\ListWindows.exe
+fzf.obj:
+	CL $(nowarncflags) fzf\fzf.c /Fd"$(outdir)\fzf.pdb" /Fo"$(outdir)\fzf.obj"
 
-ListProcesses:
-	CL /c /W4 /EHsc /nologo ListProcesses.c /DUNICODE /D_UNICODE /Zi /Fd"$(outdir)\ListProcesses.pdb" /Fo"$(outdir)\ListProcesses.obj"
-	LINK /DEBUG $(outdir)\ListProcesses.obj /OUT:$(outdir)\ListProcesses.exe
+.c.obj:
+	CL /c $(cflags) $*.c /Fd"$(outdir)\$*.pdb" /Fo"$(outdir)\$*.obj"
 
-SListProcesses:
-	CL /c /W4 /EHsc /nologo SListProcesses.c /DUNICODE /D_UNICODE /Zi /Fd"$(outdir)\SListProcesses.pdb" /Fo"$(outdir)\SListProcesses.obj"
+SimpleWindowManager.exe: ListProcesses.obj ListWindows.obj fzf.obj SMenu.obj SimpleWindowManager.obj Config.obj
+	LINK /DEBUG $(outdir)\ListProcesses.obj $(outdir)\ListWindows.obj $(outdir)\fzf.obj $(outdir)\SMenu.obj $(outdir)\SimpleWindowManager.obj $(outdir)\Config.obj $(winlibs) Oleacc.lib Shlwapi.lib OLE32.lib Advapi32.lib Dwmapi.lib Shell32.lib OleAut32.lib /OUT:$(outdir)\SimpleWindowManager.exe
 
-ListProcessesProcess: SListProcesses
-	CL /c /W4 /EHsc /nologo ListProcessesProcess.c /DUNICODE /D_UNICODE /Zi /Fd"$(outdir)\ListProcessesProcess.pdb" /Fo"$(outdir)\ListProcessesProcess.obj"
-	LINK /DEBUG $(outdir)\ListProcessesProcess.obj $(outdir)\SListProcesses.obj Gdi32.lib user32.lib ComCtl32.lib Shlwapi.lib /OUT:$(outdir)\ListProcessesProcess.exe
+ListWindows.exe: ListWindowsConsole.obj ListWindows.obj
+	LINK /DEBUG $(outdir)\ListWindowsConsole.obj $(outdir)\ListWindows.obj $(winlibs) Shlwapi.lib /OUT:$(outdir)\ListWindows.exe
 
-fzf:
-	CL /c /EHsc /nologo fzf\fzf.c /DUNICODE /D_UNICODE /Zi /Fd"$(outdir)\fzf.pdb" /Fo"$(outdir)\fzf.obj"
+SMenu.exe: SMenu.obj SMenuConsole.obj fzf.obj
+	LINK /DEBUG $(outdir)\SMenuConsole.obj $(outdir)\SMenu.obj $(outdir)\fzf.obj $(winlibs) /OUT:$(outdir)\SMenu.exe
 
-RunProcess: fzf
-	CL /c /W4 /EHsc /nologo RunProcess.c /DUNICODE /D_UNICODE /Zi /Fd"$(outdir)\RunProcess.pdb" /Fo"$(outdir)\RunProcess.obj"
-	LINK /DEBUG $(outdir)\RunProcess.obj $(outdir)\fzf.obj Gdi32.lib user32.lib ComCtl32.lib /OUT:$(outdir)\RunProcess.exe
-
-SListWindows:
-	CL /c /W4 /EHsc /nologo SListWindows.c /DUNICODE /D_UNICODE /Zi /Fd"$(outdir)\SListWindows.pdb" /Fo"$(outdir)\SListWindows.obj"
-
-ListWindowsProcess: SListWindows
-	CL /c /W4 /EHsc /nologo ListWindowsProcess.c /DUNICODE /D_UNICODE /Zi /Fd"$(outdir)\ListWindowsProcess.pdb" /Fo"$(outdir)\ListWindowsProcess.obj"
-	LINK /DEBUG $(outdir)\ListWindowsProcess.obj $(outdir)\SListWindows.obj Gdi32.lib user32.lib ComCtl32.lib Shlwapi.lib /OUT:$(outdir)\ListWindowsProcess.exe
-
-SMenu: fzf
-	CL /c /W4 /EHsc /nologo SMenu.c /DUNICODE /D_UNICODE /Zi /Fd"$(outdir)\SMenu.pdb" /Fo"$(outdir)\SMenu.obj"
-
-MenuProcess: SMenu
-	CL /c /W4 /EHsc /nologo MenuProcess.c /DUNICODE /D_UNICODE /Zi /Fd"$(outdir)\MenuProcess.pdb" /Fo"$(outdir)\MenuProcess.obj"
-	LINK /DEBUG $(outdir)\MenuProcess.obj $(outdir)\SMenu.obj $(outdir)\fzf.obj Gdi32.lib user32.lib ComCtl32.lib /OUT:$(outdir)\Menu.exe
-
-publish:
-	rd /s /q $(publishdir)
-	xcopy $(outdir) $(publishdir)\ /E
+ListProcesses.exe: ListProcesses.obj ListProcessesConsole.obj
+	LINK /DEBUG $(outdir)\ListProcessesConsole.obj $(outdir)\ListProcesses.obj $(winlibs) Shlwapi.lib /OUT:$(outdir)\ListProcesses.exe

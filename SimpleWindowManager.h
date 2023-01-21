@@ -6,6 +6,7 @@ typedef struct Monitor Monitor;
 typedef struct Layout Layout;
 typedef struct Bar Bar;
 typedef struct Button Button;
+typedef struct Command Command;
 typedef struct KeyBinding KeyBinding;
 typedef struct ScratchWindow ScratchWindow;
 typedef struct Configuration Configuration;
@@ -129,7 +130,7 @@ struct ScratchWindow
     CHAR *name;
     CHAR *cmd;
     CHAR *cmdArgs;
-    CHAR *runProcessMenuAdditionalParams;
+    /* CHAR *runProcessMenuAdditionalParams; */
     TCHAR *uniqueStr;
     Client *client;
     void (*stdOutCallback) (CHAR *);
@@ -205,21 +206,31 @@ struct Bar
     int environmentContextTextLen;
 };
 
+struct Command
+{
+    CHAR *name;
+    CHAR *type;
+    void (*execute)(Command *self);
+    void (*getDescription)(Command *self, int maxLen, CHAR *toFill);
+    void (*action)(void);
+    void (*workspaceAction)(Workspace *arg);
+    Workspace *workspaceArg;
+    void (*scratchWindowAction)(ScratchWindow *arg);
+    ScratchWindow *scratchWindowArg;
+    void (*menuAction)(MenuDefinition *arg);
+    MenuDefinition *menuArg;
+    void (*shellAction) (TCHAR *arg);
+    TCHAR *shellArg;
+    KeyBinding *keyBinding;
+};
+
 struct KeyBinding
 {
+    Command *command;
     CHAR *name;
     int modifiers;
     unsigned int key;
-    void (*action) (void);
-    void (*workspaceAction) (Workspace *);
-    Workspace *workspaceArg;
-    void (*cmdAction) (TCHAR*);
-    TCHAR *cmdArg;
     KeyBinding *next;
-    void (*scratchWindowAction) (ScratchWindow*);
-    ScratchWindow *scratchWindowArg;
-    void (*menuAction) (MenuDefinition*);
-    MenuDefinition *menuArg;
 };
 
 extern Layout deckLayout;
@@ -239,11 +250,11 @@ void workspace_register_title_contains_filter(Workspace *workspace, TCHAR *title
 void workspace_register_title_not_contains_filter(Workspace *workspace, TCHAR *title);
 Workspace* workspace_create(TCHAR *name, WindowFilter windowFilter, WCHAR* tag, Layout *layout, int numberOfButtons);
 
-void keybinding_create_no_args(CHAR *name, int modifiers, unsigned int key, void (*action) (void));
-void keybinding_create_cmd_args(CHAR *name, int modifiers, unsigned int key, void (*action) (TCHAR*), TCHAR *cmdArg);
-void keybinding_create_workspace_arg(CHAR *name, int modifiers, unsigned int key, void (*action) (Workspace*), Workspace *arg);
-void keybinding_create_scratch_arg(CHAR *name, int modifiers, unsigned int key, void (*action) (ScratchWindow*), ScratchWindow *arg);
-void keybinding_create_menu_arg(CHAR *name, int modifiers, unsigned int key, void (*action) (MenuDefinition*), MenuDefinition *arg);
+void keybinding_create_with_no_arg(CHAR *name, int modifiers, unsigned int key, void (*action) (void));
+void keybinding_create_with_workspace_arg(CHAR *name, int modifiers, unsigned int key, void (*action) (Workspace*), Workspace *arg);
+void keybinding_create_with_scratchwindow_arg(CHAR *name, int modifiers, unsigned int key, ScratchWindow *arg);
+void keybinding_create_with_menu_arg(CHAR *name, int modifiers, unsigned int key, void (*action) (MenuDefinition*), MenuDefinition *arg);
+void keybinding_create_with_shell_arg(CHAR *name, int modifiers, unsigned int key, void (*action) (TCHAR*), TCHAR *arg);
 
 TCHAR* client_get_command_line(Client *self);
 
@@ -253,22 +264,11 @@ void select_previous_window(void);
 void monitor_select_next(void);
 void start_launcher(CHAR *cmdArgs);
 void start_scratch_not_elevated(CHAR *cmdArgs);
-void scratch_window_register(
-        CHAR *cmd,
-        CHAR *cmdArgs,
-        CHAR *runProcessMenuAdditionalParams,
-        void (*stdOutCallback) (CHAR *),
-        WindowFilter windowFilter,
-        int modifiers,
-        int key,
-        TCHAR* uniqueStr,
-        ScratchFilter scratchFilter);
-ScratchWindow *scratch_menu_register(CHAR *name, CHAR *afterMenuCommand, void (*stdOutCallback) (CHAR *), TCHAR *uniqueStr);
-ScratchWindow *scratch_menu_register_command_from_function(CHAR *name, CHAR *afterMenuCommand, void (*stdOutCallback) (CHAR *), TCHAR *uniqueStr, void (*runFunc)(ScratchWindow*, Monitor*, int));
+/* ScratchWindow *scratch_menu_register(CHAR *name, CHAR *afterMenuCommand, void (*stdOutCallback) (CHAR *), TCHAR *uniqueStr); */
+/* ScratchWindow *scratch_menu_register_command_from_function(CHAR *name, CHAR *afterMenuCommand, void (*stdOutCallback) (CHAR *), TCHAR *uniqueStr, void (*runFunc)(ScratchWindow*, Monitor*, int)); */
 void scratch_terminal_register_with_unique_string(CHAR *cmd, int modifiers, int key, TCHAR *uniqueStr);
 void scratch_terminal_register(CHAR *cmd, int modifiers, int key, TCHAR *uniqueStr, ScratchFilter scratchFilter);
 ScratchWindow *register_scratch_terminal_with_unique_string(CHAR *name, char *cmd, TCHAR *uniqueStr);
-void assign_key_binding_to_scratch_window(ScratchWindow *scratchWindow, int modifiers, int key);
 void process_with_stdout_start(CHAR *cmdArgs, void (*onSuccess) (CHAR *));
 void start_app(TCHAR *processExe);
 void start_app_non_elevated(TCHAR *processExe);
@@ -316,14 +316,9 @@ MenuDefinition* menu_create_and_register(void);
 void menu_run(MenuDefinition *definition);
 void show_clients(void);
 void show_keybindings(ScratchWindow *self, Monitor *monitor, int scratchWindowsScreenPadding);
-/* Everything below is what Config.c must implement */
-/* void create_workspaces(void); */
 void keybindings_register_defaults(void);
 void register_default_scratch_windows(void);
-/* void create_keybindings(Workspace** workspaces); */
 BOOL should_use_old_move_logic(Client* client);
-/* BOOL should_always_exclude(Client* client); */
-/* BOOL should_float_be_focused(Client *client); */
 BOOL is_float_window(Client *client, LONG_PTR styles, LONG_PTR exStyles);
 HFONT initalize_font();
 
