@@ -2493,6 +2493,15 @@ void menu_focus(MenuView *self)
             w + 8,
             h + 8,
             SWP_SHOWWINDOW);
+    DeferWindowPos(
+            hdwp,
+            self->hwnd,
+            NULL,
+            x,
+            y,
+            w,
+            h,
+            SWP_SHOWWINDOW);
     EndDeferWindowPos(hdwp);
 }
 
