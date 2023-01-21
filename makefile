@@ -30,3 +30,7 @@ SMenu.exe: SMenu.obj SMenuConsole.obj fzf.obj
 
 ListProcesses.exe: ListProcesses.obj ListProcessesConsole.obj
 	LINK /DEBUG $(outdir)\ListProcessesConsole.obj $(outdir)\ListProcesses.obj $(winlibs) Shlwapi.lib /OUT:$(outdir)\ListProcesses.exe
+
+publish:
+	rd /s /q $(publishdir)
+	xcopy $(outdir) $(publishdir)\ /E
