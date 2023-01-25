@@ -28,6 +28,8 @@ struct NamedCommand
     BOOL hasReplacement;
     int indexOfReplacement;
     NamedCommand *next;
+    BOOL reloadAfter;
+    BOOL quitAfter;
 };
 
 struct MenuKeyBinding
@@ -36,10 +38,8 @@ struct MenuKeyBinding
     unsigned int key;
     NamedCommand* command;
     MenuKeyBinding* next;
-    BOOL reloadAfter;
     BOOL isLoadCommand;
     int (*loadAction)(int maxItems, CHAR** items);
-    BOOL quitAfter;
 };
 
 typedef struct ItemsView ItemsView;
@@ -121,6 +121,7 @@ struct ItemsView
     BOOL headerSet;
     BOOL hasLoadCommand;
     NamedCommand *loadCommand;
+    int (*loadAction)(int maxItems, CHAR**);
     int maxDisplayItems;
     int numberOfItemsMatched;
     BOOL isReading;
@@ -154,7 +155,7 @@ typedef struct MenuView
 } MenuView;
 
 void MenuDefinition_ParseAndAddKeyBinding(MenuDefinition *self, char *argText, BOOL isLoadCommand);
-void MenuDefinition_AddNamedCommand(MenuDefinition *self, char *argText);
+void MenuDefinition_AddNamedCommand(MenuDefinition *self, char *argText, BOOL reloadAfter, BOOL quitAfter);
 MenuView *menu_create(int left, int top, int width, int height, TCHAR *title);
 void menu_run_definition(MenuView *self, MenuDefinition *menuDefinition);
 void MenuDefinition_ParseAndAddLoadCommand(MenuDefinition *self, char *argText);

@@ -2483,7 +2483,7 @@ void menu_focus(MenuView *self)
     ShowWindow(borderWindowHwnd, SW_HIDE);
     ShowWindow(self->hwnd, SW_SHOW);
     SetForegroundWindow(self->hwnd);
-    HDWP hdwp = BeginDeferWindowPos(1);
+    HDWP hdwp = BeginDeferWindowPos(2);
     DeferWindowPos(
             hdwp,
             borderWindowHwnd,
@@ -2645,7 +2645,7 @@ void menu_hide(void)
 {
     menuVisible = FALSE;
     ShowWindow(mView->hwnd, SW_HIDE);
-    workspace_focus_selected_window(selectedMonitor->workspace);
+    /* workspace_focus_selected_window(selectedMonitor->workspace); */
 }
 
 void menu_on_escape(void)

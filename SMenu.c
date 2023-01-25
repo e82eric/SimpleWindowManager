@@ -393,6 +393,27 @@ void ItemsView_StartLoadItems_FromCommand(ItemsView *self, NamedCommand *namedCo
     ProcessWithItemStreamOutput_Start(namedCommand->expression, job);
 }
 
+void ItemsView_LoadFromAction(ItemsView *self, int (itemsAction)(int maxItems, CHAR **items))
+{
+    ItemsView_Clear(self);
+
+    ItemsView_SetLoading(self);
+    self->chunks = calloc(1, sizeof(Chunk));
+    self->chunks->items = calloc(CHUNK_SIZE, sizeof(Item*));
+
+    CHAR *itemsBuf[CHUNK_SIZE];
+    int numberOfItems = itemsAction(CHUNK_SIZE, itemsBuf);
+
+    for(int i = 0; i < numberOfItems; i++)
+    {
+        ItemsView_AddToEnd(self, itemsBuf[i]);
+        free(itemsBuf[i]);
+    }
+
+    TriggerSearch(self->searchView);
+    ItemsView_SetDoneLoading(self);
+}
+
 void ItemsView_StartLoadItems(ItemsView *self)
 {
     ProcessCmdOutputJob *job = calloc(1, sizeof(ProcessCmdOutputJob));
@@ -401,6 +422,10 @@ void ItemsView_StartLoadItems(ItemsView *self)
     if(self->loadCommand)
     {
         ProcessWithItemStreamOutput_Start(self->loadCommand->expression, job);
+    }
+    else if(self->loadAction)
+    {
+        ItemsView_LoadFromAction(self, self->loadAction);
     }
 }
 
@@ -429,27 +454,6 @@ void ItemsView_Clear(ItemsView *self)
     self->headerSet = FALSE;
 }
 
-void ItemsView_LoadFromAction(ItemsView *self, int (itemsAction)(int maxItems, CHAR **items))
-{
-    ItemsView_Clear(self);
-
-    ItemsView_SetLoading(self);
-    self->chunks = calloc(1, sizeof(Chunk));
-    self->chunks->items = calloc(CHUNK_SIZE, sizeof(Item*));
-
-    CHAR *itemsBuf[CHUNK_SIZE];
-    int numberOfItems = itemsAction(CHUNK_SIZE, itemsBuf);
-
-    for(int i = 0; i < numberOfItems; i++)
-    {
-        ItemsView_AddToEnd(self, itemsBuf[i]);
-        free(itemsBuf[i]);
-    }
-
-    TriggerSearch(self->searchView);
-    ItemsView_SetDoneLoading(self);
-}
-
 void ItemsView_ReloadFromCommand(ItemsView *self, NamedCommand *command)
 {
     ItemsView_Clear(self);
@@ -459,30 +463,27 @@ void ItemsView_ReloadFromCommand(ItemsView *self, NamedCommand *command)
 
 void ItemsView_HandleReload(ItemsView *self)
 {
-    if(self->hasLoadCommand)
+    SendMessageA(self->hwnd, LB_SETCURSEL, 0, -1);
+    SendMessage(self->hwnd, LB_RESETCONTENT, 0, 0);;
+
+    Chunk *currentChunk = self->chunks;
+    while(currentChunk)
     {
-        SendMessageA(self->hwnd, LB_SETCURSEL, 0, -1);
-        SendMessage(self->hwnd, LB_RESETCONTENT, 0, 0);;
-
-        Chunk *currentChunk = self->chunks;
-        while(currentChunk)
+        for(int i = 0; i < currentChunk->count; i++)
         {
-            for(int i = 0; i < currentChunk->count; i++)
-            {
-                free(currentChunk->items[i]->text);
-                free(currentChunk->items[i]);
-            }
-
-            Chunk *temp = currentChunk;
-            currentChunk = currentChunk->next;
-            free(temp);
+            free(currentChunk->items[i]->text);
+            free(currentChunk->items[i]);
         }
 
-        self->chunks = calloc(1, sizeof(Chunk));
-        self->chunks->items = calloc(CHUNK_SIZE, sizeof(Item*));
-
-        ItemsView_StartLoadItems(self);
+        Chunk *temp = currentChunk;
+        currentChunk = currentChunk->next;
+        free(temp);
     }
+
+    self->chunks = calloc(1, sizeof(Chunk));
+    self->chunks->items = calloc(CHUNK_SIZE, sizeof(Item*));
+
+    ItemsView_StartLoadItems(self);
 }
 
 void CALLBACK BindProcessFinishCallback(void* lpParameter, BOOLEAN isTimeout)
@@ -504,7 +505,7 @@ void CALLBACK BindProcessFinishCallback(void* lpParameter, BOOLEAN isTimeout)
     }
 }
 
-void ItemsView_HandleBinding(ItemsView *self, NamedCommand *command, BOOL reloadAfter, BOOL quitAfter)
+void ItemsView_HandleBinding(ItemsView *self, NamedCommand *command)
 {
     if(self->namedCommands)
     {
@@ -522,12 +523,12 @@ void ItemsView_HandleBinding(ItemsView *self, NamedCommand *command, BOOL reload
                 sprintf_s(selSubStr, BUF_LEN, "%.*s\n", self->returnRangeEnd, curSelStr + self->returnRangeStart);
 
                 NamedCommand_Parse(newBindCommand, selSubStr, command, BUF_LEN);
-                ItemsView_StartBindingProcess(self, newBindCommand, BindProcessFinishCallback, reloadAfter, quitAfter);
+                ItemsView_StartBindingProcess(self, newBindCommand, BindProcessFinishCallback, command->reloadAfter, command->quitAfter);
             }
             else
             {
                 NamedCommand_Parse(newBindCommand, curSelStr, command, BUF_LEN);
-                ItemsView_StartBindingProcess(self, newBindCommand, BindProcessFinishCallback, reloadAfter, quitAfter);
+                ItemsView_StartBindingProcess(self, newBindCommand, BindProcessFinishCallback, command->reloadAfter, command->quitAfter);
             }
         }
     }
@@ -605,7 +606,7 @@ LRESULT CALLBACK SearchView_MessageProcessor(HWND hWnd, UINT uMsg, WPARAM wParam
                     }
                     else
                     {
-                        ItemsView_HandleBinding(self->itemsView, current->command, current->reloadAfter, current->quitAfter);
+                        ItemsView_HandleBinding(self->itemsView, current->command);
                     }
                     return 1;
                 }
@@ -998,22 +999,19 @@ void MenuView_CreateChildControls(MenuView *self)
     SetWindowSubclass(self->searchView->hwnd, SearchView_MessageProcessor, 0, (DWORD_PTR)self->searchView);
     SendMessage(self->searchView->hwnd, WM_SETFONT, (WPARAM)font, (LPARAM)TRUE);
 
-    /* if(self->itemsView->hasHeader) */
-    /* { */
-        self->itemsView->headerHwnd = CreateWindowA(
-                "STATIC", 
-                NULL, 
-                WS_VISIBLE | WS_CHILD | SS_LEFT | WS_BORDER,
-                10, 
-                10, 
-                600, 
-                10,
-                self->hwnd, 
-                (HMENU)IDC_STATIC_TEXT,
-                hinstance,
-                NULL);
-        SendMessageA(self->itemsView->headerHwnd, WM_SETFONT, (WPARAM)font, (LPARAM)TRUE);
-    /* } */
+    self->itemsView->headerHwnd = CreateWindowA(
+            "STATIC", 
+            NULL, 
+            WS_VISIBLE | WS_CHILD | SS_LEFT | WS_BORDER,
+            10, 
+            10, 
+            600, 
+            10,
+            self->hwnd, 
+            (HMENU)IDC_STATIC_TEXT,
+            hinstance,
+            NULL);
+    SendMessageA(self->itemsView->headerHwnd, WM_SETFONT, (WPARAM)font, (LPARAM)TRUE);
 
     self->itemsView->summaryHwnd = CreateWindow(
             L"STATIC", 
@@ -1282,9 +1280,7 @@ void MenuDefinition_AddLoadActionKeyBinding(MenuDefinition *self, unsigned int m
     MenuKeyBinding *binding = calloc(1, sizeof(MenuKeyBinding));
     binding->modifier = modifier;
     binding->key = key;
-    binding->reloadAfter = TRUE;
     binding->isLoadCommand = TRUE;
-    binding->quitAfter = FALSE;
     binding->loadAction = loadAction;
 
     if(!self->keyBindings)
@@ -1327,35 +1323,8 @@ void MenuDefinition_ParseAndAddKeyBinding(MenuDefinition *self, char *argText, B
     }
 
     char nameBuff[BUF_LEN];
-    BOOL quitAfter = FALSE;
-    BOOL reloadAfter = TRUE;
     for(int i = 6; i < len; i++)
     {
-        if(argText[i] == ':')
-        {
-            nameBuff[i - startOfName] = '\0';
-            if(len - i == 5)
-            {
-                if(argText[len - 4] == 'q' && argText[len - 3] == 'u' && argText[len - 2] == 'i' && argText[len - 1] == 't')
-                {
-                    quitAfter = TRUE;
-                    break;
-                }
-            }
-            else if(len - i == 7)
-            {
-                if(     argText[len - 6] == 'r' &&
-                        argText[len - 5] == 'e' &&
-                        argText[len - 4] == 'l' &&
-                        argText[len - 3] == 'o' &&
-                        argText[len - 2] == 'a' &&
-                        argText[len - 1] == 'd')
-                {
-                    reloadAfter = TRUE;
-                    break;
-                }
-            }
-        }
         nameBuff[i - startOfName] = argText[i];
     }
 
@@ -1364,90 +1333,7 @@ void MenuDefinition_ParseAndAddKeyBinding(MenuDefinition *self, char *argText, B
     NamedCommand *command = MenuDefinition_FindNamedCommandByName(self, nameBuff);
     binding->command = command;
     binding->key = virtualKey;
-    binding->reloadAfter = reloadAfter;
     binding->isLoadCommand = isLoadCommand;
-    binding->quitAfter = quitAfter;
-
-    if(!self->keyBindings)
-    {
-        self->keyBindings = binding;
-        self->lastKeyBinding = binding;
-    }
-    else
-    {
-        self->lastKeyBinding->next = binding;
-        self->lastKeyBinding = binding;
-    }
-}
-
-void SearchView_ParseAndAddKeyBinding(SearchView *self, char *argText, BOOL isLoadCommand)
-{
-    size_t len = strlen(argText);
-    const int startOfName = 6;
-
-    if(len < 8)
-    {
-        return;
-    }
-
-    if(argText[3] != '-' || argText[5] != ':')
-    {
-        return;
-    }
-
-    short virtualKey = VkKeyScanW(argText[4]);
-
-    MenuKeyBinding *binding = calloc(1, sizeof(MenuKeyBinding));
-    if(argText[0] == 'c' && argText[1] == 't' && argText[2] == 'l')
-    {
-        binding->modifier = VK_CONTROL;
-    }
-    if(argText[0] == 'a' && argText[1] == 't' && argText[2] == 'l')
-    {
-        /* binding->modifier = VM_LALT; */
-    }
-
-    char nameBuff[BUF_LEN];
-    BOOL quitAfter = FALSE;
-    BOOL reloadAfter = TRUE;
-    for(int i = 6; i < len; i++)
-    {
-        if(argText[i] == ':')
-        {
-            nameBuff[i - startOfName] = '\0';
-            if(len - i == 5)
-            {
-                if(argText[len - 4] == 'q' && argText[len - 3] == 'u' && argText[len - 2] == 'i' && argText[len - 1] == 't')
-                {
-                    quitAfter = TRUE;
-                    break;
-                }
-            }
-            else if(len - i == 7)
-            {
-                if(     argText[len - 6] == 'r' &&
-                        argText[len - 5] == 'e' &&
-                        argText[len - 4] == 'l' &&
-                        argText[len - 3] == 'o' &&
-                        argText[len - 2] == 'a' &&
-                        argText[len - 1] == 'd')
-                {
-                    reloadAfter = TRUE;
-                    break;
-                }
-            }
-        }
-        nameBuff[i - startOfName] = argText[i];
-    }
-
-    nameBuff[len - startOfName] = '\0';
-
-    NamedCommand *command = ItemsView_FindNamedCommandByName(self->itemsView, nameBuff);
-    binding->command = command;
-    binding->key = virtualKey;
-    binding->reloadAfter = reloadAfter;
-    binding->isLoadCommand = isLoadCommand;
-    binding->quitAfter = quitAfter;
 
     if(!self->keyBindings)
     {
@@ -1481,7 +1367,7 @@ void MenuDefinition_ParseAndSetRange(MenuDefinition *self, char *argText)
     self->returnRangeEnd = atoi(endStr);
 }
 
-void MenuDefinition_AddNamedCommand(MenuDefinition *self, char *argText)
+void MenuDefinition_AddNamedCommand(MenuDefinition *self, char *argText, BOOL reloadAfter, BOOL quitAfter)
 {
     char nameBuff[BUF_LEN];
     char expressionBuff[BUF_LEN];
@@ -1534,72 +1420,8 @@ void MenuDefinition_AddNamedCommand(MenuDefinition *self, char *argText)
     command->hasReplacement = hasReplacement;
     command->indexOfReplacement = indexOfReplacement;
     command->expressionLen = expressionCtr;
-
-    if(!self->namedCommands)
-    {
-        self->namedCommands = command;
-        self->lastNamedCommand = command;
-    }
-    else
-    {
-        self->lastNamedCommand->next = command;
-        self->lastNamedCommand = command;
-    }
-}
-
-void ItemsView_AddNamedCommand(ItemsView *self, char *argText)
-{
-    char nameBuff[BUF_LEN];
-    char expressionBuff[BUF_LEN];
-
-    BOOL parsingName = TRUE;
-
-    int indexOfReplacement = 0;
-    BOOL hasReplacement = FALSE;
-
-    size_t len = strlen(argText);
-    if(len > BUF_LEN)
-    {
-        len = BUF_LEN;
-    }
-
-    int expressionCtr = 0;
-    for(int i = 0; i < len; i++)
-    {
-        if(argText[i] == ':' && parsingName)
-        {
-            nameBuff[i] = '\0';
-            parsingName = FALSE;
-        }
-        else if(argText[i] == '{' && i + 1 < len && argText[i + 1] == '}')
-        {
-            hasReplacement = TRUE;
-            indexOfReplacement = expressionCtr;
-            expressionBuff[expressionCtr] = argText[i];
-            expressionCtr++;
-            i++;
-            expressionBuff[expressionCtr] = argText[i];
-            expressionCtr++;
-        }
-        else if(parsingName)
-        {
-            nameBuff[i] = argText[i];
-        }
-        else
-        {
-            expressionBuff[expressionCtr] = argText[i];
-            expressionCtr++;
-        }
-    }
-
-    expressionBuff[expressionCtr] = '\0';
-
-    NamedCommand *command = calloc(1, sizeof(NamedCommand));
-    command->name = _strdup(nameBuff);
-    command->expression = _strdup(expressionBuff);
-    command->hasReplacement = hasReplacement;
-    command->indexOfReplacement = indexOfReplacement;
-    command->expressionLen = expressionCtr;
+    command->quitAfter = quitAfter;
+    command->reloadAfter = reloadAfter;
 
     if(!self->namedCommands)
     {
@@ -1617,33 +1439,14 @@ MenuView *menu_create(int left, int top, int width, int height, TCHAR *title)
 {
     MenuView *menuView = calloc(1, sizeof(MenuView));
 
-    NamedCommand *copyCommand = calloc(1, sizeof(NamedCommand));
-    copyCommand->name = "copytoclipboard";
-    copyCommand->expression = "cmd /c echo {} | clip"; 
-    copyCommand->expressionLen = 21;
-    copyCommand->hasReplacement = TRUE;
-    copyCommand->indexOfReplacement = 12;
-    copyCommand->next = NULL;
-
-    MenuKeyBinding *copyKeyBinding = calloc(1, sizeof(MenuKeyBinding));
-    copyKeyBinding->modifier = VK_LCONTROL;
-    copyKeyBinding->key = VK_C;
-    copyKeyBinding->command = copyCommand;
-    copyKeyBinding->next = NULL;
-    copyKeyBinding->reloadAfter = FALSE;
-
     ItemsView *itemsView = calloc(1, sizeof(ItemsView));
     itemsView->maxDisplayItems = 50;
     itemsView->hasHeader = FALSE;
     itemsView->chunks = calloc(1, sizeof(Chunk));
     itemsView->chunks->items = calloc(CHUNK_SIZE, sizeof(Item*));
-    itemsView->namedCommands = copyCommand;
-    itemsView->lastNamedCommand = copyCommand;
 
     SearchView *searchView = calloc(1, sizeof(SearchView));
     searchView->itemsView = itemsView;
-    searchView->keyBindings = copyKeyBinding;
-    searchView->lastKeyBinding = copyKeyBinding;
 
     itemsView->searchView = searchView;
 
@@ -1709,6 +1512,7 @@ void menu_run_definition(MenuView *self, MenuDefinition *menuDefinition)
     self->itemsView->hasHeader = menuDefinition->hasHeader;
     self->itemsView->hasLoadCommand = menuDefinition->hasLoadCommand;
     self->itemsView->loadCommand = menuDefinition->loadCommand;
+    self->itemsView->loadAction = menuDefinition->itemsAction;
     self->searchView->keyBindings = menuDefinition->keyBindings;
     self->itemsView->namedCommands = menuDefinition->namedCommands;
     self->itemsView->hasReturnRange = menuDefinition->hasReturnRange;
@@ -1716,6 +1520,9 @@ void menu_run_definition(MenuView *self, MenuDefinition *menuDefinition)
     self->itemsView->returnRangeEnd = menuDefinition->returnRangeEnd;
     self->itemsView->onSelection = menuDefinition->onSelection;
     self->searchView->onEscape = menuDefinition->onEscape;
+
+    MenuDefinition_AddNamedCommand(menuDefinition, "copytoclipboard:cmd /c echo {} | clip", FALSE, FALSE);
+    MenuDefinition_ParseAndAddKeyBinding(menuDefinition, "ctl-c:copytoclipboard", FALSE);
 
     SetWindowTextA(self->searchView->hwnd, "");
 
