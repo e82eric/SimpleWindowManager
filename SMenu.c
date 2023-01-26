@@ -463,26 +463,7 @@ void ItemsView_ReloadFromCommand(ItemsView *self, NamedCommand *command)
 
 void ItemsView_HandleReload(ItemsView *self)
 {
-    SendMessageA(self->hwnd, LB_SETCURSEL, 0, -1);
-    SendMessage(self->hwnd, LB_RESETCONTENT, 0, 0);;
-
-    Chunk *currentChunk = self->chunks;
-    while(currentChunk)
-    {
-        for(int i = 0; i < currentChunk->count; i++)
-        {
-            free(currentChunk->items[i]->text);
-            free(currentChunk->items[i]);
-        }
-
-        Chunk *temp = currentChunk;
-        currentChunk = currentChunk->next;
-        free(temp);
-    }
-
-    self->chunks = calloc(1, sizeof(Chunk));
-    self->chunks->items = calloc(CHUNK_SIZE, sizeof(Item*));
-
+    ItemsView_Clear(self);
     ItemsView_StartLoadItems(self);
 }
 
