@@ -1295,6 +1295,26 @@ void MenuDefinition_AddLoadActionKeyBinding(MenuDefinition *self, unsigned int m
     }
 }
 
+void MenuDefinition_AddKeyBindingToNamedCommand(MenuDefinition *self, NamedCommand *namedCommand, unsigned int modifier, unsigned int key, BOOL isLoadCommand)
+{
+    MenuKeyBinding *binding = calloc(1, sizeof(MenuKeyBinding));
+    binding->modifier = modifier;
+    binding->key = key;
+    binding->command = namedCommand;
+    binding->isLoadCommand = isLoadCommand;
+
+    if(!self->keyBindings)
+    {
+        self->keyBindings = binding;
+        self->lastKeyBinding = binding;
+    }
+    else
+    {
+        self->lastKeyBinding->next = binding;
+        self->lastKeyBinding = binding;
+    }
+}
+
 void MenuDefinition_ParseAndAddKeyBinding(MenuDefinition *self, char *argText, BOOL isLoadCommand)
 {
     size_t len = strlen(argText);
@@ -1311,11 +1331,11 @@ void MenuDefinition_ParseAndAddKeyBinding(MenuDefinition *self, char *argText, B
     }
 
     short virtualKey = VkKeyScanW(argText[4]);
+    unsigned int modifier = 0;
 
-    MenuKeyBinding *binding = calloc(1, sizeof(MenuKeyBinding));
     if(argText[0] == 'c' && argText[1] == 't' && argText[2] == 'l')
     {
-        binding->modifier = VK_CONTROL;
+        modifier = VK_CONTROL;
     }
     if(argText[0] == 'a' && argText[1] == 't' && argText[2] == 'l')
     {
@@ -1331,19 +1351,10 @@ void MenuDefinition_ParseAndAddKeyBinding(MenuDefinition *self, char *argText, B
     nameBuff[len - startOfName] = '\0';
 
     NamedCommand *command = MenuDefinition_FindNamedCommandByName(self, nameBuff);
-    binding->command = command;
-    binding->key = virtualKey;
-    binding->isLoadCommand = isLoadCommand;
 
-    if(!self->keyBindings)
+    if(modifier && command)
     {
-        self->keyBindings = binding;
-        self->lastKeyBinding = binding;
-    }
-    else
-    {
-        self->lastKeyBinding->next = binding;
-        self->lastKeyBinding = binding;
+        MenuDefinition_AddKeyBindingToNamedCommand(self, command, modifier, virtualKey, isLoadCommand);
     }
 }
 
@@ -1523,6 +1534,15 @@ void menu_run_definition(MenuView *self, MenuDefinition *menuDefinition)
 
     MenuDefinition_AddNamedCommand(menuDefinition, "copytoclipboard:cmd /c echo {} | clip", FALSE, FALSE);
     MenuDefinition_ParseAndAddKeyBinding(menuDefinition, "ctl-c:copytoclipboard", FALSE);
+
+    if(menuDefinition->loadCommand)
+    {
+        MenuDefinition_AddKeyBindingToNamedCommand(menuDefinition, menuDefinition->loadCommand, VK_CONTROL, VkKeyScanW('r'), TRUE);
+    }
+    else if(menuDefinition->itemsAction)
+    {
+        MenuDefinition_AddLoadActionKeyBinding(menuDefinition, VK_CONTROL, VkKeyScanW('r'), menuDefinition->itemsAction);
+    }
 
     SetWindowTextA(self->searchView->hwnd, "");
 
