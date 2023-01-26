@@ -1050,6 +1050,7 @@ void CALLBACK handle_windows_event(
         }
         else if(event == EVENT_SYSTEM_FOREGROUND)
         {
+            bar_trigger_paint(selectedMonitor->bar);
             Client* client = windowManager_find_client_in_workspaces_by_hwnd(hwnd);
             if(client)
             {
@@ -2645,7 +2646,7 @@ void menu_hide(void)
 {
     menuVisible = FALSE;
     ShowWindow(mView->hwnd, SW_HIDE);
-    /* workspace_focus_selected_window(selectedMonitor->workspace); */
+    border_window_update();
 }
 
 void menu_on_escape(void)
@@ -2888,12 +2889,11 @@ void bar_trigger_paint(Bar *bar)
     InvalidateRect(
       bar->hwnd,
       NULL,
-      FALSE
-    );
+      FALSE);
     UpdateWindow(bar->hwnd);
 }
 
-void bar_render_selected_window_description(Bar *bar, HDC hdc, PAINTSTRUCT *ps)
+void bar_render_selected_window_description(Bar *bar, HDC hdc)
 {
     TCHAR* windowRoutingMode = L"UNKNOWN";
     switch(currentWindowRoutingMode)
@@ -2924,7 +2924,7 @@ void bar_render_selected_window_description(Bar *bar, HDC hdc, PAINTSTRUCT *ps)
 
     TCHAR displayStr[MAX_PATH];
     int displayStrLen;
-    if(bar->monitor->workspace->selected)
+    if(bar->monitor->workspace->selected && bar->monitor == selectedMonitor)
     {
         int numberOfWorkspaceClients = workspace_get_number_of_clients(bar->monitor->workspace);
         LPCWSTR processShortFileName = PathFindFileName(clientToRender->data->processImageName);
@@ -2956,11 +2956,12 @@ void bar_render_selected_window_description(Bar *bar, HDC hdc, PAINTSTRUCT *ps)
             hdc,
             displayStr,
             displayStrLen,
-            &ps->rcPaint,
+            bar->selectedWindowDescRect,
+            /* &ps->rcPaint, */
             DT_LEFT | DT_VCENTER | DT_SINGLELINE);
 }
 
-void bar_render_times(HDC hdc, PAINTSTRUCT *ps)
+void bar_render_times(Bar *bar, HDC hdc)
 {
     if(networkListManager)
     {
@@ -3033,7 +3034,8 @@ void bar_render_times(HDC hdc, PAINTSTRUCT *ps)
                 hdc,
                 displayStr,
                 displayStrLen,
-                &ps->rcPaint,
+                bar->timesRect,
+                /* &ps->rcPaint, */
                 DT_RIGHT | DT_VCENTER | DT_SINGLELINE);
     }
 }
@@ -3101,8 +3103,15 @@ LRESULT CALLBACK bar_message_loop(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPa
                 SetTextColor(hdc, barTextColor);
                 SetBkMode(hdc, TRANSPARENT);
 
-                bar_render_times(hdc, &ps);
-                bar_render_selected_window_description(msgBar, hdc, &ps);
+                if(ps.rcPaint.left == msgBar->timesRect->left)
+                {
+                    bar_render_times(msgBar, hdc);
+                }
+                else
+                {
+                    bar_render_times(msgBar, hdc);
+                    bar_render_selected_window_description(msgBar, hdc);
+                }
             }
             EndPaint(hwnd, &ps); 
             return 0;
@@ -3110,14 +3119,10 @@ LRESULT CALLBACK bar_message_loop(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPa
             return TRUE;
         case WM_TIMER:
             msgBar = (Bar *) GetWindowLongPtr(hwnd, GWLP_USERDATA);
-            RECT rc;
-            GetClientRect(msgBar->hwnd, &rc); 
             InvalidateRect(
               msgBar->hwnd,
-              &rc,
-              FALSE
-            );
-            DeleteObject(&rc);
+              msgBar->timesRect,
+              FALSE);
             return 0;
         case WM_CLOSE:
             DestroyWindow(hwnd);
@@ -3208,6 +3213,19 @@ int get_memory_percent(void)
 int get_cpu_usage(void)
 {
     static int previousResult;
+    static ULONGLONG g_lastTimeOfProcessListRefresh;
+
+    FILETIME nowFileTime;
+    GetSystemTimeAsFileTime(&nowFileTime);
+    ULONGLONG now = ConvertFileTimeToInt64(&nowFileTime);
+    ULONGLONG nanoSecondsSinceLastRefresh = now - g_lastTimeOfProcessListRefresh;
+
+    if(!(nanoSecondsSinceLastRefresh > 10000000))
+    {
+        return previousResult;
+    }
+
+    g_lastTimeOfProcessListRefresh = now;
     int nRes = -1;
 
     FILETIME ftIdle, ftKrnl, ftUsr;
@@ -3245,6 +3263,8 @@ int get_cpu_usage(void)
     {
         return previousResult;
     }
+
+    previousResult = nRes;
     return nRes;
 }
 
@@ -4380,17 +4400,17 @@ int run (void)
             monitors[i]->bar = bar;
 
             int selectWindowLeft = (buttonWidth * numberOfWorkspaces) + 2;
-            RECT *selectedWindowDescRect = malloc(sizeof(RECT));
-            selectedWindowDescRect->left = selectWindowLeft;
-            selectedWindowDescRect->right = selectWindowLeft + 1000;
-            selectedWindowDescRect->top = barTop;
-            selectedWindowDescRect->bottom = barBottom;
-
             RECT *timesRect = malloc(sizeof(RECT));
             timesRect->left = monitors[i]->w - 1000;
             timesRect->right = monitors[i]->w - 10;
             timesRect->top = barTop;
             timesRect->bottom = barBottom;
+
+            RECT *selectedWindowDescRect = malloc(sizeof(RECT));
+            selectedWindowDescRect->left = selectWindowLeft;
+            selectedWindowDescRect->right = timesRect->left;
+            selectedWindowDescRect->top = barTop;
+            selectedWindowDescRect->bottom = barBottom;
 
             bars[i]->selectedWindowDescRect = selectedWindowDescRect;
             bars[i]->timesRect = timesRect;
