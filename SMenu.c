@@ -70,8 +70,6 @@ DWORD WINAPI SearchView_Worker(LPVOID lpParam)
 
     CHAR buff[BUF_LEN];
     GetWindowTextA(self->hwnd, buff, BUF_LEN);
-
-    self->itemsView->fzfPattern = fzf_parse_pattern(CaseSmart, false, buff, true);
     PTP_WORK completeWorkHandles[50];
     Chunk *currentChunk = self->itemsView->chunks;
     while(currentChunk)
@@ -132,6 +130,7 @@ DWORD WINAPI SearchView_Worker(LPVOID lpParam)
             free(jobs[i]->allItemsWithScores[j]);
         }
         free(jobs[i]->allItemsWithScores);
+        free(jobs[i]->searchString);
     }
 
     LRESULT lResult = SendMessageA(self->itemsView->hwnd, LB_FINDSTRING, 0, (LPARAM)self->itemsView->selectedString);
@@ -140,7 +139,7 @@ DWORD WINAPI SearchView_Worker(LPVOID lpParam)
         LRESULT newSelection = SendMessageA(self->itemsView->hwnd, LB_SETCURSEL, 0, 0);
         char achBuffer[BUF_LEN];
         SendMessageA(self->itemsView->hwnd, LB_GETTEXT, newSelection, (LPARAM)achBuffer); 
-        self->itemsView->selectedString = _strdup(achBuffer);
+        memcpy(self->itemsView->selectedString, achBuffer, BUF_LEN);
     }
     else
     {
@@ -157,6 +156,7 @@ DWORD WINAPI SearchView_Worker(LPVOID lpParam)
         fzf_free_slab(jobs[i]->fzfSlab);
         fzf_free_pattern(jobs[i]->fzfPattern);
         free(jobs[i]->displayItemList->items);
+        free(jobs[i]->displayItemList);
         free(jobs[i]);
     }
 
@@ -171,13 +171,15 @@ DWORD WINAPI SearchView_Worker(LPVOID lpParam)
 void TriggerSearch(SearchView *self)
 {
     DWORD dwThreadIdArray[1];
-    CreateThread( 
+    HANDLE threadHandle = CreateThread( 
             NULL,
             0,
             SearchView_Worker,
             self,
             0,
             &dwThreadIdArray[0]);
+
+    CloseHandle(threadHandle);
 }
 
 LRESULT CALLBACK Summary_MessageProcessor(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam, UINT_PTR uIdSubclass, DWORD_PTR dwRefData)
@@ -259,7 +261,7 @@ void ItemsView_HandleSelection(ItemsView *self)
         self->onSelection(result);
     }
 
-    /* ItemsView_Clear(self->searchView->itemsView); */
+    ItemsView_Clear(self->searchView->itemsView);
 }
 
 void ItemsView_SetHeader(ItemsView *self, char* headerLine)
@@ -275,7 +277,7 @@ void ItemsView_SelectNext(ItemsView *self)
         SendMessageA(self->hwnd, LB_SETCURSEL, dwSel + 1, 0);
         char achBuffer[BUF_LEN];
         SendMessageA(self->hwnd, LB_GETTEXT, dwSel + 1, (LPARAM)achBuffer); 
-        self->selectedString = _strdup(achBuffer);
+        memcpy(self->selectedString, achBuffer, BUF_LEN);
     }
 }
 
@@ -287,7 +289,7 @@ void ItemsView_SelectPrevious(ItemsView *self)
         SendMessageA(self->hwnd, LB_SETCURSEL, dwSel + -1, 0);
         char achBuffer[BUF_LEN];
         SendMessageA(self->hwnd, LB_GETTEXT, dwSel + 1, (LPARAM)achBuffer); 
-        self->selectedString = _strdup(achBuffer);
+        memcpy(self->selectedString, achBuffer, BUF_LEN);
     }
 }
 
@@ -382,6 +384,8 @@ void ItemsView_StartLoadItemsFromStdIn(ItemsView *self)
             job,
             0,
             &dwThreadIdArray[0]);
+
+    CloseHandle(hThreadArray[0]);
 }
 
 void ItemsView_StartLoadItems_FromCommand(ItemsView *self, NamedCommand *namedCommand)
@@ -481,9 +485,11 @@ void CALLBACK BindProcessFinishCallback(void* lpParameter, BOOLEAN isTimeout)
     CloseHandle(asyncState->processId);
     if(asyncState->quitAfter)
     {
-        ItemsView_Clear(asyncState->itemsView);
         asyncState->itemsView->searchView->onEscape();
+        ItemsView_Clear(asyncState->itemsView);
     }
+
+    free(asyncState);
 }
 
 void ItemsView_HandleBinding(ItemsView *self, NamedCommand *command)
@@ -496,21 +502,8 @@ void ItemsView_HandleBinding(ItemsView *self, NamedCommand *command)
             char newBindCommand[BUF_LEN];
             CHAR curSelStr[BUF_LEN] = "";
             SendMessageA(self->hwnd, LB_GETTEXT, dwSel, (LPARAM)curSelStr);
-
-            if(self->hasReturnRange)
-            {
-                CHAR selSubStr[BUF_LEN];
-
-                sprintf_s(selSubStr, BUF_LEN, "%.*s\n", self->returnRangeEnd, curSelStr + self->returnRangeStart);
-
-                NamedCommand_Parse(newBindCommand, selSubStr, command, BUF_LEN);
-                ItemsView_StartBindingProcess(self, newBindCommand, BindProcessFinishCallback, command->reloadAfter, command->quitAfter);
-            }
-            else
-            {
-                NamedCommand_Parse(newBindCommand, curSelStr, command, BUF_LEN);
-                ItemsView_StartBindingProcess(self, newBindCommand, BindProcessFinishCallback, command->reloadAfter, command->quitAfter);
-            }
+            NamedCommand_Parse(newBindCommand, curSelStr, command, BUF_LEN);
+            ItemsView_StartBindingProcess(self, newBindCommand, BindProcessFinishCallback, command->reloadAfter, command->quitAfter);
         }
     }
 }
@@ -528,7 +521,7 @@ LRESULT CALLBACK SearchView_MessageProcessor(HWND hWnd, UINT uMsg, WPARAM wParam
                 if(wParam == VK_ESCAPE)
                 {
                     self->onEscape();
-                    /* PostQuitMessage(0); */
+                    ItemsView_Clear(self->itemsView);
                     return 0;
                 }
                 if(wParam == VK_RETURN)
@@ -896,6 +889,8 @@ void ProcessWithItemStreamOutput_Start(char *cmdArgs, ProcessCmdOutputJob *job)
             job,
             0,
             &dwThreadIdArray[0]);
+
+    CloseHandle(hThreadArray[0]);
 }
 
 void ItemsView_SetLoading(ItemsView *self)
@@ -1180,9 +1175,13 @@ LRESULT CALLBACK Menu_MessageProcessor(
                     SetTextColor(pdis->hDC, textColor);
                     TextOutA(pdis->hDC, 0, pdis->rcItem.top + 2, achBuffer, (int)cch);
 
-                    if(self->itemsView->fzfPattern)
+                    CHAR searchStringBuff[BUF_LEN];
+                    GetWindowTextA(self->searchView->hwnd, searchStringBuff, BUF_LEN);
+                    fzf_pattern_t *fzfPattern = fzf_parse_pattern(CaseSmart, false, searchStringBuff, true);
+
+                    if(fzfPattern)
                     {
-                        fzf_position_t *pos = fzf_get_positions(achBuffer, self->itemsView->fzfPattern, self->itemsView->fzfSlab);
+                        fzf_position_t *pos = fzf_get_positions(achBuffer, fzfPattern, self->itemsView->fzfSlab);
 
                         SIZE sz;
 
@@ -1197,6 +1196,7 @@ LRESULT CALLBACK Menu_MessageProcessor(
                         }
 
                         fzf_free_positions(pos);
+                        fzf_free_pattern(fzfPattern);
                     }
 
                     if (pdis->itemState & ODS_SELECTED) 
@@ -1345,7 +1345,7 @@ void MenuDefinition_ParseAndAddLoadCommand(MenuDefinition *self, char *argText)
     if(loadCommand)
     {
         self->hasLoadCommand = TRUE;
-        self->loadCommand = loadCommand;
+        menu_definition_set_load_command(self, loadCommand);
     }
 }
 
@@ -1499,31 +1499,40 @@ MenuView *menu_create(int left, int top, int width, int height, TCHAR *title)
     return menuView;
 }
 
+MenuDefinition* menu_definition_create(void)
+{
+    MenuDefinition *result = calloc(1, sizeof(MenuDefinition));
+    MenuDefinition_AddNamedCommand(result, "copytoclipboard:cmd /c echo {} | clip", FALSE, FALSE);
+    MenuDefinition_ParseAndAddKeyBinding(result, "ctl-c:copytoclipboard", FALSE);
+
+    return result;
+}
+
+void menu_definition_set_load_action(MenuDefinition *self, int (*loadAction)(int maxItems, CHAR** items))
+{
+    self->itemsAction = loadAction;
+    MenuDefinition_AddLoadActionKeyBinding(self, VK_CONTROL, VkKeyScanW('r'), self->itemsAction);
+}
+
+void menu_definition_set_load_command(MenuDefinition *self, NamedCommand *loadCommand)
+{
+    self->loadCommand = loadCommand;
+    MenuDefinition_AddKeyBindingToNamedCommand(self, self->loadCommand, VK_CONTROL, VkKeyScanW('r'), TRUE);
+}
+
 void menu_run_definition(MenuView *self, MenuDefinition *menuDefinition)
 {
     self->itemsView->hasHeader = menuDefinition->hasHeader;
     self->itemsView->hasLoadCommand = menuDefinition->hasLoadCommand;
     self->itemsView->loadCommand = menuDefinition->loadCommand;
     self->itemsView->loadAction = menuDefinition->itemsAction;
-    self->searchView->keyBindings = menuDefinition->keyBindings;
     self->itemsView->namedCommands = menuDefinition->namedCommands;
     self->itemsView->hasReturnRange = menuDefinition->hasReturnRange;
     self->itemsView->returnRangeStart = menuDefinition->returnRangeStart;
     self->itemsView->returnRangeEnd = menuDefinition->returnRangeEnd;
     self->itemsView->onSelection = menuDefinition->onSelection;
     self->searchView->onEscape = menuDefinition->onEscape;
-
-    MenuDefinition_AddNamedCommand(menuDefinition, "copytoclipboard:cmd /c echo {} | clip", FALSE, FALSE);
-    MenuDefinition_ParseAndAddKeyBinding(menuDefinition, "ctl-c:copytoclipboard", FALSE);
-
-    if(menuDefinition->loadCommand)
-    {
-        MenuDefinition_AddKeyBindingToNamedCommand(menuDefinition, menuDefinition->loadCommand, VK_CONTROL, VkKeyScanW('r'), TRUE);
-    }
-    else if(menuDefinition->itemsAction)
-    {
-        MenuDefinition_AddLoadActionKeyBinding(menuDefinition, VK_CONTROL, VkKeyScanW('r'), menuDefinition->itemsAction);
-    }
+    self->searchView->keyBindings = menuDefinition->keyBindings;
 
     SetWindowTextA(self->searchView->hwnd, "");
 

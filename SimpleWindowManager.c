@@ -2638,7 +2638,7 @@ void scratch_windows_add_to_end(ScratchWindow *scratchWindow)
 
 MenuDefinition* menu_create_and_register(void)
 {
-    MenuDefinition *result = calloc(1, sizeof(MenuDefinition));
+    MenuDefinition *result = menu_definition_create();
     return result;
 }
 
@@ -2646,7 +2646,17 @@ void menu_hide(void)
 {
     menuVisible = FALSE;
     ShowWindow(mView->hwnd, SW_HIDE);
-    border_window_update();
+
+    HWND foregroundHwnd = GetForegroundWindow();
+    if((foregroundHwnd == mView->hwnd || foregroundHwnd == borderWindowHwnd) && selectedMonitor->workspace)
+    {
+        workspace_focus_selected_window(selectedMonitor->workspace);
+    }
+    else
+    {
+        border_window_update();
+    }
+    bar_trigger_paint(selectedMonitor->bar);
 }
 
 void menu_on_escape(void)
@@ -2992,13 +3002,10 @@ void bar_render_times(Bar *bar, HDC hdc)
         float currentVol = -1.0f;
         IAudioEndpointVolume_GetMasterVolumeLevelScalar(
                 audioEndpointVolume,
-                &currentVol
-                );
+                &currentVol);
 
         BOOL isVolumeMuted;
-        IAudioEndpointVolume_GetMute(
-                audioEndpointVolume,
-                &isVolumeMuted);
+        IAudioEndpointVolume_GetMute(audioEndpointVolume, &isVolumeMuted);
 
         if(isVolumeMuted)
         {
@@ -3015,7 +3022,7 @@ void bar_render_times(Bar *bar, HDC hdc)
         int displayStrLen = swprintf(
                 displayStr,
                 MAX_PATH,
-                L"Internet: %lc | Volume: %3.0f %% | Memory: %3ld %% | CPU: %3ld %% | %04d-%02d-%02d %02d:%02d:%02d | %02d:%02d:%02d\n",
+                L"Internet: %lc | Volume: %3.0f %% | Memory: %3ld %% | CPU: %3ld %% | %04d-%02d-%02d %02d:%02d | %02d:%02d\n",
                 internetStatusChar,
                 currentVol * 100,
                 memoryPercent,
@@ -3025,18 +3032,22 @@ void bar_render_times(Bar *bar, HDC hdc)
                 lt.wDay,
                 lt.wHour,
                 lt.wMinute,
-                lt.wSecond,
+                /* lt.wSecond, */
                 st.wHour,
-                st.wMinute,
-                st.wSecond);
+                st.wMinute);
+                /* st.wSecond); */
 
-        DrawText(
-                hdc,
-                displayStr,
-                displayStrLen,
-                bar->timesRect,
-                /* &ps->rcPaint, */
-                DT_RIGHT | DT_VCENTER | DT_SINGLELINE);
+        if(wcscmp(displayStr, bar->timesText) != 0)
+        {
+            memcpy(bar->timesText, displayStr, displayStrLen + 1);
+            DrawText(
+                    hdc,
+                    displayStr,
+                    displayStrLen,
+                    bar->timesRect,
+                    /* &ps->rcPaint, */
+                    DT_RIGHT | DT_VCENTER | DT_SINGLELINE);
+        }
     }
 }
 

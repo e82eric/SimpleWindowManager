@@ -200,10 +200,9 @@ struct Bar
     Button **buttons;
     RECT *selectedWindowDescRect;
     RECT *timesRect;
-    TCHAR *windowContextText;
-    int windowContextTextLen;
     TCHAR *environmentContextText;
     int environmentContextTextLen;
+    TCHAR timesText[MAX_PATH];
 };
 
 struct Command
