@@ -142,6 +142,15 @@ Client* clientFactory_create_from_hwnd(HWND hwnd)
     return c;
 }
 
+static void client_free(Client *self)
+{
+    free(self->data->title);
+    free(self->data->processName);
+    free(self->data->className);
+    free(self->data);
+    free(self);
+}
+
 static BOOL CALLBACK enum_windows_callback(HWND hwnd, LPARAM lparam)
 {
     HWND shellHwnd = GetShellWindow();
@@ -230,9 +239,14 @@ int list_windows_run(int maxItems, CHAR** toFill)
                 c->data->hwnd, c->data->processId, (int)workspace->maxProcessNameLen, c->data->processName, c->data->title);
 
         toFill[numberOfResults] = _strdup(lineBuf);
+        Client *cPrev = c;
         c = c->next;
+
+        client_free(cPrev);
         numberOfResults++;
     }
+
+    free(workspace);
 
     return numberOfResults;
 }
