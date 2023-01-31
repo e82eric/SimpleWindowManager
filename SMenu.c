@@ -134,7 +134,7 @@ DWORD WINAPI SearchView_Worker(LPVOID lpParam)
     }
 
     LRESULT lResult = SendMessageA(self->itemsView->hwnd, LB_FINDSTRING, 0, (LPARAM)self->itemsView->selectedString);
-    if(lResult == LB_ERR)
+    if(lResult == LB_ERR || !self->itemsView->itemSelected)
     {
         LRESULT newSelection = SendMessageA(self->itemsView->hwnd, LB_SETCURSEL, 0, 0);
         char achBuffer[BUF_LEN];
@@ -278,6 +278,7 @@ void ItemsView_SelectNext(ItemsView *self)
         char achBuffer[BUF_LEN];
         SendMessageA(self->hwnd, LB_GETTEXT, dwSel + 1, (LPARAM)achBuffer); 
         memcpy(self->selectedString, achBuffer, BUF_LEN);
+        self->itemSelected = TRUE;
     }
 }
 
@@ -290,6 +291,7 @@ void ItemsView_SelectPrevious(ItemsView *self)
         char achBuffer[BUF_LEN];
         SendMessageA(self->hwnd, LB_GETTEXT, dwSel + 1, (LPARAM)achBuffer); 
         memcpy(self->selectedString, achBuffer, BUF_LEN);
+        self->itemSelected = TRUE;
     }
 }
 
@@ -437,6 +439,7 @@ void ItemsView_Clear(ItemsView *self)
 {
     SendMessageA(self->hwnd, LB_SETCURSEL, 0, -1);
     SendMessage(self->hwnd, LB_RESETCONTENT, 0, 0);;
+    self->itemSelected = FALSE;
 
     Chunk *currentChunk = self->chunks;
     while(currentChunk)

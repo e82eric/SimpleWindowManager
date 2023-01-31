@@ -132,6 +132,7 @@ struct ItemsView
     NamedCommand *namedCommands;
     NamedCommand *lastNamedCommand;
     char selectedString[BUF_LEN];
+    BOOL itemSelected;
     BOOL hasReturnRange;
     int returnRangeStart;
     int returnRangeEnd;
