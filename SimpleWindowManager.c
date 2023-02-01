@@ -4220,7 +4220,7 @@ void open_windows_scratch_exit_callback(char *stdOut)
     HWND hwnd = (HWND)strtoll(stdOut, &lastCharRead, 16);
 
     Client *client = windowManager_find_client_in_workspaces_by_hwnd(hwnd);
-    if(client)
+    if(client && !client->data->isMinimized)
     {
         if(selectedMonitor->workspace != client->workspace)
         {
