@@ -392,6 +392,7 @@ void toggle_create_window_in_current_workspace(void)
     {
         if(!monitors[i]->isHidden)
         {
+            bar_trigger_paint(monitors[i]->bar);
         }
     }
 }
@@ -410,6 +411,7 @@ void toggle_ignore_workspace_filters(void)
     {
         if(!monitors[i]->isHidden)
         {
+            bar_trigger_paint(monitors[i]->bar);
         }
     }
 }
