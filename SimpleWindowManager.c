@@ -3416,7 +3416,7 @@ void border_window_update(void)
 
 void border_window_paint(HWND hWnd)
 {
-    if(selectedMonitor->workspace->selected || selectedMonitor->scratchWindow)
+    if(selectedMonitor->workspace->selected || selectedMonitor->scratchWindow || menuVisible)
     {
         PAINTSTRUCT ps;
         HDC hDC = BeginPaint(hWnd, &ps);
