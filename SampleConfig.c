@@ -17,7 +17,7 @@ void search_drive(char* stdOut)
             "ld:cmd /c fd . %s\\",
             stdOut);
 
-    MenuDefinition_AddNamedCommand(&definition, cmdBuf);
+    MenuDefinition_AddNamedCommand(&definition, cmdBuf, FALSE, FALSE);
     MenuDefinition_ParseAndAddLoadCommand(&definition, "ld");
     definition.onSelection = open_program_scratch_callback_not_elevated;
     menu_run(&definition);
@@ -71,7 +71,7 @@ void configure(Configuration *configuration)
 
     WCHAR chromeTag = { 0xfa9e };
     WCHAR terminalTag = { 0xf120 };
-    WCHAR ideTag = { 0xf668 };
+    WCHAR riderTag = { 0xf668 };
     WCHAR teamsTag = { 0xf865 };
 
     Workspace *browserWorkspace = workspace_register(L"Chrome", &chromeTag, &tileLayout);
@@ -83,7 +83,7 @@ void configure(Configuration *configuration)
     Workspace *terminalWorkspace = workspace_register(L"Terminal", &terminalTag, &deckLayout);
     workspace_register_processimagename_contains_filter(terminalWorkspace, L"WindowsTerminal.exe");
 
-    Workspace *ideWorkspace = workspace_register(L"Rider", &ideTag, &monacleLayout);
+    Workspace *ideWorkspace = workspace_register(L"Rider", &riderTag, &monacleLayout);
     workspace_register_processimagename_contains_filter(ideWorkspace, L"rider64.exe");
     workspace_register_processimagename_contains_filter(ideWorkspace, L"Code.exe");
 
@@ -94,7 +94,7 @@ void configure(Configuration *configuration)
     workspace_register(L"6", L"6", &tileLayout);
     workspace_register(L"7", L"7", &tileLayout);
     workspace_register(L"8", L"8", &tileLayout);
-    workspace_register(L"9", L"9", &tileLayout);
+    workspace_register(L"9", L"8", &tileLayout);
 
     keybindings_register_defaults();
 
@@ -122,16 +122,19 @@ void configure(Configuration *configuration)
 
     MenuDefinition *listWindowsMenu2 = menu_create_and_register();
     listWindowsMenu2->hasHeader = TRUE;
-    listWindowsMenu2->itemsAction = list_windows_run;
+    menu_definition_set_load_action(listWindowsMenu2, list_windows_run);
+    /* listWindowsMenu2->itemsAction = list_windows_run; */
     listWindowsMenu2->onSelection = open_windows_scratch_exit_callback;
     keybinding_create_with_menu_arg("ListWindowsMenu", LAlt, VK_SPACE, menu_run, listWindowsMenu2);
 
     MenuDefinition *programLauncher = menu_create_and_register();
-    MenuDefinition_AddNamedCommand(programLauncher, "ld:fd -t f -g \"*{.lnk,.exe}\" \
+    MenuDefinition_AddNamedCommand(programLauncher, "ld:cmd /c fd -t f -g \"*{.lnk,.exe}\" \
             \"%USERPROFILE%\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\" \
             \"C:\\ProgramData\\Microsoft\\Windows\\Start Menu\" \
             \"%USERPROFILE%\\AppData\\Local\\Microsoft\\WindowsApps\" \
-            \"%USERPROFILE%\\Utilites\"");
+            \"%USERPROFILE%\\Utilites\"",
+            FALSE,
+            FALSE);
     MenuDefinition_ParseAndAddLoadCommand(programLauncher, "ld");
     programLauncher->onSelection = open_program_scratch_callback;
     keybinding_create_with_menu_arg("ProgramLauncherNotElevatedMenu", LAlt | LShift, VK_P, menu_run, programLauncher);
@@ -141,28 +144,37 @@ void configure(Configuration *configuration)
             \"%USERPROFILE%\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\" \
             \"C:\\ProgramData\\Microsoft\\Windows\\Start Menu\" \
             \"%USERPROFILE%\\AppData\\Local\\Microsoft\\WindowsApps\" \
-            \"%USERPROFILE%\\Utilites\"");
+            \"%USERPROFILE%\\Utilites\"",
+            FALSE,
+            FALSE);
     MenuDefinition_ParseAndAddLoadCommand(programLauncherNotElevatedMenu, "ld");
     programLauncherNotElevatedMenu->onSelection = open_program_scratch_callback_not_elevated;
     keybinding_create_with_menu_arg("ProgramLauncherNotElevatedMenu", LAlt, VK_P, menu_run, programLauncherNotElevatedMenu);
 
     MenuDefinition *listProcessMenu = menu_create_and_register();
-    listProcessMenu->itemsAction = list_processes_run_no_sort;
-    MenuDefinition_AddNamedCommand(listProcessMenu, "procKill:cmd /c taskkill /f /pid {}");
-    MenuDefinition_AddNamedCommand(listProcessMenu, "windbg:powershell.exe -C '{}' -match '\\d{8}';windbg -p \"\"\"$([int]$Matches[0])\"\"\"");
+    menu_definition_set_load_action(listProcessMenu, list_processes_run_no_sort);
+    MenuDefinition_AddNamedCommand(listProcessMenu, "procKill:cmd /c taskkill /f /pid {}", TRUE, FALSE);
+    MenuDefinition_AddNamedCommand(listProcessMenu, "windbg:powershell.exe -C '{}' -match '\\d{8}';windbg -p \"\"\"$([int]$Matches[0])\"\"\"", FALSE, TRUE);
     MenuDefinition_AddLoadActionKeyBinding(listProcessMenu, VK_CONTROL, VK_1, list_processes_run_sorted_by_private_bytes);
     MenuDefinition_AddLoadActionKeyBinding(listProcessMenu, VK_CONTROL, VK_2, list_processes_run_sorted_by_working_set);
     MenuDefinition_AddLoadActionKeyBinding(listProcessMenu, VK_CONTROL, VK_3, list_processes_run_sorted_by_cpu);
     MenuDefinition_AddLoadActionKeyBinding(listProcessMenu, VK_CONTROL, VK_4, list_processes_run_sorted_by_pid);
     MenuDefinition_ParseAndSetRange(listProcessMenu, "46,8");
-    MenuDefinition_ParseAndAddKeyBinding(listProcessMenu, "ctl-k:procKill:reload", FALSE);
-    MenuDefinition_ParseAndAddKeyBinding(listProcessMenu, "ctl-d:windbg:quit", FALSE);
+    MenuDefinition_ParseAndAddKeyBinding(listProcessMenu, "ctl-k:procKill", FALSE);
+    MenuDefinition_ParseAndAddKeyBinding(listProcessMenu, "ctl-d:windbg", FALSE);
     listProcessMenu->hasHeader = TRUE;
     keybinding_create_with_menu_arg("ProcessListMenu", LWin, VK_9, menu_run, listProcessMenu);
 
     MenuDefinition *searchAllDrivesMenu = menu_create_and_register();
-    MenuDefinition_AddNamedCommand(searchAllDrivesMenu, "ld:powershell -c \"(Get-PSDrive -PSProvider FileSystem).Root\"");
+    MenuDefinition_AddNamedCommand(searchAllDrivesMenu, "ld:powershell -c \"(Get-PSDrive -PSProvider FileSystem).Root\"", FALSE, FALSE);
     MenuDefinition_ParseAndAddLoadCommand(searchAllDrivesMenu, "ld");
     searchAllDrivesMenu->onSelection = search_drive;
     keybinding_create_with_menu_arg("SearchAllDrivesMenu", LAlt, VK_E, menu_run, searchAllDrivesMenu);
+
+    configuration_add_bar_segment(configuration, L"UTC", 5, fill_system_time);
+    configuration_add_bar_segment(configuration, L"Time", 16, fill_local_time);
+    configuration_add_bar_segment(configuration, L"CPU", 6, fill_cpu);
+    configuration_add_bar_segment(configuration, L"Memory", 6, fill_memory_percent);
+    configuration_add_bar_segment(configuration, L"Volume", 6, fill_volume_percent);
+    configuration_add_bar_segment(configuration, L"Internet", 3, fill_is_connected_to_internet);
 }

@@ -3068,10 +3068,6 @@ void bar_segment_initalize_rectangles(BarSegment *self, HDC hdc, int right, Bar 
     self->headerRect->left = headerLeft + paddingBetweenHeaderAndVariable;
     self->headerRect->top = bar->timesRect->top;
     self->headerRect->bottom = bar->timesRect->bottom;
-
-/*     HBRUSH brush = bar_get_background_brush(bar); */
-/*     bar_segment_render_header(self, hdc, brush); */
-/*     bar_segment_render_variable_text(self, hdc, brush); */
 }
 
 void bar_add_segments_from_configuration(Bar *self, HDC hdc, Configuration *config)
