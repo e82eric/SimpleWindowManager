@@ -10,6 +10,8 @@ typedef struct Command Command;
 typedef struct KeyBinding KeyBinding;
 typedef struct ScratchWindow ScratchWindow;
 typedef struct Configuration Configuration;
+typedef struct BarSegment BarSegment;
+typedef struct BarSegmentConfiguration BarSegmentConfiguration;
 
 typedef BOOL (*WindowFilter)(Client *client);
 typedef BOOL (*ScratchFilter)(ScratchWindow *self, Client *client);
@@ -64,6 +66,13 @@ enum Modifiers
     LCtl = 0x80
 };
 
+struct BarSegmentConfiguration
+{
+    TCHAR *headerText;
+    int variableTextFixedWidth;
+    void (*variableTextFunc) (TCHAR *toFill, int maxLen);
+};
+
 struct Configuration
 {
     BOOL (*isFloatWindowFunc) (Client *client, LONG_PTR styles, LONG_PTR exStyles);
@@ -79,6 +88,8 @@ struct Configuration
     COLORREF buttonWithWindowsTextColor;
     COLORREF buttonWithoutWindowsTextColor;
     COLORREF barTextColor;
+    BarSegmentConfiguration **barSegments;
+    int numberOfBarSegments;
 };
 
 struct WorkspaceFilterData
@@ -200,9 +211,18 @@ struct Bar
     Button **buttons;
     RECT *selectedWindowDescRect;
     RECT *timesRect;
-    TCHAR *environmentContextText;
-    int environmentContextTextLen;
-    TCHAR timesText[MAX_PATH];
+    BarSegment **segments;
+    int numberOfSegments;
+};
+
+struct BarSegment
+{
+    TCHAR *headerText;
+    TCHAR lastVariableText[MAX_PATH];
+    int variableTextFixedWidth;
+    RECT *headerRect;
+    RECT *variableRect;
+    void (*variableTextFunc) (TCHAR *toFill, int maxLen);
 };
 
 struct Command
@@ -256,6 +276,14 @@ void keybinding_create_with_menu_arg(CHAR *name, int modifiers, unsigned int key
 void keybinding_create_with_shell_arg(CHAR *name, int modifiers, unsigned int key, void (*action) (TCHAR*), TCHAR *arg);
 
 TCHAR* client_get_command_line(Client *self);
+
+void configuration_add_bar_segment(Configuration *self, TCHAR *headerText, int variableTextFixedWidth, void (*variableTextFunc)(TCHAR *toFill, int maxLen));
+void fill_cpu(TCHAR *toFill, int maxLen);
+void fill_volume_percent(TCHAR *toFill, int maxLen);
+void fill_system_time(TCHAR *toFill, int maxLen);
+void fill_local_time(TCHAR *toFill, int maxLen);
+void fill_memory_percent(TCHAR *toFill, int maxLen);
+void fill_is_connected_to_internet(TCHAR *toFill, int maxLen);
 
 void redraw_focused_window(void);
 void select_next_window(void);

@@ -119,6 +119,7 @@ static void button_press_handle(Button *button);
 static void button_redraw(Button *button);
 static void bar_apply_workspace_change(Bar *bar, Workspace *previousWorkspace, Workspace *newWorkspace);
 static void bar_trigger_paint(Bar *bar);
+static void bar_trigger_selected_window_paint(Bar *self);
 static void bar_run(Bar *bar, WNDCLASSEX *barWindowClass);
 static void border_window_update(void);
 static LRESULT CALLBACK button_message_loop( HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam, UINT_PTR uIdSubclass, DWORD_PTR dwRefData);
@@ -392,7 +393,7 @@ void toggle_create_window_in_current_workspace(void)
     {
         if(!monitors[i]->isHidden)
         {
-            bar_trigger_paint(monitors[i]->bar);
+            bar_trigger_selected_window_paint(monitors[i]->bar);
         }
     }
 }
@@ -411,7 +412,7 @@ void toggle_ignore_workspace_filters(void)
     {
         if(!monitors[i]->isHidden)
         {
-            bar_trigger_paint(monitors[i]->bar);
+            bar_trigger_selected_window_paint(monitors[i]->bar);
         }
     }
 }
@@ -1052,7 +1053,7 @@ void CALLBACK handle_windows_event(
         }
         else if(event == EVENT_SYSTEM_FOREGROUND)
         {
-            bar_trigger_paint(selectedMonitor->bar);
+            bar_trigger_selected_window_paint(selectedMonitor->bar);
             Client* client = windowManager_find_client_in_workspaces_by_hwnd(hwnd);
             if(client)
             {
@@ -1926,7 +1927,7 @@ void workspace_focus_selected_window(Workspace *workspace)
     }
     if(workspace->monitor->bar)
     {
-        bar_trigger_paint(workspace->monitor->bar);
+        bar_trigger_selected_window_paint(workspace->monitor->bar);
     }
 
     border_window_update();
@@ -2658,7 +2659,7 @@ void menu_hide(void)
     {
         border_window_update();
     }
-    bar_trigger_paint(selectedMonitor->bar);
+    bar_trigger_selected_window_paint(selectedMonitor->bar);
 }
 
 void menu_on_escape(void)
@@ -2905,6 +2906,14 @@ void bar_trigger_paint(Bar *bar)
     UpdateWindow(bar->hwnd);
 }
 
+void bar_trigger_selected_window_paint(Bar *self)
+{
+    InvalidateRect(
+            self->hwnd,
+            self->selectedWindowDescRect,
+            FALSE);
+}
+
 void bar_render_selected_window_description(Bar *bar, HDC hdc)
 {
     TCHAR* windowRoutingMode = L"UNKNOWN";
@@ -2969,87 +2978,138 @@ void bar_render_selected_window_description(Bar *bar, HDC hdc)
             displayStr,
             displayStrLen,
             bar->selectedWindowDescRect,
-            /* &ps->rcPaint, */
             DT_LEFT | DT_VCENTER | DT_SINGLELINE);
 }
 
-void bar_render_times(Bar *bar, HDC hdc)
+HBRUSH bar_get_background_brush(Bar *self)
 {
-    if(networkListManager)
+    HBRUSH brush;
+    if(self->monitor->selected)
     {
-        VARIANT_BOOL isInternetConnected;
-        WCHAR internetUnknown = { 0xf128 };
-        WCHAR internetUp = { 0xf817 };
-        WCHAR internetDown = { 0xf127 };
-        WCHAR internetStatusChar;
+        brush = barSelectedBackgroundBrush;
+    }
+    else
+    {
+        brush = backgroundBrush;
+    }
 
-        HRESULT hr;
-        hr = INetworkListManager_get_IsConnectedToInternet(networkListManager, &isInternetConnected);
-        if(FAILED(hr))
-        {
-            internetStatusChar = internetUnknown;
-        }
-        else
-        {
-            if(isInternetConnected)
-            {
-                internetStatusChar = internetUp;
-            }
-            else
-            {
-                internetStatusChar = internetDown;
-            }
-        }
+    return brush;
+}
 
-        float currentVol = -1.0f;
-        IAudioEndpointVolume_GetMasterVolumeLevelScalar(
-                audioEndpointVolume,
-                &currentVol);
+void bar_segment_render_header(BarSegment *self, HDC hdc, HBRUSH brush)
+{
+    TCHAR headerBuff[MAX_PATH];
+    int headerTextLen = swprintf(
+            headerBuff,
+            MAX_PATH,
+            L" | %ls: ",
+            self->headerText);
 
-        BOOL isVolumeMuted;
-        IAudioEndpointVolume_GetMute(audioEndpointVolume, &isVolumeMuted);
+    FillRect(hdc, self->headerRect, brush);
+    DrawText(hdc, headerBuff, headerTextLen, self->headerRect, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+}
 
-        if(isVolumeMuted)
-        {
-            currentVol = 0.0f;
-        }
+void bar_segment_render_variable_text(BarSegment *self, HDC hdc, HBRUSH brush)
+{
+    TCHAR variableTextBuff[MAX_PATH];
+    TCHAR variableValueBuff[MAX_PATH];
+    self->variableTextFunc(variableValueBuff, MAX_PATH);
+    int variableTextLen = swprintf(
+            variableTextBuff,
+            MAX_PATH,
+            L"%*ls",
+            self->variableTextFixedWidth,
+            variableValueBuff);
 
-        int cpuUsage = get_cpu_usage();
-        int memoryPercent = get_memory_percent();
+    if(wcscmp(variableTextBuff, self->lastVariableText) != 0)
+    {
+        FillRect(hdc, self->variableRect, brush);
+        DrawText(hdc, variableTextBuff, variableTextLen, self->variableRect, DT_RIGHT | DT_VCENTER | DT_SINGLELINE);
+        memcpy(self->lastVariableText, variableTextBuff, variableTextLen + 1);
+    }
+}
 
-        SYSTEMTIME st, lt;
-        GetSystemTime(&st);
-        GetLocalTime(&lt);
-        TCHAR displayStr[MAX_PATH];
-        int displayStrLen = swprintf(
-                displayStr,
-                MAX_PATH,
-                L"Internet: %lc | Volume: %3.0f %% | Memory: %3ld %% | CPU: %3ld %% | %04d-%02d-%02d %02d:%02d | %02d:%02d\n",
-                internetStatusChar,
-                currentVol * 100,
-                memoryPercent,
-                cpuUsage,
-                lt.wYear,
-                lt.wMonth,
-                lt.wDay,
-                lt.wHour,
-                lt.wMinute,
-                /* lt.wSecond, */
-                st.wHour,
-                st.wMinute);
-                /* st.wSecond); */
+void bar_segment_initalize_rectangles(BarSegment *self, HDC hdc, int right, Bar *bar)
+{
+    int paddingBetweenHeaderAndVariable = 5;
+    RECT headerTextRect = { 0, 0, 0, 0 };
+    TCHAR headerBuff[MAX_PATH];
+    int headerTextLen = swprintf(
+            headerBuff,
+            MAX_PATH,
+            L" | %ls: ",
+            self->headerText);
+    DrawText(hdc, headerBuff, headerTextLen, &headerTextRect, DT_CALCRECT);
 
-        if(wcscmp(displayStr, bar->timesText) != 0)
-        {
-            memcpy(bar->timesText, displayStr, displayStrLen + 1);
-            DrawText(
-                    hdc,
-                    displayStr,
-                    displayStrLen,
-                    bar->timesRect,
-                    /* &ps->rcPaint, */
-                    DT_RIGHT | DT_VCENTER | DT_SINGLELINE);
-        }
+    RECT variableTextRect = { 0, 0, 0, 0 };
+    TCHAR variableValueBuff[MAX_PATH];
+    self->variableTextFunc(variableValueBuff, MAX_PATH);
+    TCHAR variableTextBuff[MAX_PATH];
+    int variableTextLen = swprintf(
+            variableTextBuff,
+            MAX_PATH,
+            L"%*ls",
+            self->variableTextFixedWidth,
+            variableValueBuff);
+    DrawText(hdc, variableTextBuff, variableTextLen, &variableTextRect, DT_CALCRECT);
+
+    int variableWidth = variableTextRect.right - variableTextRect.left;
+    int variableLeft = right - variableWidth;
+    
+    self->variableRect->right = right;
+    self->variableRect->left = right - variableWidth;
+    self->variableRect->top = bar->timesRect->top;
+    self->variableRect->bottom = bar->timesRect->bottom;
+
+    int headerWidth = headerTextRect.right - headerTextRect.left;
+    int headerLeft = variableLeft - headerWidth;
+
+    self->headerRect->right = variableLeft + paddingBetweenHeaderAndVariable;
+    self->headerRect->left = headerLeft + paddingBetweenHeaderAndVariable;
+    self->headerRect->top = bar->timesRect->top;
+    self->headerRect->bottom = bar->timesRect->bottom;
+
+/*     HBRUSH brush = bar_get_background_brush(bar); */
+/*     bar_segment_render_header(self, hdc, brush); */
+/*     bar_segment_render_variable_text(self, hdc, brush); */
+}
+
+void bar_add_segments_from_configuration(Bar *self, HDC hdc, Configuration *config)
+{
+    self->segments = calloc(config->numberOfBarSegments, sizeof(BarSegment*));
+    self->numberOfSegments = config->numberOfBarSegments;
+
+    int segmentRightEdge = self->timesRect->right;
+    for(int i = 0; i < config->numberOfBarSegments; i++)
+    {
+        BarSegment *segment = calloc(1, sizeof(BarSegment));
+        segment->headerText = _wcsdup(config->barSegments[i]->headerText);
+        segment->variableTextFixedWidth = config->barSegments[i]->variableTextFixedWidth;
+        segment->headerRect = calloc(1, sizeof(RECT));
+        segment->variableRect = calloc(1, sizeof(RECT));
+        segment->variableTextFunc = config->barSegments[i]->variableTextFunc;
+        self->segments[i] = segment;
+
+        bar_segment_initalize_rectangles(segment, hdc, segmentRightEdge, self);
+        segmentRightEdge = segment->headerRect->left;
+
+        self->selectedWindowDescRect->right = self->segments[i]->headerRect->left;
+    }
+}
+
+void bar_render_headers(Bar *bar, HDC hdc, HBRUSH brush)
+{
+    for(int i = 0; i < bar->numberOfSegments; i++)
+    {
+        bar_segment_render_header(bar->segments[i], hdc, brush);
+    }
+}
+
+void bar_render_times(Bar *bar, HDC hdc, HBRUSH brush)
+{
+    for(int i = 0; i < bar->numberOfSegments; i++)
+    {
+        bar_segment_render_variable_text(bar->segments[i], hdc, brush);
     }
 }
 
@@ -3094,6 +3154,7 @@ LRESULT CALLBACK bar_message_loop(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPa
 
                 button->hwnd = buttonHwnd;
             }
+
             return 0;
         }
         case WM_PAINT:
@@ -3101,16 +3162,7 @@ LRESULT CALLBACK bar_message_loop(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPa
             hdc = BeginPaint(hwnd, &ps);
             if(msgBar)
             {
-                HBRUSH brush;
-                if(msgBar->monitor->selected)
-                {
-                    brush = barSelectedBackgroundBrush;
-                }
-                else
-                {
-                    brush = backgroundBrush;
-                }
-                FillRect(hdc, &ps.rcPaint, brush);
+                HBRUSH brush = bar_get_background_brush(msgBar);
 
                 SelectObject(hdc, font);
                 SetTextColor(hdc, barTextColor);
@@ -3118,11 +3170,19 @@ LRESULT CALLBACK bar_message_loop(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPa
 
                 if(ps.rcPaint.left == msgBar->timesRect->left)
                 {
-                    bar_render_times(msgBar, hdc);
+                    bar_render_times(msgBar, hdc, brush);
+                }
+                else if(ps.rcPaint.left == msgBar->selectedWindowDescRect->left)
+                {
+                    FillRect(hdc, msgBar->selectedWindowDescRect, brush);
+                    bar_render_selected_window_description(msgBar, hdc);
                 }
                 else
                 {
-                    bar_render_times(msgBar, hdc);
+                    FillRect(hdc, &ps.rcPaint, brush);
+                    bar_render_headers(msgBar, hdc, brush);
+                    bar_render_times(msgBar, hdc, brush);
+                    FillRect(hdc, msgBar->selectedWindowDescRect, brush);
                     bar_render_selected_window_description(msgBar, hdc);
                 }
             }
@@ -3215,12 +3275,118 @@ void bar_run(Bar *bar, WNDCLASSEX *barWindowClass)
         (TIMERPROC) NULL);
 }
 
+void fill_volume_percent(TCHAR *toFill, int maxLen)
+{
+    float currentVol = -1.0f;
+    IAudioEndpointVolume_GetMasterVolumeLevelScalar(
+            audioEndpointVolume,
+            &currentVol);
+
+    BOOL isVolumeMuted;
+    IAudioEndpointVolume_GetMute(audioEndpointVolume, &isVolumeMuted);
+
+    if(isVolumeMuted)
+    {
+        currentVol = 0.0f;
+    }
+
+    swprintf(
+            toFill,
+            maxLen,
+            L"%3.0f %%",
+            currentVol * 100);
+}
+
+void fill_system_time(TCHAR *toFill, int maxLen)
+{
+    SYSTEMTIME st;
+    GetSystemTime(&st);
+    swprintf(
+            toFill,
+            maxLen,
+            L"%02d:%02d",
+            st.wHour,
+            st.wMinute);
+}
+
+void fill_local_time(TCHAR *toFill, int maxLen)
+{
+    SYSTEMTIME lt;
+    GetLocalTime(&lt);
+    swprintf(
+            toFill,
+            maxLen,
+            L"%04d-%02d-%02d %02d:%02d",
+            lt.wYear,
+            lt.wMonth,
+            lt.wDay,
+            lt.wHour,
+            lt.wMinute);
+}
+
+void fill_memory_percent(TCHAR *toFill, int maxLen)
+{
+    int memoryPercent = get_memory_percent();
+    swprintf(
+            toFill,
+            maxLen,
+            L"%3ld %%",
+            memoryPercent);
+}
+
 int get_memory_percent(void)
 {
     MEMORYSTATUSEX statex;
     statex.dwLength = sizeof (statex);
     GlobalMemoryStatusEx (&statex);
     return statex.dwMemoryLoad;
+}
+
+void fill_is_connected_to_internet(TCHAR *toFill, int maxLen)
+{
+    WCHAR internetUnknown = { 0xf128 };
+    WCHAR internetUp = { 0xf817 };
+    WCHAR internetDown = { 0xf127 };
+    WCHAR internetStatusChar = internetUnknown;
+
+    if(networkListManager)
+    {
+        VARIANT_BOOL isInternetConnected;
+
+        HRESULT hr;
+        hr = INetworkListManager_get_IsConnectedToInternet(networkListManager, &isInternetConnected);
+        if(FAILED(hr))
+        {
+            /* internetStatusChar = internetUnknown; */
+        }
+        else
+        {
+            if(isInternetConnected)
+            {
+                internetStatusChar = internetUp;
+            }
+            else
+            {
+                internetStatusChar = internetDown;
+            }
+        }
+    }
+
+    swprintf(
+            toFill,
+            maxLen,
+            L" %lc ",
+            internetStatusChar);
+}
+
+void fill_cpu(TCHAR *toFill, int maxLen)
+{
+    int cpu = get_cpu_usage();
+    swprintf(
+            toFill,
+            maxLen,
+            L"%3ld %%",
+            cpu);
 }
 
 int get_cpu_usage(void)
@@ -4279,6 +4445,26 @@ HFONT default_initalize_font()
     return result;
 }
 
+void configuration_add_bar_segment(Configuration *self, TCHAR *headerText, int variableTextFixedWidth, void (*variableTextFunc)(TCHAR *toFill, int maxLen))
+{
+    if(!self->barSegments)
+    {
+        self->barSegments = calloc(1, sizeof(BarSegmentConfiguration*));
+        self->numberOfBarSegments = 1;
+    }
+    else
+    {
+        self->numberOfBarSegments++;
+        self->barSegments = realloc(self->barSegments, sizeof(BarSegmentConfiguration*) * self->numberOfBarSegments);
+    }
+
+    BarSegmentConfiguration *segment = calloc(1, sizeof(BarSegmentConfiguration));
+    segment->headerText = _wcsdup(headerText);
+    segment->variableTextFixedWidth = variableTextFixedWidth;
+    segment->variableTextFunc = variableTextFunc;
+    self->barSegments[self->numberOfBarSegments - 1] = segment;
+}
+
 int run (void)
 {
     HANDLE hMutex;
@@ -4431,12 +4617,6 @@ int run (void)
         monitor_set_workspace(workspaces[i], monitors[i]);
     }
 
-
-    for(int i = 0; i < numberOfBars; i++)
-    {
-        bar_run(bars[i], barWindowClass);
-    }
-
     monitor_select(monitors[0]);
 
     int menuLeft = selectedMonitor->xOffset + scratchWindowsScreenPadding;
@@ -4447,7 +4627,6 @@ int run (void)
 
     mView = menu_create(menuTop, menuLeft, menuWidth, menuHeight, menuTitle);
     ShowWindow(mView->hwnd, SW_HIDE);
-
 
     IWbemLocator *locator  = NULL;
 
@@ -4534,6 +4713,15 @@ int run (void)
       IMMDevice_Release(mmdevice);
       CoUninitialize();
       return 1;
+    }
+
+    for(int i = 0; i < numberOfBars; i++)
+    {
+        bar_run(bars[i], barWindowClass);
+        HDC barHdc = GetDC(bars[i]->hwnd);
+        SelectObject(barHdc, font);
+        bar_add_segments_from_configuration(bars[i], barHdc, configuration);
+        DeleteDC(barHdc);
     }
 
     WNDCLASSEX* borderWindowClass = border_window_register_class();
