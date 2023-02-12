@@ -7,9 +7,9 @@
 (Most features and concepts are copied from these or DWM or I3)
 
 ## Overview
-My general feeling having tried to a bunch of different tiling managers for Microsoft Windows, is that trying to layout every window that gets created by Windows is a endless battle against all of Windows's different intricasies.  So I created this window manager to target my specific workflow where 99% of the windows that I create come from a few different applications (browser, terminal, IDE, chat, email) and to create rules to manage those applications within workspaces and allow easy movement and navigation with common key bindings and to let any other windows that get created float.
+My general feeling having tried to a bunch of different tiling managers for  Windows, is that trying to layout every window that gets created by Windows is really hard since a subset off applications will do unexpected things.  So I created this window manager to target my specific workflow where 99% of the windows that I create come from a few different applications (browser, terminal, IDE, chat, email) and to create rules to manage those applications within workspaces and allow easy movement and navigation with common key bindings and to let any other windows that get created float.
 
-## Instalation
+## Install
 - You will need to compile the application to install it
   - Make sure that MSVC (C compiler) is installed
   - Run setvccars.bar to add nmake and cl.exe to the path.  (You make need to adjust the paths in the batch depending one where MSVC is installed)
@@ -94,12 +94,6 @@ Multiple Monitors
 
 https://user-images.githubusercontent.com/811029/196359680-c7d45b94-3edc-409f-97f8-715abe833925.mp4
 
-## Build
-* Copy the SampleConfig.c file to Config.c and make customizations to Config.c
-* Make sure visual studio c++ build tools are installed (this shouldn't require a full VS install)
-* Run setvcvars.bat (the path in the batch is hard coded to the VS install directory and may need to be updated)
-* Run build.cmd
-
 ## Configuration
 * Defining workspaces:
   * Specifying workspaces: https://github.com/e82eric/SimpleWindowManager/blob/main/SampleConfig.c#L129
@@ -107,3 +101,6 @@ https://user-images.githubusercontent.com/811029/196359680-c7d45b94-3edc-409f-97
 * Key Bindings 
   * Simple key binding mapped to function with no args: https://github.com/e82eric/SimpleWindowManager/blob/main/SampleConfig.c#L196
   * Key binding mapped to function with single argument: https://github.com/e82eric/SimpleWindowManager/blob/main/SampleConfig.c#L188
+* Menus
+* Scratch Terminals
+* Bar segments
