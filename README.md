@@ -102,10 +102,10 @@ https://user-images.githubusercontent.com/811029/196359630-66a98674-c604-4a3a-95
 https://user-images.githubusercontent.com/811029/196359680-c7d45b94-3edc-409f-97f8-715abe833925.mp4
 
 ## Configuration
-* Defining workspaces:
-  * Specifying workspaces: https://github.com/e82eric/SimpleWindowManager/blob/main/SampleConfig.c#L77
-  * Can be configured with simple contains matching using the exe name, windows title, or window class.
-  * It is also possible to use a C function to do advanced filtering using the Client struct
+### Defining workspaces:
+* Specifying workspaces: https://github.com/e82eric/SimpleWindowManager/blob/main/SampleConfig.c#L77
+* Can be configured with simple contains matching using the exe name, windows title, or window class.
+* It is also possible to use a C function to do advanced filtering using the Client struct
 
 _Example Workspace defined using exe name filters_
 ```C
@@ -118,14 +118,14 @@ _Example Workspace defined using exe name filters_
     workspace_register_processimagename_contains_filter(browserWorkspace, L"msedge.exe");
 ```
 
+### Key Bindings
+* A number of keybindings are registered by default: https://github.com/e82eric/SimpleWindowManager/blob/main/SimpleWindowManager.c#L3966
+  * These can be overridden by registering a keybinding using the same modifier key combination
+* Simple key binding mapped to function with no args: https://github.com/e82eric/SimpleWindowManager/blob/main/SampleConfig.c#L196
+* Key binding mapped to function with single argument: https://github.com/e82eric/SimpleWindowManager/blob/main/SampleConfig.c#L188
 
-* Key Bindings
-  * A number of keybindings are registered by default: https://github.com/e82eric/SimpleWindowManager/blob/main/SimpleWindowManager.c#L3966
-    * These can be overridden by registering a keybinding using the same modifier key combination
-  * Simple key binding mapped to function with no args: https://github.com/e82eric/SimpleWindowManager/blob/main/SampleConfig.c#L196
-  * Key binding mapped to function with single argument: https://github.com/e82eric/SimpleWindowManager/blob/main/SampleConfig.c#L188
-* Menus
-  * Both menu items and on selection actions, can be provided by the stdout of a shell command or by a custom C function.
+### Menus
+* Both menu items and OnSelection actions, can be provided by the stdout of a shell command or by a custom C function.
 
 _Example Menu items defined with shell command_
 ```C
@@ -163,7 +163,8 @@ _Example Menu items defined with C function_
   * Shell: 
     * C function: https://github.com/e82eric/SimpleWindowManager/blob/main/SampleConfig.c#L150
     * Custom actions can also be defined using shell commands: https://github.com/e82eric/SimpleWindowManager/blob/main/SampleConfig.c#L156
-* Scratch Terminals
+
+### Scratch Terminals
 
 _Example scratch terminal to toggle neovim terminal with powershell running in it_
 ```C
@@ -174,8 +175,8 @@ _Example scratch terminal to toggle neovim terminal with powershell running in i
     keybinding_create_with_scratchwindow_arg("NvimPowershellScratchWindow", LAlt, VK_W, nPowershellScratch);
 ```
 
-* Bar segments:
-  * These are defined using header text: width of variable part of segment: C function for getting the variable text:
+### Bar segments:
+* These are defined using header text: width of variable part of segment: C function for getting the variable text:
   
 _Example bar segment definitions_
 ```C
