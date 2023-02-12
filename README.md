@@ -7,7 +7,7 @@
 (Most features and concepts are copied from these or DWM or I3)
 
 ## Overview
-My general feeling having tried to a bunch of different tiling managers for  Windows, is that trying to layout every window that gets created by Windows is really hard since a subset off applications will do unexpected things.  So I created this window manager to target my specific workflow where 99% of the windows that I create come from a few different applications (browser, terminal, IDE, chat, email) and to create rules to manage those applications within workspaces and allow easy movement and navigation with common key bindings and to let any other windows that get created float.
+My general feeling having tried to a bunch of different tiling managers for  Windows, is that trying to layout every window that gets created by Windows is really hard since a subset off applications will do unexpected things.  So I created this window manager to target my specific workflow where 99% of the windows that I create come from a few different applications (browser, terminal, IDE, chat, email) and to create rules to manage those applications within workspaces and allow easy movement and navigation with common key bindings and to let any other windows that get created float.  It is still possible to toggle a mode where all newly created root application windows are added to the current workspace (ctrl-z).
 
 ## Install
 - You will need to compile the application to install it
@@ -96,11 +96,25 @@ https://user-images.githubusercontent.com/811029/196359680-c7d45b94-3edc-409f-97
 
 ## Configuration
 * Defining workspaces:
-  * Specifying workspaces: https://github.com/e82eric/SimpleWindowManager/blob/main/SampleConfig.c#L129
-  * Providing a filter function: https://github.com/e82eric/SimpleWindowManager/blob/main/SampleConfig.c#L26
-* Key Bindings 
+  * Specifying workspaces: https://github.com/e82eric/SimpleWindowManager/blob/main/SampleConfig.c#L77
+  * Can be configured with simple contains matching using the exe name, windows title, or window class.
+    * https://github.com/e82eric/SimpleWindowManager/blob/main/SampleConfig.c#L78
+  * It is also possible to use a C function to do advanced filtering using the Client struct
+* Key Bindings
+  * A number of keybindings are registered by default: https://github.com/e82eric/SimpleWindowManager/blob/main/SimpleWindowManager.c#L3966
+    * These can be overridden by registering a keybinding using the same modifier key combination
   * Simple key binding mapped to function with no args: https://github.com/e82eric/SimpleWindowManager/blob/main/SampleConfig.c#L196
   * Key binding mapped to function with single argument: https://github.com/e82eric/SimpleWindowManager/blob/main/SampleConfig.c#L188
 * Menus
+  * Both menu items and on selection actions, can be provided by the stdout of a shell command or by a custom C function.
+    * Menu Items:
+      * Shell:  https://github.com/e82eric/SimpleWindowManager/blob/main/SampleConfig.c#L142
+      * C function: https://github.com/e82eric/SimpleWindowManager/blob/main/SampleConfig.c#L154
+    * OnSelection action:
+      * Shell: 
+      * C function: https://github.com/e82eric/SimpleWindowManager/blob/main/SampleConfig.c#L150
+  * Custom actions can also be defined using shell commands: https://github.com/e82eric/SimpleWindowManager/blob/main/SampleConfig.c#L156
 * Scratch Terminals
-* Bar segments
+  * https://github.com/e82eric/SimpleWindowManager/blob/main/SampleConfig.c#L111
+* Bar segments:
+  * These are defined using header text: width of variable part of segment: C function for getting the variable text: https://github.com/e82eric/SimpleWindowManager/blob/main/SampleConfig.c#L173
