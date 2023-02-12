@@ -123,7 +123,6 @@ void configure(Configuration *configuration)
     MenuDefinition *listWindowsMenu2 = menu_create_and_register();
     listWindowsMenu2->hasHeader = TRUE;
     menu_definition_set_load_action(listWindowsMenu2, list_windows_run);
-    /* listWindowsMenu2->itemsAction = list_windows_run; */
     listWindowsMenu2->onSelection = open_windows_scratch_exit_callback;
     keybinding_create_with_menu_arg("ListWindowsMenu", LAlt, VK_SPACE, menu_run, listWindowsMenu2);
 

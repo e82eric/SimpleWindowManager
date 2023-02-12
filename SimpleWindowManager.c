@@ -2478,6 +2478,13 @@ void monacleLayout_calculate_and_apply_client_sizes(Workspace *workspace)
 
 void menu_focus(MenuView *self)
 {
+    INPUT inputs[1] = { 0 };
+    ZeroMemory(inputs, sizeof(inputs));
+
+    inputs[0].type = INPUT_MOUSE;
+
+    SendInput(ARRAYSIZE(inputs), inputs, sizeof(INPUT));
+
     menuVisible = TRUE;
     int x = selectedMonitor->xOffset + scratchWindowsScreenPadding;
     int y = scratchWindowsScreenPadding;
