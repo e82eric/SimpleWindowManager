@@ -66,35 +66,37 @@ There is a SampleConfig.c provided in the repository
 | ALT+A         | Toggle mode where all windows that match a filter are added to the current workspace |
 | ALT+Z         | Toggle mode where all windows are added to current workspace |
 
-Tile Layout
+## Tile Layout
 
 https://user-images.githubusercontent.com/811029/196359396-70a04129-12e9-4ff3-8ef4-2f8f8a10c90a.mp4
 
-Monacle Layout
+## Monacle Layout
 
 https://user-images.githubusercontent.com/811029/196359466-7dc2b2d1-75a7-4eb8-8fd7-f9d18356ecd9.mp4
 
-Deck Layout
+## Deck Layout
 
 https://user-images.githubusercontent.com/811029/196359506-d070da87-9949-45de-a045-3a8254fdd4c0.mp4
 
-Multiple Workspaces
+### Multiple Workspaces
 
 https://user-images.githubusercontent.com/811029/196359562-a419c46f-ecd6-43f6-9deb-5f10eb2f231d.mp4
 
-Menus
+## Menus
+Below is an example workflow using the Programs Menu (Alt-P) to open VS Code and then using the same menu to open notepad, then  the List Processes Menu (Super-9) to kill the notepad process, and then the List Windows Menu (Alt-Space) to find the NeoVim window switch to that workspace.  The definitions for these windows are included in the sample config,  adding custom workflow using menus is intended to be easy using shell commands or custom c functions.
 
 https://user-images.githubusercontent.com/811029/218302288-3829d11d-67af-411c-8c8d-f174193583b9.mp4
 
-Scratch Windows
+## Scratch Windows
+Below is an example workflow using a scratch terminal defined as the NeoVim terminal with powershell running inside of it to quickly toggle the terminal generate a new guid and copy it into a editor
 
 https://user-images.githubusercontent.com/811029/218302270-1b8a65aa-1bd2-44a8-b023-62557ad45c55.mp4
 
-Move windows between workspaces
+## Moving windows between workspaces
 
 https://user-images.githubusercontent.com/811029/196359630-66a98674-c604-4a3a-959c-f85b0aed9d8c.mp4
 
-Multiple Monitors
+## Multiple Monitors
 
 https://user-images.githubusercontent.com/811029/196359680-c7d45b94-3edc-409f-97f8-715abe833925.mp4
 
