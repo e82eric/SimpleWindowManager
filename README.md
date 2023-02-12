@@ -65,6 +65,7 @@ There is a SampleConfig.c provided in the repository
 | ALT+V         | Toggle Windows Taskbar |
 | ALT+A         | Toggle mode where all windows that match a filter are added to the current workspace |
 | ALT+Z         | Toggle mode where all windows are added to current workspace |
+| ALT+X         | Toggle menu to view all available hotkeys |
 
 ## Tile Layout
 
