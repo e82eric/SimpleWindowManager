@@ -82,9 +82,13 @@ Multiple Workspaces
 
 https://user-images.githubusercontent.com/811029/196359562-a419c46f-ecd6-43f6-9deb-5f10eb2f231d.mp4
 
+Menus
+
+https://user-images.githubusercontent.com/811029/218302288-3829d11d-67af-411c-8c8d-f174193583b9.mp4
+
 Scratch Windows
 
-https://user-images.githubusercontent.com/811029/196359594-922ecd56-64d2-4d48-9a32-f8fac95cf837.mp4
+https://user-images.githubusercontent.com/811029/218302270-1b8a65aa-1bd2-44a8-b023-62557ad45c55.mp4
 
 Move windows between workspaces
 
