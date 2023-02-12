@@ -30,6 +30,9 @@ struct NamedCommand
     NamedCommand *next;
     BOOL reloadAfter;
     BOOL quitAfter;
+    BOOL hasTextRange;
+    int textRangeStart;
+    int textRangeEnd;
 };
 
 struct MenuKeyBinding
@@ -155,7 +158,8 @@ typedef struct MenuView
 } MenuView;
 
 void MenuDefinition_ParseAndAddKeyBinding(MenuDefinition *self, char *argText, BOOL isLoadCommand);
-void MenuDefinition_AddNamedCommand(MenuDefinition *self, char *argText, BOOL reloadAfter, BOOL quitAfter);
+NamedCommand *MenuDefinition_AddNamedCommand(MenuDefinition *self, char *argText, BOOL reloadAfter, BOOL quitAfter);
+void MenuDefinition_AddNamedCommand_WithTextRange(MenuDefinition *self, char *argText, BOOL reloadAfter, BOOL quitAfter, int textStart, int textEnd);
 MenuView *menu_create(int left, int top, int width, int height, TCHAR *title);
 void menu_run_definition(MenuView *self, MenuDefinition *menuDefinition);
 void MenuDefinition_ParseAndAddLoadCommand(MenuDefinition *self, char *argText);

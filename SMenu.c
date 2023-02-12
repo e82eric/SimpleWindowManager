@@ -505,7 +505,16 @@ void ItemsView_HandleBinding(ItemsView *self, NamedCommand *command)
             char newBindCommand[BUF_LEN];
             CHAR curSelStr[BUF_LEN] = "";
             SendMessageA(self->hwnd, LB_GETTEXT, dwSel, (LPARAM)curSelStr);
-            NamedCommand_Parse(newBindCommand, curSelStr, command, BUF_LEN);
+            if(command->hasTextRange)
+            {
+                CHAR text[BUF_LEN];
+                sprintf_s(text, BUF_LEN, "%.*s", command->textRangeEnd, curSelStr + command->textRangeStart);
+                NamedCommand_Parse(newBindCommand, text, command, BUF_LEN);
+            }
+            else
+            {
+                NamedCommand_Parse(newBindCommand, curSelStr, command, BUF_LEN);
+            }
             ItemsView_StartBindingProcess(self, newBindCommand, BindProcessFinishCallback, command->reloadAfter, command->quitAfter);
         }
     }
@@ -1362,7 +1371,7 @@ void MenuDefinition_ParseAndSetRange(MenuDefinition *self, char *argText)
     self->returnRangeEnd = atoi(endStr);
 }
 
-void MenuDefinition_AddNamedCommand(MenuDefinition *self, char *argText, BOOL reloadAfter, BOOL quitAfter)
+NamedCommand *MenuDefinition_AddNamedCommand(MenuDefinition *self, char *argText, BOOL reloadAfter, BOOL quitAfter)
 {
     char nameBuff[BUF_LEN];
     char expressionBuff[BUF_LEN];
@@ -1417,6 +1426,7 @@ void MenuDefinition_AddNamedCommand(MenuDefinition *self, char *argText, BOOL re
     command->expressionLen = expressionCtr;
     command->quitAfter = quitAfter;
     command->reloadAfter = reloadAfter;
+    command->hasTextRange = FALSE;
 
     if(!self->namedCommands)
     {
@@ -1428,6 +1438,16 @@ void MenuDefinition_AddNamedCommand(MenuDefinition *self, char *argText, BOOL re
         self->lastNamedCommand->next = command;
         self->lastNamedCommand = command;
     }
+
+    return command;
+}
+
+void MenuDefinition_AddNamedCommand_WithTextRange(MenuDefinition *self, char *argText, BOOL reloadAfter, BOOL quitAfter, int textStart, int textEnd)
+{
+    NamedCommand *command = MenuDefinition_AddNamedCommand(self, argText, reloadAfter, quitAfter);
+    command->hasTextRange = TRUE;
+    command->textRangeStart = textStart;
+    command->textRangeEnd = textEnd;
 }
 
 MenuView *menu_create(int left, int top, int width, int height, TCHAR *title)
