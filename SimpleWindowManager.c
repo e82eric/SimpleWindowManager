@@ -2507,7 +2507,7 @@ void menu_focus(MenuView *self)
     DeferWindowPos(
             hdwp,
             self->hwnd,
-            HWND_TOPMOST,
+            NULL,
             x,
             y,
             w,
