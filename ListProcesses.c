@@ -109,7 +109,7 @@ void fill_line_from_process(Process *process, CHAR *lineToFill)
     sprintf_s(
             lineToFill,
             1024,
-            "%-45ls %08d %20ls %20ls %10ls",
+            "%-75.75ls %08d %20ls %20ls %10ls",
             process->fileName, process->pid, workingSetFormatedStr, privateBytesFormatedStr, cpuSecondsStrFormated);
 }
 
@@ -125,7 +125,7 @@ int list_processes_run(int maxItems, CHAR** linesToFill, BOOL sort, int (*sortFu
     sprintf_s(
             headerBuf,
             1024,
-            "%-45ls %8ls %20ls %20ls %10ls",
+            "%-75.75ls %8ls %20ls %20ls %10ls",
             L"Name", L"PID", L"WorkingSet(kb)", L"PrivateBytes(kb)", L"CPU(s)");
 
     linesToFill[0] = _strdup(headerBuf);
