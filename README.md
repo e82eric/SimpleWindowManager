@@ -105,8 +105,20 @@ https://user-images.githubusercontent.com/811029/196359680-c7d45b94-3edc-409f-97
 * Defining workspaces:
   * Specifying workspaces: https://github.com/e82eric/SimpleWindowManager/blob/main/SampleConfig.c#L77
   * Can be configured with simple contains matching using the exe name, windows title, or window class.
-    * https://github.com/e82eric/SimpleWindowManager/blob/main/SampleConfig.c#L78
   * It is also possible to use a C function to do advanced filtering using the Client struct
+
+_Example Workspace defined using exe name filters_
+```C
+    WCHAR chromeTag = { 0xfa9e };
+
+    Workspace *browserWorkspace = workspace_register(L"Chrome", &chromeTag, &tileLayout);
+    workspace_register_processimagename_contains_filter(browserWorkspace, L"chrome.exe");
+    workspace_register_processimagename_contains_filter(browserWorkspace, L"brave.exe");
+    workspace_register_processimagename_contains_filter(browserWorkspace, L"firefox.exe");
+    workspace_register_processimagename_contains_filter(browserWorkspace, L"msedge.exe");
+```
+
+
 * Key Bindings
   * A number of keybindings are registered by default: https://github.com/e82eric/SimpleWindowManager/blob/main/SimpleWindowManager.c#L3966
     * These can be overridden by registering a keybinding using the same modifier key combination
@@ -114,14 +126,63 @@ https://user-images.githubusercontent.com/811029/196359680-c7d45b94-3edc-409f-97
   * Key binding mapped to function with single argument: https://github.com/e82eric/SimpleWindowManager/blob/main/SampleConfig.c#L188
 * Menus
   * Both menu items and on selection actions, can be provided by the stdout of a shell command or by a custom C function.
-    * Menu Items:
-      * Shell:  https://github.com/e82eric/SimpleWindowManager/blob/main/SampleConfig.c#L142
-      * C function: https://github.com/e82eric/SimpleWindowManager/blob/main/SampleConfig.c#L154
-    * OnSelection action:
-      * Shell: 
-      * C function: https://github.com/e82eric/SimpleWindowManager/blob/main/SampleConfig.c#L150
-  * Custom actions can also be defined using shell commands: https://github.com/e82eric/SimpleWindowManager/blob/main/SampleConfig.c#L156
+
+_Example Menu items defined with shell command_
+```C
+    MenuDefinition *programLauncher = menu_create_and_register();
+    MenuDefinition_AddNamedCommand(programLauncher, "ld:cmd /c fd -t f -g \"*{.lnk,.exe}\" \
+            \"%USERPROFILE%\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\" \
+            \"C:\\ProgramData\\Microsoft\\Windows\\Start Menu\" \
+            \"%USERPROFILE%\\AppData\\Local\\Microsoft\\WindowsApps\" \
+            \"%USERPROFILE%\\Utilites\"",
+            FALSE,
+            FALSE);
+    MenuDefinition_ParseAndAddLoadCommand(programLauncher, "ld");
+    programLauncher->onSelection = open_program_scratch_callback;
+    keybinding_create_with_menu_arg("ProgramLauncherNotElevatedMenu", LAlt | LShift, VK_P, menu_run, programLauncher);
+```
+
+_Example Menu items defined with C function_
+```C
+    MenuDefinition *listProcessMenu = menu_create_and_register();
+    menu_definition_set_load_action(listProcessMenu, list_processes_run_no_sort);
+    MenuDefinition_AddNamedCommand(listProcessMenu, "procKill:cmd /c taskkill /f /pid {}", TRUE, FALSE);
+    MenuDefinition_AddNamedCommand(listProcessMenu, "windbg:powershell.exe -C '{}' -match '\\d{8}';windbg -p \"\"\"$([int]$Matches[0])\"\"\"", FALSE, TRUE);
+    MenuDefinition_AddLoadActionKeyBinding(listProcessMenu, VK_CONTROL, VK_1, list_processes_run_sorted_by_private_bytes);
+    MenuDefinition_AddLoadActionKeyBinding(listProcessMenu, VK_CONTROL, VK_2, list_processes_run_sorted_by_working_set);
+    MenuDefinition_AddLoadActionKeyBinding(listProcessMenu, VK_CONTROL, VK_3, list_processes_run_sorted_by_cpu);
+    MenuDefinition_AddLoadActionKeyBinding(listProcessMenu, VK_CONTROL, VK_4, list_processes_run_sorted_by_pid);
+    MenuDefinition_ParseAndSetRange(listProcessMenu, "46,8");
+    MenuDefinition_ParseAndAddKeyBinding(listProcessMenu, "ctl-k:procKill", FALSE);
+    MenuDefinition_ParseAndAddKeyBinding(listProcessMenu, "ctl-d:windbg", FALSE);
+    listProcessMenu->hasHeader = TRUE;
+    keybinding_create_with_menu_arg("ProcessListMenu", LWin, VK_9, menu_run, listProcessMenu);
+```
+
+* OnSelection action:
+  * Shell: 
+    * C function: https://github.com/e82eric/SimpleWindowManager/blob/main/SampleConfig.c#L150
+    * Custom actions can also be defined using shell commands: https://github.com/e82eric/SimpleWindowManager/blob/main/SampleConfig.c#L156
 * Scratch Terminals
-  * https://github.com/e82eric/SimpleWindowManager/blob/main/SampleConfig.c#L111
+
+_Example scratch terminal to toggle neovim terminal with powershell running in it_
+```C
+    ScratchWindow *nPowershellScratch = register_scratch_terminal_with_unique_string(
+            "Nvim Powershell",
+            "cmd /c nvim -c \"terminal powershell -nologo\"",
+            L"643763f5-f5cd-416e-a5c9-bef1f516863c");
+    keybinding_create_with_scratchwindow_arg("NvimPowershellScratchWindow", LAlt, VK_W, nPowershellScratch);
+```
+
 * Bar segments:
-  * These are defined using header text: width of variable part of segment: C function for getting the variable text: https://github.com/e82eric/SimpleWindowManager/blob/main/SampleConfig.c#L173
+  * These are defined using header text: width of variable part of segment: C function for getting the variable text:
+  
+_Example bar segment definitions_
+```C
+    configuration_add_bar_segment(configuration, L"UTC", 5, fill_system_time);
+    configuration_add_bar_segment(configuration, L"Time", 16, fill_local_time);
+    configuration_add_bar_segment(configuration, L"CPU", 6, fill_cpu);
+    configuration_add_bar_segment(configuration, L"Memory", 6, fill_memory_percent);
+    configuration_add_bar_segment(configuration, L"Volume", 6, fill_volume_percent);
+    configuration_add_bar_segment(configuration, L"Internet", 3, fill_is_connected_to_internet);
+```
