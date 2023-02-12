@@ -95,7 +95,7 @@ int CompareProcessPid(const void *a, const void *b)
     return result;
 }
 
-void fill_line_from_process(Process *process, CHAR *lineToFill, int maxExeNameLen)
+void fill_line_from_process(Process *process, CHAR *lineToFill)
 {
     WCHAR privateBytesFormatedStr[MAX_PATH];
     format_number(privateBytesFormatedStr, process->privateBytes);
@@ -109,8 +109,8 @@ void fill_line_from_process(Process *process, CHAR *lineToFill, int maxExeNameLe
     sprintf_s(
             lineToFill,
             1024,
-            "%-*ls %08d %20ls %20ls %10ls",
-            maxExeNameLen, process->fileName, process->pid, workingSetFormatedStr, privateBytesFormatedStr, cpuSecondsStrFormated);
+            "%-45ls %08d %20ls %20ls %10ls",
+            process->fileName, process->pid, workingSetFormatedStr, privateBytesFormatedStr, cpuSecondsStrFormated);
 }
 
 int list_processes_run(int maxItems, CHAR** linesToFill, BOOL sort, int (*sortFunc)(const void *, const void*))
@@ -122,20 +122,20 @@ int list_processes_run(int maxItems, CHAR** linesToFill, BOOL sort, int (*sortFu
 
     int numberOfResults = 1;
     CHAR headerBuf[1024];
+    sprintf_s(
+            headerBuf,
+            1024,
+            "%-45ls %8ls %20ls %20ls %10ls",
+            L"Name", L"PID", L"WorkingSet(kb)", L"PrivateBytes(kb)", L"CPU(s)");
+
+    linesToFill[0] = _strdup(headerBuf);
     unsigned int count = 0;
     Process processes[1024];
 
-    int maxExeNameLen = 0;
     do
     {
         if(pEntry.szExeFile[0] != '\0')
         {
-            int exeNameLen = (int)wcslen(pEntry.szExeFile);
-            if(exeNameLen > maxExeNameLen)
-            {
-                maxExeNameLen = exeNameLen;
-            }
-
             processes[count].fileName = _wcsdup(pEntry.szExeFile);
             processes[count].pid = pEntry.th32ProcessID;
             fill_process_stats(&processes[count]);
@@ -145,14 +145,6 @@ int list_processes_run(int maxItems, CHAR** linesToFill, BOOL sort, int (*sortFu
 
     CloseHandle(hSnapshot);
 
-    sprintf_s(
-            headerBuf,
-            1024,
-            "%-*ls %8ls %20ls %20ls %10ls",
-            maxExeNameLen, L"Name", L"PID", L"WorkingSet(kb)", L"PrivateBytes(kb)", L"CPU(s)");
-
-    linesToFill[0] = _strdup(headerBuf);
-
     if(sort)
     {
         qsort(processes, count, sizeof(Process), sortFunc);
@@ -161,7 +153,7 @@ int list_processes_run(int maxItems, CHAR** linesToFill, BOOL sort, int (*sortFu
     for(unsigned int j = 0; j < count && numberOfResults <= maxItems; j++)
     {
         CHAR lineBuf[1024];
-        fill_line_from_process(&processes[j], lineBuf, maxExeNameLen);
+        fill_line_from_process(&processes[j], lineBuf);
         linesToFill[numberOfResults] = _strdup(lineBuf);
         free(processes[j].fileName);
         numberOfResults++;
