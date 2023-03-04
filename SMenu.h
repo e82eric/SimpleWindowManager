@@ -24,7 +24,9 @@ struct NamedCommand
 {
     char* name;
     char* expression;
+    void (*action)(char* stdOut);
     int expressionLen;
+    BOOL trimEnd;
     BOOL hasReplacement;
     int indexOfReplacement;
     NamedCommand *next;
@@ -157,9 +159,11 @@ typedef struct MenuView
     ItemsView *itemsView;
 } MenuView;
 
+void MenuDefinition_AddKeyBindingToNamedCommand(MenuDefinition *self, NamedCommand *namedCommand, unsigned int modifier, unsigned int key, BOOL isLoadCommand);
 void MenuDefinition_ParseAndAddKeyBinding(MenuDefinition *self, char *argText, BOOL isLoadCommand);
 NamedCommand *MenuDefinition_AddNamedCommand(MenuDefinition *self, char *argText, BOOL reloadAfter, BOOL quitAfter);
-void MenuDefinition_AddNamedCommand_WithTextRange(MenuDefinition *self, char *argText, BOOL reloadAfter, BOOL quitAfter, int textStart, int textEnd);
+void NamedCommand_SetTextRange(NamedCommand *self, int start, int end, BOOL trimEnd);
+NamedCommand* MenuDefinition_AddActionNamedCommand_WithTextRange(MenuDefinition *self, CHAR *nameBuff, void (*action)(CHAR *text), BOOL reloadAfter, BOOL quitAfter);
 MenuView *menu_create(int left, int top, int width, int height, TCHAR *title);
 void menu_run_definition(MenuView *self, MenuDefinition *menuDefinition);
 void MenuDefinition_ParseAndAddLoadCommand(MenuDefinition *self, char *argText);
@@ -168,3 +172,4 @@ void MenuDefinition_AddLoadActionKeyBinding(MenuDefinition *self, unsigned int m
 MenuDefinition* menu_definition_create(void);
 void menu_definition_set_load_action(MenuDefinition *self, int (*loadAction)(int maxItems, CHAR** items));
 void menu_definition_set_load_command(MenuDefinition *self, NamedCommand *loadCommand);
+MenuDefinition* menu_definition_create(void);

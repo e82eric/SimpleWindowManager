@@ -255,13 +255,12 @@ void ItemsView_HandleSelection(ItemsView *self)
         }
     }
 
+    ItemsView_Clear(self->searchView->itemsView);
     self->searchView->onEscape();
     if(self->onSelection)
     {
         self->onSelection(result);
     }
-
-    ItemsView_Clear(self->searchView->itemsView);
 }
 
 void ItemsView_SetHeader(ItemsView *self, char* headerLine)
@@ -392,6 +391,7 @@ void ItemsView_StartLoadItemsFromStdIn(ItemsView *self)
 
 void ItemsView_StartLoadItems_FromCommand(ItemsView *self, NamedCommand *namedCommand)
 {
+    ItemsView_Clear(self);
     UNREFERENCED_PARAMETER(self);
     ProcessCmdOutputJob *job = calloc(1, sizeof(ProcessCmdOutputJob));
     job->itemsView = self;
@@ -505,17 +505,43 @@ void ItemsView_HandleBinding(ItemsView *self, NamedCommand *command)
             char newBindCommand[BUF_LEN];
             CHAR curSelStr[BUF_LEN] = "";
             SendMessageA(self->hwnd, LB_GETTEXT, dwSel, (LPARAM)curSelStr);
+            CHAR text[BUF_LEN];
+            int numberOfTextChars = 0;
+
             if(command->hasTextRange)
             {
-                CHAR text[BUF_LEN];
-                sprintf_s(text, BUF_LEN, "%.*s", command->textRangeEnd, curSelStr + command->textRangeStart);
-                NamedCommand_Parse(newBindCommand, text, command, BUF_LEN);
+                numberOfTextChars = sprintf_s(text, BUF_LEN, "%.*s", command->textRangeEnd, curSelStr + command->textRangeStart);
             }
             else
             {
-                NamedCommand_Parse(newBindCommand, curSelStr, command, BUF_LEN);
+                numberOfTextChars = sprintf_s(text, BUF_LEN, "%s", curSelStr);
             }
-            ItemsView_StartBindingProcess(self, newBindCommand, BindProcessFinishCallback, command->reloadAfter, command->quitAfter);
+
+            if(command->trimEnd)
+            {
+                for(size_t i = numberOfTextChars - 1; i >= 0; i--)
+                {
+                    if(isspace(text[i]))
+                    {
+                        text[i] = '\0';
+                    }
+                    else
+                    {
+                        break;
+                    }
+                }
+            }
+
+            NamedCommand_Parse(newBindCommand, text, command, BUF_LEN);
+
+            if(command->action)
+            {
+                command->action(text);
+            }
+            else
+            {
+                ItemsView_StartBindingProcess(self, newBindCommand, BindProcessFinishCallback, command->reloadAfter, command->quitAfter);
+            }
         }
     }
 }
@@ -745,6 +771,10 @@ void ItemsView_AddToEnd(ItemsView *self, char* text)
         current->next->items = calloc(CHUNK_SIZE, sizeof(Item*));
         current->items[current->count] = item;
         current->count++;
+    }
+    else
+    {
+        assert(FALSE);
     }
 
     self->numberOfItems++;
@@ -1371,6 +1401,29 @@ void MenuDefinition_ParseAndSetRange(MenuDefinition *self, char *argText)
     self->returnRangeEnd = atoi(endStr);
 }
 
+NamedCommand *MenuDefinition_FindOrAddNamedCommand(MenuDefinition *self, CHAR *nameBuff)
+{
+    NamedCommand *command = MenuDefinition_FindNamedCommandByName(self, nameBuff);
+    if(!command)
+    {
+        command = calloc(1, sizeof(NamedCommand));
+        command->name = _strdup(nameBuff);
+
+        if(!self->namedCommands)
+        {
+            self->namedCommands = command;
+            self->lastNamedCommand = command;
+        }
+        else
+        {
+            self->lastNamedCommand->next = command;
+            self->lastNamedCommand = command;
+        }
+    }
+
+    return command;
+}
+
 NamedCommand *MenuDefinition_AddNamedCommand(MenuDefinition *self, char *argText, BOOL reloadAfter, BOOL quitAfter)
 {
     char nameBuff[BUF_LEN];
@@ -1418,8 +1471,7 @@ NamedCommand *MenuDefinition_AddNamedCommand(MenuDefinition *self, char *argText
 
     expressionBuff[expressionCtr] = '\0';
 
-    NamedCommand *command = calloc(1, sizeof(NamedCommand));
-    command->name = _strdup(nameBuff);
+    NamedCommand *command = MenuDefinition_FindOrAddNamedCommand(self, nameBuff);
     command->expression = _strdup(expressionBuff);
     command->hasReplacement = hasReplacement;
     command->indexOfReplacement = indexOfReplacement;
@@ -1428,26 +1480,25 @@ NamedCommand *MenuDefinition_AddNamedCommand(MenuDefinition *self, char *argText
     command->reloadAfter = reloadAfter;
     command->hasTextRange = FALSE;
 
-    if(!self->namedCommands)
-    {
-        self->namedCommands = command;
-        self->lastNamedCommand = command;
-    }
-    else
-    {
-        self->lastNamedCommand->next = command;
-        self->lastNamedCommand = command;
-    }
-
     return command;
 }
 
-void MenuDefinition_AddNamedCommand_WithTextRange(MenuDefinition *self, char *argText, BOOL reloadAfter, BOOL quitAfter, int textStart, int textEnd)
+void NamedCommand_SetTextRange(NamedCommand *self, int start, int end, BOOL trimEnd)
 {
-    NamedCommand *command = MenuDefinition_AddNamedCommand(self, argText, reloadAfter, quitAfter);
+    self->hasTextRange = TRUE;
+    self->textRangeStart = start;
+    self->textRangeEnd = end;
+    self->trimEnd = trimEnd;
+}
+
+NamedCommand* MenuDefinition_AddActionNamedCommand(MenuDefinition *self, CHAR *nameBuff, void (*action)(CHAR *text), BOOL reloadAfter, BOOL quitAfter)
+{
+    NamedCommand *command = MenuDefinition_FindOrAddNamedCommand(self, nameBuff);
+    command->quitAfter = quitAfter;
+    command->reloadAfter = reloadAfter;
+    command->action = action;
     command->hasTextRange = TRUE;
-    command->textRangeStart = textStart;
-    command->textRangeEnd = textEnd;
+    return command;
 }
 
 MenuView *menu_create(int left, int top, int width, int height, TCHAR *title)
@@ -1457,8 +1508,7 @@ MenuView *menu_create(int left, int top, int width, int height, TCHAR *title)
     ItemsView *itemsView = calloc(1, sizeof(ItemsView));
     itemsView->maxDisplayItems = 50;
     itemsView->hasHeader = FALSE;
-    itemsView->chunks = calloc(1, sizeof(Chunk));
-    itemsView->chunks->items = calloc(CHUNK_SIZE, sizeof(Item*));
+    itemsView->fzfSlab = fzf_make_default_slab();
 
     SearchView *searchView = calloc(1, sizeof(SearchView));
     searchView->itemsView = itemsView;

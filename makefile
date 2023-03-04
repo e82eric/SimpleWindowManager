@@ -19,8 +19,8 @@ fzf.obj:
 .c.obj:
 	CL /c $(cflags) $*.c /Fd"$(outdir)\$*.pdb" /Fo"$(outdir)\$*.obj"
 
-SimpleWindowManager.exe: ListProcesses.obj ListWindows.obj fzf.obj SMenu.obj SimpleWindowManager.obj Config.obj
-	LINK /DEBUG $(outdir)\ListProcesses.obj $(outdir)\ListWindows.obj $(outdir)\fzf.obj $(outdir)\SMenu.obj $(outdir)\SimpleWindowManager.obj $(outdir)\Config.obj $(winlibs) Oleacc.lib Shlwapi.lib OLE32.lib Advapi32.lib Dwmapi.lib Shell32.lib OleAut32.lib /OUT:$(outdir)\SimpleWindowManager.exe
+SimpleWindowManager.exe: ListServices.obj ListProcesses.obj ListWindows.obj fzf.obj SMenu.obj SimpleWindowManager.obj Config.obj
+	LINK /DEBUG $(outdir)\ListServices.obj $(outdir)\ListProcesses.obj $(outdir)\ListWindows.obj $(outdir)\fzf.obj $(outdir)\SMenu.obj $(outdir)\SimpleWindowManager.obj $(outdir)\Config.obj $(winlibs) Oleacc.lib Shlwapi.lib OLE32.lib Advapi32.lib Dwmapi.lib Shell32.lib OleAut32.lib /OUT:$(outdir)\SimpleWindowManager.exe
 
 ListWindows.exe: ListWindowsConsole.obj ListWindows.obj
 	LINK /DEBUG $(outdir)\ListWindowsConsole.obj $(outdir)\ListWindows.obj $(winlibs) Shlwapi.lib /OUT:$(outdir)\ListWindows.exe
@@ -30,6 +30,12 @@ SMenu.exe: SMenu.obj SMenuConsole.obj fzf.obj
 
 ListProcesses.exe: ListProcesses.obj ListProcessesConsole.obj
 	LINK /DEBUG $(outdir)\ListProcessesConsole.obj $(outdir)\ListProcesses.obj $(winlibs) Shlwapi.lib /OUT:$(outdir)\ListProcesses.exe
+
+ListServices.exe: ListServices.obj ListServicesConsole.obj
+	LINK /DEBUG $(outdir)\ListServicesConsole.obj $(outdir)\ListServices.obj $(winlibs) Shlwapi.lib Advapi32.lib /OUT:$(outdir)\ListServices.exe
+
+KeyBindingSystem.exe: Process.obj ScratchWindow.obj KeyBindingSystem.obj KeyBindingSystemConsole.obj
+	LINK /DEBUG $(outdir)\ScratchWindow.obj $(outdir)\Process.obj $(outdir)\KeyBindingSystemConsole.obj $(outdir)\KeyBindingSystem.obj $(winlibs) Shlwapi.lib /OUT:$(outdir)\KeyBindingSystem.exe Shell32.lib wbemuuid.lib Oleacc.lib OLE32.lib Advapi32.lib Dwmapi.lib OleAut32.lib
 
 publish:
 	rd /s /q $(publishdir)
