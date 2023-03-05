@@ -64,7 +64,6 @@ typedef struct Item Item;
 struct Item
 {
     CHAR *text;
-    Item *next;
 };
 
 typedef struct ItemMatchResult
@@ -92,12 +91,15 @@ typedef struct DisplayItemList
 typedef struct SearchView
 {
     HWND hwnd;
+    CHAR *searchString;
     ItemsView *itemsView;
     MenuKeyBinding *keyBindings;
     MenuKeyBinding *lastKeyBinding;
     void (*onEscape)(void);
+    BOOL isSearching;
     BOOL cancelSearch;
-    HANDLE cancelSearchEvent;
+    HANDLE searchEvent;
+    CRITICAL_SECTION searchCriticalSection; 
     CRITICAL_SECTION cancelSearchCriticalSection; 
 } SearchView;
 
@@ -142,6 +144,12 @@ struct ItemsView
     int returnRangeStart;
     int returnRangeEnd;
     void (*onSelection)(char* stdOut);
+    BOOL isLoading;
+    BOOL cancelLoad;
+    HANDLE loadEvent;
+    CRITICAL_SECTION loadCriticalSection; 
+    Item *displayItems[1024];
+    int numberOfDisplayItems;
 };
 
 typedef struct ProcessCmdOutputJob

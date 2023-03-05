@@ -23,6 +23,8 @@
 
 #define CHUNK_SIZE 20000
 
+#define WM_REDRAW_DISPLAY_LIST    (WM_USER + 1)
+
 COLORREF backgroundColor = 0x282828;
 COLORREF selectionBackgroundTextColor = RGB(168, 153, 132);
 COLORREF highlightBackgroundColor = RGB(60,56,54);
@@ -40,7 +42,7 @@ HFONT font;
 
 void ItemsView_SetLoading(ItemsView *self);
 void ItemsView_SetDoneLoading(ItemsView *self);
-VOID CALLBACK ItemsView_ProcessChunkWorker2(PTP_CALLBACK_INSTANCE Instance, PVOID lpParam, PTP_WORK Work);
+VOID CALLBACK ItemsView_ProcessChunkWorker(PTP_CALLBACK_INSTANCE Instance, PVOID lpParam, PTP_WORK Work);
 void DisplayItemList_MergeIntoRight(SearchView *searchView, DisplayItemList *self, DisplayItemList *resultList2);
 void ItemsView_SetHeader(ItemsView *self, char* headerLine);
 NamedCommand* ItemsView_FindNamedCommandByName(ItemsView *self, char *name);
@@ -58,8 +60,9 @@ DWORD WINAPI SearchView_Worker(LPVOID lpParam)
 
     EnterCriticalSection(&self->cancelSearchCriticalSection); 
     self->cancelSearch = TRUE;
-    WaitForSingleObject(self->cancelSearchEvent, 50000);
-    ResetEvent(self->cancelSearchEvent);
+    WaitForSingleObject(self->searchEvent, 50000);
+    self->isSearching = TRUE;
+    ResetEvent(self->searchEvent);
     self->cancelSearch = FALSE;
     LeaveCriticalSection(&self->cancelSearchCriticalSection);
 
@@ -68,26 +71,24 @@ DWORD WINAPI SearchView_Worker(LPVOID lpParam)
     ProcessChunkJob *jobs[250];
     int numberOfJobs = 0;
 
-    CHAR buff[BUF_LEN];
-    GetWindowTextA(self->hwnd, buff, BUF_LEN);
     PTP_WORK completeWorkHandles[50];
     Chunk *currentChunk = self->itemsView->chunks;
     while(currentChunk)
     {
         jobs[numberOfJobs] = calloc(1, sizeof(ProcessChunkJob));
         jobs[numberOfJobs]->fzfSlab = fzf_make_default_slab();
-        jobs[numberOfJobs]->fzfPattern = fzf_parse_pattern(CaseSmart, false, buff, true);
+        jobs[numberOfJobs]->fzfPattern = fzf_parse_pattern(CaseSmart, false, self->searchString, true);
         jobs[numberOfJobs]->chunk = currentChunk;
         jobs[numberOfJobs]->allItemsWithScores = calloc(CHUNK_SIZE, sizeof(ItemMatchResult*));
         jobs[numberOfJobs]->jobNumber = numberOfJobs;
-        jobs[numberOfJobs]->searchString = _strdup(buff);
+        jobs[numberOfJobs]->searchString = self->searchString;
 
         jobs[numberOfJobs]->displayItemList = calloc(1, sizeof(DisplayItemList));
         jobs[numberOfJobs]->displayItemList->items = calloc(self->itemsView->maxDisplayItems, sizeof(ItemMatchResult*));
         jobs[numberOfJobs]->displayItemList->maxItems = self->itemsView->maxDisplayItems;
         jobs[numberOfJobs]->searchView = self;
 
-        completeWorkHandles[numberOfJobs] = CreateThreadpoolWork(ItemsView_ProcessChunkWorker2, jobs[numberOfJobs], NULL);
+        completeWorkHandles[numberOfJobs] = CreateThreadpoolWork(ItemsView_ProcessChunkWorker, jobs[numberOfJobs], NULL);
         SubmitThreadpoolWork(completeWorkHandles[numberOfJobs]);
 
         numberOfJobs++;
@@ -111,16 +112,17 @@ DWORD WINAPI SearchView_Worker(LPVOID lpParam)
     }
     self->itemsView->numberOfItemsMatched = totalMatches;
 
-    SendMessageA(self->itemsView->hwnd, WM_SETREDRAW, FALSE, 0);
-    SendMessageA(self->itemsView->hwnd, LB_RESETCONTENT, 0, 0);
+    EnterCriticalSection(&self->searchCriticalSection);
+    self->itemsView->numberOfDisplayItems = 0;
     for(int i = 0; i < mergedDisplayItemList->count; i++)
     {
-        if(self->cancelSearch)
-        {
-            break;
-        }
-        SendMessageA(self->itemsView->hwnd, LB_INSERTSTRING, i, (LPARAM)mergedDisplayItemList->items[i]->item->text);
+        self->itemsView->displayItems[i] = mergedDisplayItemList->items[i]->item;
+        self->itemsView->numberOfDisplayItems++;
     }
+    LeaveCriticalSection(&self->searchCriticalSection);
+
+    free(mergedDisplayItemList->items);
+    free(mergedDisplayItemList);
 
     for(int i = 0; i < numberOfJobs; i++)
     {
@@ -130,25 +132,6 @@ DWORD WINAPI SearchView_Worker(LPVOID lpParam)
             free(jobs[i]->allItemsWithScores[j]);
         }
         free(jobs[i]->allItemsWithScores);
-        free(jobs[i]->searchString);
-    }
-
-    LRESULT lResult = SendMessageA(self->itemsView->hwnd, LB_FINDSTRING, 0, (LPARAM)self->itemsView->selectedString);
-    if(lResult == LB_ERR || !self->itemsView->itemSelected)
-    {
-        LRESULT newSelection = SendMessageA(self->itemsView->hwnd, LB_SETCURSEL, 0, 0);
-        char achBuffer[BUF_LEN];
-        SendMessageA(self->itemsView->hwnd, LB_GETTEXT, newSelection, (LPARAM)achBuffer); 
-        memcpy(self->itemsView->selectedString, achBuffer, BUF_LEN);
-    }
-    else
-    {
-        SendMessageA(self->itemsView->hwnd, LB_SETCURSEL, lResult, 0);
-    }
-
-    if(!self->cancelSearch)
-    {
-        SendMessageA(self->itemsView->hwnd, WM_SETREDRAW, TRUE, 0);
     }
 
     for(int i = 0; i < numberOfJobs; i++)
@@ -160,17 +143,48 @@ DWORD WINAPI SearchView_Worker(LPVOID lpParam)
         free(jobs[i]);
     }
 
-    free(mergedDisplayItemList->items);
-    free(mergedDisplayItemList);
-
-    SetEvent(self->cancelSearchEvent);
     self->itemsView->isSearching = FALSE;
+    SetEvent(self->searchEvent);
+    PostMessage(self->hwnd, WM_REDRAW_DISPLAY_LIST, (WPARAM)NULL, (LPARAM)NULL);
     return TRUE;
+}
+
+void ItemsView_HandleDisplayItemsUpdate(ItemsView *self)
+{
+    SendMessageA(self->hwnd, WM_SETREDRAW, FALSE, 0);
+    SendMessageA(self->hwnd, LB_RESETCONTENT, 0, 0);
+    EnterCriticalSection(&self->searchView->searchCriticalSection);
+    for(int i = 0; i < self->numberOfDisplayItems; i++)
+    {
+        SendMessageA(self->hwnd, LB_INSERTSTRING, i, (LPARAM)self->displayItems[i]->text);
+    }
+    LeaveCriticalSection(&self->searchView->searchCriticalSection);
+
+    LRESULT lResult = SendMessageA(self->hwnd, LB_FINDSTRING, 0, (LPARAM)self->selectedString);
+    if(lResult == LB_ERR || !self->itemSelected)
+    {
+        LRESULT newSelection = SendMessageA(self->hwnd, LB_SETCURSEL, 0, 0);
+        char achBuffer[BUF_LEN];
+        SendMessageA(self->hwnd, LB_GETTEXT, newSelection, (LPARAM)achBuffer); 
+        memcpy(self->selectedString, achBuffer, BUF_LEN);
+    }
+    else
+    {
+        SendMessageA(self->hwnd, LB_SETCURSEL, lResult, 0);
+    }
+    SendMessageA(self->hwnd, WM_SETREDRAW, TRUE, 0);
 }
 
 void TriggerSearch(SearchView *self)
 {
     DWORD dwThreadIdArray[1];
+    CHAR searchString[BUF_LEN];
+    GetWindowTextA(self->hwnd, searchString, BUF_LEN);
+    if(self->searchString)
+    {
+        free(self->searchString);
+    }
+    self->searchString = _strdup(searchString); 
     HANDLE threadHandle = CreateThread( 
             NULL,
             0,
@@ -437,6 +451,22 @@ void ItemsView_StartLoadItems(ItemsView *self)
 
 void ItemsView_Clear(ItemsView *self)
 {
+    EnterCriticalSection(&self->loadCriticalSection); 
+    if(self->isLoading)
+    {
+        self->cancelLoad = TRUE;
+    }
+    LeaveCriticalSection(&self->loadCriticalSection); 
+    WaitForSingleObject(self->loadEvent, 50000);
+
+    EnterCriticalSection(&self->searchView->searchCriticalSection); 
+    if(self->searchView->isSearching)
+    {
+        self->searchView->cancelSearch = TRUE;
+    }
+    LeaveCriticalSection(&self->searchView->searchCriticalSection); 
+    WaitForSingleObject(self->searchView->searchEvent, 50000);
+
     SendMessageA(self->hwnd, LB_SETCURSEL, 0, -1);
     SendMessage(self->hwnd, LB_RESETCONTENT, 0, 0);;
     self->itemSelected = FALSE;
@@ -459,6 +489,9 @@ void ItemsView_Clear(ItemsView *self)
     self->chunks = NULL;
     self->numberOfItems = 0;
     self->headerSet = FALSE;
+
+    self->cancelLoad = FALSE;
+    self->searchView->cancelSearch = FALSE;
 }
 
 void ItemsView_ReloadFromCommand(ItemsView *self, NamedCommand *command)
@@ -554,6 +587,11 @@ LRESULT CALLBACK SearchView_MessageProcessor(HWND hWnd, UINT uMsg, WPARAM wParam
 
     switch (uMsg)
     {
+        case WM_REDRAW_DISPLAY_LIST:
+            {
+                ItemsView_HandleDisplayItemsUpdate(self->itemsView);
+            }
+            break;
         case WM_CHAR:
             {
                 if(wParam == VK_ESCAPE)
@@ -689,7 +727,7 @@ void DisplayItemList_TryAdd(DisplayItemList *self, ItemMatchResult *matchResult)
     }
 }
 
-VOID CALLBACK ItemsView_ProcessChunkWorker2(PTP_CALLBACK_INSTANCE Instance, PVOID lpParam, PTP_WORK Work)
+VOID CALLBACK ItemsView_ProcessChunkWorker(PTP_CALLBACK_INSTANCE Instance, PVOID lpParam, PTP_WORK Work)
 {
     UNREFERENCED_PARAMETER(Work);
     UNREFERENCED_PARAMETER(Instance);
@@ -811,9 +849,27 @@ BOOL FillLineFromBuffer(char *target, char *buffer, int max, int *charsRead, int
     return FALSE;
 }
 
+void ItemsView_StartLoad(ItemsView *self)
+{
+    EnterCriticalSection(&self->loadCriticalSection);
+    self->isLoading = TRUE;
+    ItemsView_SetLoading(self);
+    ResetEvent(self->loadEvent);
+    LeaveCriticalSection(&self->loadCriticalSection);
+}
+
+void ItemsView_CompleteLoad(ItemsView *self)
+{
+    EnterCriticalSection(&self->loadCriticalSection);
+    self->isLoading = FALSE;
+    ItemsView_SetDoneLoading(self);
+    SetEvent(self->loadEvent);
+    LeaveCriticalSection(&self->loadCriticalSection);
+}
+
 BOOL ProcessCmdOutJob_ProcessStream(ProcessCmdOutputJob *self)
 {
-    ItemsView_SetLoading(self->itemsView);
+    ItemsView_StartLoad(self->itemsView);
     CHAR buffer[BUF_LEN];
     CHAR line[BUF_LEN];
     DWORD readBytes = 0;
@@ -840,6 +896,11 @@ BOOL ProcessCmdOutJob_ProcessStream(ProcessCmdOutputJob *self)
             isFullLine = FillLineFromBuffer(line + lineIndex, buffer + bufferIndex, readBytes - bufferIndex, &charsRead, &lineLen);
             if(isFullLine)
             {
+                if(self->itemsView->cancelLoad)
+                {
+                    ItemsView_CompleteLoad(self->itemsView);
+                    return FALSE;
+                }
                 ItemsView_AddToEnd(self->itemsView, line);
                 searchTriggerCtr++;
                 if(searchTriggerCtr > 50000)
@@ -860,7 +921,7 @@ BOOL ProcessCmdOutJob_ProcessStream(ProcessCmdOutputJob *self)
     }
 
     TriggerSearch(self->itemsView->searchView);
-    ItemsView_SetDoneLoading(self->itemsView);
+    ItemsView_CompleteLoad(self->itemsView);
     return TRUE;
 }
 
@@ -1509,9 +1570,11 @@ MenuView *menu_create(int left, int top, int width, int height, TCHAR *title)
     itemsView->maxDisplayItems = 50;
     itemsView->hasHeader = FALSE;
     itemsView->fzfSlab = fzf_make_default_slab();
+    itemsView->isLoading = FALSE;
 
     SearchView *searchView = calloc(1, sizeof(SearchView));
     searchView->itemsView = itemsView;
+    searchView->isSearching = FALSE;
 
     itemsView->searchView = searchView;
 
@@ -1519,12 +1582,22 @@ MenuView *menu_create(int left, int top, int width, int height, TCHAR *title)
     menuView->searchView = searchView;
     menuView->searchView->itemsView = itemsView;
 
+    InitializeCriticalSectionAndSpinCount(&searchView->searchCriticalSection, 0x00000400);
     InitializeCriticalSectionAndSpinCount(&searchView->cancelSearchCriticalSection, 0x00000400);
-    searchView->cancelSearchEvent = CreateEvent(
+    searchView->searchEvent = CreateEvent(
             NULL,
             TRUE,
             TRUE,
-            L"CancelSearchEvent");
+            L"searchEvent");
+    SetEvent(searchView->searchEvent);
+
+    InitializeCriticalSectionAndSpinCount(&itemsView->loadCriticalSection, 0x00000400);
+    itemsView->loadEvent = CreateEvent(
+            NULL,
+            TRUE,
+            TRUE,
+            L"loadEvent");
+    SetEvent(itemsView->loadEvent);
 
     backgrounBrush = CreateSolidBrush(backgroundColor);
     highlightedBackgroundBrush = CreateSolidBrush(highlightBackgroundColor);
