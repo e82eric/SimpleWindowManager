@@ -6,10 +6,12 @@
 #include "..\\SimpleWindowManager2\\SimpleWindowManager.h"
 #include "..\\SimpleWindowManager2\\ListWindows.h"
 #include "..\\SimpleWindowManager2\\ListProcesses.h"
+#include "..\\SimpleWindowManager2\\ListServices.h"
+
+MenuDefinition *searchDriveMenuDefinition;
 
 void search_drive(char* stdOut)
 {
-    MenuDefinition definition = {0};
     CHAR cmdBuf[MAX_PATH];
     sprintf_s(
             cmdBuf,
@@ -17,10 +19,10 @@ void search_drive(char* stdOut)
             "ld:cmd /c fd . %s\\",
             stdOut);
 
-    MenuDefinition_AddNamedCommand(&definition, cmdBuf, FALSE, FALSE);
-    MenuDefinition_ParseAndAddLoadCommand(&definition, "ld");
-    definition.onSelection = open_program_scratch_callback_not_elevated;
-    menu_run(&definition);
+    MenuDefinition_AddNamedCommand(searchDriveMenuDefinition, cmdBuf, FALSE, FALSE);
+    MenuDefinition_ParseAndAddLoadCommand(searchDriveMenuDefinition, "ld");
+    searchDriveMenuDefinition->onSelection = open_program_scratch_callback_not_elevated;
+    menu_run(searchDriveMenuDefinition);
 }
 
 BOOL should_float_be_focused(Client *client)
@@ -90,11 +92,11 @@ void configure(Configuration *configuration)
     Workspace *teamsWorkspace = workspace_register(L"Teams", &teamsTag, &tileLayout);
     workspace_register_processimagename_contains_filter(teamsWorkspace, L"Teams.exe");
 
-    workspace_register(L"5", L"5", &tileLayout);
+    workspace_register(L"5", L"4", &tileLayout);
     workspace_register(L"6", L"6", &tileLayout);
     workspace_register(L"7", L"7", &tileLayout);
     workspace_register(L"8", L"8", &tileLayout);
-    workspace_register(L"9", L"8", &tileLayout);
+    workspace_register(L"9", L"9", &tileLayout);
 
     keybindings_register_defaults();
 
@@ -120,11 +122,25 @@ void configure(Configuration *configuration)
             L"643763f5-f5cd-416e-a5c9-bef1f516863c");
     keybinding_create_with_scratchwindow_arg("NvimPowershellScratchWindow", LAlt, VK_W, nPowershellScratch);
 
-    MenuDefinition *listWindowsMenu2 = menu_create_and_register();
-    listWindowsMenu2->hasHeader = TRUE;
-    menu_definition_set_load_action(listWindowsMenu2, list_windows_run);
-    listWindowsMenu2->onSelection = open_windows_scratch_exit_callback;
-    keybinding_create_with_menu_arg("ListWindowsMenu", LAlt, VK_SPACE, menu_run, listWindowsMenu2);
+    MenuDefinition *listWindowsMenu = menu_create_and_register();
+    listWindowsMenu->hasHeader = TRUE;
+    menu_definition_set_load_action(listWindowsMenu, list_windows_run);
+    listWindowsMenu->onSelection = open_windows_scratch_exit_callback;
+    keybinding_create_with_menu_arg("ListWindowsMenu", LAlt, VK_SPACE, menu_run, listWindowsMenu);
+
+    MenuDefinition *listServicesMenu = menu_create_and_register();
+    listServicesMenu->hasHeader = TRUE;
+    menu_definition_set_load_action(listServicesMenu, list_services_run_no_sort);
+    NamedCommand *serviceStartCommand = MenuDefinition_AddNamedCommand(listServicesMenu, "start:sc start \"\"{}\"\"", TRUE, FALSE);
+    NamedCommand *serviceStopCommand = MenuDefinition_AddNamedCommand(listServicesMenu, "stop:sc stop \"\"{}\"\"", TRUE, FALSE);
+    NamedCommand_SetTextRange(serviceStartCommand, 0, 45, TRUE);
+    NamedCommand_SetTextRange(serviceStopCommand, 0, 45, TRUE);
+    /* MenuDefinition_AddNamedCommand_WithTextRange(MenuDefinition *self, char *argText, BOOL reloadAfter, BOOL quitAfter, int textStart, int textEnd) */
+    MenuDefinition_ParseAndAddKeyBinding(listServicesMenu, "ctl-s:start", FALSE);
+    MenuDefinition_ParseAndAddKeyBinding(listServicesMenu, "ctl-x:stop", FALSE);
+    /* startServiceNamedCommand->trimEnd = TRUE; */
+    /* MenuDefinition_AddKeyBindingToNamedCommand(listServicesMenu, startServiceNamedCommand, VK_CONTROL, VK_S, FALSE); */
+    keybinding_create_with_menu_arg("ListServicesMenu", LAlt, VK_Y, menu_run, listServicesMenu);
 
     MenuDefinition *programLauncher = menu_create_and_register();
     MenuDefinition_AddNamedCommand(programLauncher, "ld:cmd /c fd -t f -g \"*{.lnk,.exe}\" \
@@ -152,18 +168,20 @@ void configure(Configuration *configuration)
 
     MenuDefinition *listProcessMenu = menu_create_and_register();
     menu_definition_set_load_action(listProcessMenu, list_processes_run_no_sort);
-    MenuDefinition_AddNamedCommand(listProcessMenu, "procKill:cmd /c taskkill /f /pid {}", TRUE, FALSE);
+    NamedCommand *killProcessCommand = MenuDefinition_AddNamedCommand(listProcessMenu, "procKill:cmd /c taskkill /f /pid {}", TRUE, FALSE);
+    NamedCommand_SetTextRange(killProcessCommand, 76, 8, TRUE);
     MenuDefinition_AddNamedCommand(listProcessMenu, "windbg:powershell.exe -C '{}' -match '\\d{8}';windbg -p \"\"\"$([int]$Matches[0])\"\"\"", FALSE, TRUE);
     MenuDefinition_AddLoadActionKeyBinding(listProcessMenu, VK_CONTROL, VK_1, list_processes_run_sorted_by_private_bytes);
     MenuDefinition_AddLoadActionKeyBinding(listProcessMenu, VK_CONTROL, VK_2, list_processes_run_sorted_by_working_set);
     MenuDefinition_AddLoadActionKeyBinding(listProcessMenu, VK_CONTROL, VK_3, list_processes_run_sorted_by_cpu);
     MenuDefinition_AddLoadActionKeyBinding(listProcessMenu, VK_CONTROL, VK_4, list_processes_run_sorted_by_pid);
-    MenuDefinition_ParseAndSetRange(listProcessMenu, "46,8");
+    MenuDefinition_ParseAndSetRange(listProcessMenu, "76,8");
     MenuDefinition_ParseAndAddKeyBinding(listProcessMenu, "ctl-k:procKill", FALSE);
     MenuDefinition_ParseAndAddKeyBinding(listProcessMenu, "ctl-d:windbg", FALSE);
     listProcessMenu->hasHeader = TRUE;
     keybinding_create_with_menu_arg("ProcessListMenu", LWin, VK_9, menu_run, listProcessMenu);
 
+    searchDriveMenuDefinition = menu_definition_create();
     MenuDefinition *searchAllDrivesMenu = menu_create_and_register();
     MenuDefinition_AddNamedCommand(searchAllDrivesMenu, "ld:powershell -c \"(Get-PSDrive -PSProvider FileSystem).Root\"", FALSE, FALSE);
     MenuDefinition_ParseAndAddLoadCommand(searchAllDrivesMenu, "ld");
