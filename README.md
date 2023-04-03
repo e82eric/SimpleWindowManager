@@ -7,7 +7,7 @@
 (Most features and concepts are copied from these or DWM or I3)
 
 ## Overview
-I wrote this application to target my specific workflow where 90% of windows come from a few different applications (browser, terminal IDE, chat, email) and I want to have those windows auto layed out for me into tiles and workspaces so that I can quickly navigate between them using the keyboard.  All other windows I let float.
+I wrote this application to target my specific workflow where 90% of windows come from a few different applications (browser, terminal, IDE, chat, email) and I want to have those windows auto layed out for me into tiles and workspaces so that I can quickly navigate between them using the keyboard.  All other windows I let float.
 
 ## Install
 - You will need to compile the application to install it
