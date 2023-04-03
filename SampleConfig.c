@@ -135,11 +135,8 @@ void configure(Configuration *configuration)
     NamedCommand *serviceStopCommand = MenuDefinition_AddNamedCommand(listServicesMenu, "stop:sc stop \"\"{}\"\"", TRUE, FALSE);
     NamedCommand_SetTextRange(serviceStartCommand, 0, 45, TRUE);
     NamedCommand_SetTextRange(serviceStopCommand, 0, 45, TRUE);
-    /* MenuDefinition_AddNamedCommand_WithTextRange(MenuDefinition *self, char *argText, BOOL reloadAfter, BOOL quitAfter, int textStart, int textEnd) */
     MenuDefinition_ParseAndAddKeyBinding(listServicesMenu, "ctl-s:start", FALSE);
     MenuDefinition_ParseAndAddKeyBinding(listServicesMenu, "ctl-x:stop", FALSE);
-    /* startServiceNamedCommand->trimEnd = TRUE; */
-    /* MenuDefinition_AddKeyBindingToNamedCommand(listServicesMenu, startServiceNamedCommand, VK_CONTROL, VK_S, FALSE); */
     keybinding_create_with_menu_arg("ListServicesMenu", LAlt, VK_Y, menu_run, listServicesMenu);
 
     MenuDefinition *programLauncher = menu_create_and_register();

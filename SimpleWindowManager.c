@@ -27,7 +27,7 @@
 #include "SMenu.h"
 #include "SimpleWindowManager.h"
 
-#define MAX_WORKSPACES 9
+#define MAX_WORKSPACES 10
 #define MAX_COMMANDS 256
 
 DEFINE_GUID(IID_IMMDeviceEnumerator, 0xa95664d2, 0x9614, 0x4f35, 0xa7, 0x46, 0xde, 0x8d, 0xb6, 0x36, 0x17, 0xe6);
@@ -79,7 +79,7 @@ void start_process(CHAR *processExe, CHAR *cmdArgs, DWORD creationFlags);
 void process_with_stdout_start(CHAR *cmdArgs, void (*onSuccess) (CHAR *));
 
 static void windowMnaager_remove_client_if_found_by_hwnd(HWND hwnd);
-static void windowManager_move_workspace_to_monitor(Monitor *monitor, Workspace *workspace);
+/* static void windowManager_move_workspace_to_monitor(Monitor *monitor, Workspace *workspace); */
 static void windowManager_move_window_to_workspace_and_arrange(HWND hwnd, Workspace *workspace);
 static Workspace* windowManager_find_client_workspace_using_filters(Client *client);
 static Client* windowManager_find_client_in_workspaces_by_hwnd(HWND hwnd);
@@ -1264,7 +1264,7 @@ void windowManager_move_workspace_to_monitor(Monitor *monitor, Workspace *worksp
 
     HDWP hdwp = BeginDeferWindowPos(workspaceNumberOfClients + selectedMonitorCurrentWorkspaceNumberOfClients);
     monitor_set_workspace_and_arrange(workspace, monitor, hdwp);
-    workspace_focus_selected_window(workspace);
+    /* workspace_focus_selected_window(workspace); */
     monitor_set_workspace_and_arrange(selectedMonitorCurrentWorkspace, currentMonitor, hdwp);
     EndDeferWindowPos(hdwp);
 }
@@ -1872,30 +1872,18 @@ Workspace* workspace_register(TCHAR *name, WCHAR* tag, Layout *layout)
 
 Workspace* workspace_register_with_window_filter(TCHAR *name, WindowFilter windowFilter, WCHAR* tag, Layout *layout)
 {
-    Workspace *workspace = workspace_create(name, windowFilter, tag, layout, numberOfBars);
-    if(workspace)
-    {
-        workspaces[numberOfWorkspaces] = workspace;
-        numberOfWorkspaces++;
-        return workspace;
-    }
-
-    return NULL;
-}
-
-Workspace* workspace_create(TCHAR *name, WindowFilter windowFilter, WCHAR* tag, Layout *layout, int numberOfButtons)
-{
     if(numberOfWorkspaces < MAX_WORKSPACES)
     {
-        Button ** buttons = (Button **) calloc(numberOfButtons, sizeof(Button *));
-        Workspace *result = calloc(1, sizeof(Workspace));
-        result->name = _wcsdup(name);
-        result->windowFilter = windowFilter;
-        result->buttons = buttons;
-        result->tag = _wcsdup(tag);
-        result->layout = layout;
-        result->filterData = calloc(1, sizeof(WorkspaceFilterData));
-        return result;
+        Button ** buttons = (Button **) calloc(numberOfBars, sizeof(Button *));
+        Workspace *workspace = workspaces[numberOfWorkspaces];
+        workspace->name = _wcsdup(name);
+        workspace->windowFilter = windowFilter;
+        workspace->buttons = buttons;
+        workspace->tag = _wcsdup(tag);
+        workspace->layout = layout;
+        workspace->filterData = calloc(1, sizeof(WorkspaceFilterData));
+        numberOfWorkspaces++;
+        return workspace;
     }
 
     return NULL;
@@ -3987,6 +3975,7 @@ void keybindings_register_defaults(void)
     keybinding_create_with_workspace_arg("swap_selected_monitor_to[7]", LAlt, VK_7, swap_selected_monitor_to, workspaces[6]);
     keybinding_create_with_workspace_arg("swap_selected_monitor_to[8]", LAlt, VK_8, swap_selected_monitor_to, workspaces[7]);
     keybinding_create_with_workspace_arg("swap_selected_monitor_to[9]", LAlt, VK_9, swap_selected_monitor_to, workspaces[8]);
+    keybinding_create_with_workspace_arg("swap_selected_monitor_to[0]", LAlt, VK_0, swap_selected_monitor_to, workspaces[9]);
 
     keybinding_create_with_no_arg("move_focused_client_next", LShift | LAlt, VK_J, move_focused_client_next);
     keybinding_create_with_no_arg("move_focused_client_previous", LShift | LAlt, VK_K, move_focused_client_previous);
@@ -4014,8 +4003,6 @@ void keybindings_register_defaults(void)
     keybinding_create_with_no_arg("swap_selected_monitor_to_tile_layout", LAlt, VK_T, swap_selected_monitor_to_tile_layout);
     keybinding_create_with_no_arg("redraw_focused_window", LAlt, VK_R, redraw_focused_window);
 
-    /* keybinding_create_cmd_args(LWin, VK_T, start_app, terminalAppPath); */
-
     keybinding_create_with_no_arg("quit", LAlt, VK_F9, quit);
 }
 
@@ -4028,7 +4015,6 @@ void start_process(CHAR *processExe, CHAR *cmdArgs, DWORD creationFlags)
     si.dwXSize = 2000;
     si.dwYSize = 1200;
     si.wShowWindow = SW_SHOW;
-    /* si.lpTitle = scratchWindowTitle; */
 
     PROCESS_INFORMATION pi = { 0 };
 
@@ -4397,6 +4383,7 @@ void open_windows_scratch_exit_callback(char *stdOut)
         {
             client->workspace->selected = client;
             windowManager_move_workspace_to_monitor(selectedMonitor, client->workspace);
+            workspace_focus_selected_window(client->workspace);
         }
         else
         {
@@ -4487,8 +4474,27 @@ int run (void)
     numberOfBars = numberOfDisplayMonitors;
 
     workspaces = calloc(MAX_WORKSPACES, sizeof(Workspace*));
+    for(int i = 0; i < MAX_WORKSPACES; i++)
+    {
+        workspaces[i] = calloc(1, sizeof(Workspace));
+    }
+
+    numberOfMonitors = MAX_WORKSPACES;
+    monitors = calloc(numberOfMonitors, sizeof(Monitor*));
+    for(int i = 0; i < numberOfMonitors; i++)
+    {
+        Monitor *monitor = calloc(1, sizeof(Monitor));
+        monitors[i] = monitor;
+        monitor_calulate_coordinates(monitor, i + 1);
+        if(i > 0 && !monitors[i]->isHidden)
+        {
+            monitors[i - 1]->next = monitors[i];
+        }
+    }
 
     configuration = calloc(1, sizeof(Configuration));
+    configuration->monitors = monitors;
+    configuration->workspaces = workspaces;
     configure(configuration);
 
     if(configuration->barHeight)
@@ -4538,19 +4544,6 @@ int run (void)
     else
     {
         font = default_initalize_font();
-    }
-
-    numberOfMonitors = numberOfWorkspaces;
-    monitors = calloc(numberOfMonitors, sizeof(Monitor*));
-    for(int i = 0; i < numberOfMonitors; i++)
-    {
-        Monitor *monitor = calloc(1, sizeof(Monitor));
-        monitors[i] = monitor;
-        monitor_calulate_coordinates(monitor, i + 1);
-        if(i > 0 && !monitors[i]->isHidden)
-        {
-            monitors[i - 1]->next = monitors[i];
-        }
     }
 
     hiddenWindowMonitor = calloc(1, sizeof(Monitor));

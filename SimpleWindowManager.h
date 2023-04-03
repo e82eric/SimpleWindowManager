@@ -90,6 +90,8 @@ struct Configuration
     COLORREF barTextColor;
     BarSegmentConfiguration **barSegments;
     int numberOfBarSegments;
+    Monitor **monitors;
+    Workspace **workspaces;
 };
 
 struct WorkspaceFilterData
@@ -285,14 +287,13 @@ void fill_local_time(TCHAR *toFill, int maxLen);
 void fill_memory_percent(TCHAR *toFill, int maxLen);
 void fill_is_connected_to_internet(TCHAR *toFill, int maxLen);
 
+void windowManager_move_workspace_to_monitor(Monitor *monitor, Workspace *workspace);
 void redraw_focused_window(void);
 void select_next_window(void);
 void select_previous_window(void);
 void monitor_select_next(void);
 void start_launcher(CHAR *cmdArgs);
 void start_scratch_not_elevated(CHAR *cmdArgs);
-/* ScratchWindow *scratch_menu_register(CHAR *name, CHAR *afterMenuCommand, void (*stdOutCallback) (CHAR *), TCHAR *uniqueStr); */
-/* ScratchWindow *scratch_menu_register_command_from_function(CHAR *name, CHAR *afterMenuCommand, void (*stdOutCallback) (CHAR *), TCHAR *uniqueStr, void (*runFunc)(ScratchWindow*, Monitor*, int)); */
 void scratch_terminal_register_with_unique_string(CHAR *cmd, int modifiers, int key, TCHAR *uniqueStr);
 void scratch_terminal_register(CHAR *cmd, int modifiers, int key, TCHAR *uniqueStr, ScratchFilter scratchFilter);
 ScratchWindow *register_scratch_terminal_with_unique_string(CHAR *name, char *cmd, TCHAR *uniqueStr);
