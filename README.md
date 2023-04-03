@@ -7,7 +7,7 @@
 (Most features and concepts are copied from these or DWM or I3)
 
 ## Overview
-My general feeling having tried to a bunch of different tiling managers for  Windows, is that trying to layout every window that gets created by Windows is really hard since a subset off applications will do unexpected things.  So I created this window manager to target my specific workflow where 99% of the windows that I create come from a few different applications (browser, terminal, IDE, chat, email) and to create rules to manage those applications within workspaces and allow easy movement and navigation with common key bindings and to let any other windows that get created float.  It is still possible to toggle a mode where all newly created root application windows are added to the current workspace (ctrl-z).
+I wrote this application to target my specific workflow where 90% of windows come from a few different applications (browser, terminal IDE, chat, email) and I want to have those windows auto layed out for me into tiles and workspaces so that I can quickly navigate between them using the keyboard.  All other windows I let float.
 
 ## Install
 - You will need to compile the application to install it
