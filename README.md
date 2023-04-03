@@ -37,7 +37,7 @@ There is a SampleConfig.c provided in the repository
 - Scratch Windows
   - Simple short lived terminal application mapped to key bindings.
 - Scratch Menus
-  - A really simple generic menu/filter is included that works similar to fzf and can be bound to keybindings
+  - A really simple generic menu/filter that can be used as a launcher, window switcher etc (similar to fzf)
 - KeyBindings
   - Map keybindings to arbitrary commands
 
