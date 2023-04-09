@@ -14,6 +14,7 @@
 #define IDC_STATIC_TEXT 1002
 #define IDC_SUMMARY_TEXT 1003
 #define IDT_LOADINGTIMER 1004
+#define IDC_HELP_TEXT 1005
 
 #define VK_P 0x50
 #define VK_R 0x52
@@ -571,11 +572,114 @@ void ItemsView_HandleBinding(ItemsView *self, NamedCommand *command)
             {
                 command->action(text);
             }
+            else if(command->action2)
+            {
+                command->action2(command->action2State);
+            }
             else
             {
                 ItemsView_StartBindingProcess(self, newBindCommand, BindProcessFinishCallback, command->reloadAfter, command->quitAfter);
             }
         }
+    }
+}
+
+void SearchView_ShowHelp(SearchView *self)
+{
+    CHAR helpStr[2048];
+    MenuKeyBinding *current = self->keyBindings;
+    int ctr = 0;
+
+    while(current)
+    {
+        CHAR modifiersKeyName[MAX_PATH];
+        if(current->modifier == VK_CONTROL)
+        {
+            memcpy(modifiersKeyName, "CTL+", 50);
+        }
+        else
+        {
+            memcpy(modifiersKeyName, "", 50);
+        }
+
+        unsigned int scanCode = MapVirtualKey(current->key, MAPVK_VK_TO_VSC);
+
+        switch (current->key)
+        {
+            case VK_LEFT: case VK_UP: case VK_RIGHT: case VK_DOWN:
+            case VK_PRIOR: case VK_NEXT:
+            case VK_END: case VK_HOME:
+            case VK_INSERT: case VK_DELETE:
+            case VK_DIVIDE:
+            case VK_NUMLOCK:
+                {
+                    scanCode |= 0x100;
+                    break;
+                }
+        }
+
+        CHAR keyStrBuff[MAX_PATH];
+        GetKeyNameTextA(scanCode << 16, keyStrBuff, MAX_PATH);
+
+        CHAR bindStr[25];
+        sprintf_s(
+                bindStr,
+                25,
+                "%s%s",
+                modifiersKeyName,
+                keyStrBuff);
+        if(ctr == 0)
+        {
+            sprintf_s(
+                    helpStr,
+                    2048,
+                    "%-25s%-25s%-25s",
+                    bindStr,
+                    current->command->name,
+                    current->command->expression);
+        }
+        else
+        {
+            sprintf_s(
+                    helpStr,
+                    2048,
+                    "%s\n%-25s%-25s%-25s",
+                    helpStr,
+                    bindStr,
+                    current->command->name,
+                    current->command->expression);
+        }
+
+        current = current->next;
+        ctr++;
+    }
+
+    SetWindowTextA(self->helpHwnd, helpStr);
+    ShowWindow(self->helpHwnd, SW_SHOW);
+    SetWindowPos(self->helpHwnd, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
+    SendMessage(self->hwnd, EM_SETREADONLY, (WPARAM)TRUE, (LPARAM)NULL);
+    SendMessage(self->helpHwnd, WM_SETFONT, (WPARAM)font, (LPARAM)TRUE);
+
+    self->mode =  Help;
+}
+
+void SearchView_HideHelp(SearchView *self)
+{
+    ShowWindow(self->helpHwnd, SW_HIDE);
+    SendMessage(self->hwnd, EM_SETREADONLY, (WPARAM)FALSE, (LPARAM)NULL);
+    self->mode = Normal;
+}
+
+void SearchView_HandleEscape(SearchView *self)
+{
+    if(self->mode == Help)
+    {
+        SearchView_HideHelp(self);
+    }
+    else
+    {
+        self->onEscape();
+        ItemsView_Clear(self->itemsView);
     }
 }
 
@@ -592,46 +696,6 @@ LRESULT CALLBACK SearchView_MessageProcessor(HWND hWnd, UINT uMsg, WPARAM wParam
                 ItemsView_HandleDisplayItemsUpdate(self->itemsView);
             }
             break;
-        case WM_CHAR:
-            {
-                if(wParam == VK_ESCAPE)
-                {
-                    self->onEscape();
-                    ItemsView_Clear(self->itemsView);
-                    return 0;
-                }
-                if(wParam == VK_RETURN)
-                {
-                    ItemsView_HandleSelection(self->itemsView);
-                    return 0;
-                }
-            }
-            break;
-    }
-
-    if((uMsg == WM_KEYDOWN) && (wParam == VK_N))
-    {
-        if(GetAsyncKeyState(VK_CONTROL))
-        {
-            ItemsView_SelectNext(self->itemsView);
-            return 1;
-        }
-    }
-    if((uMsg == WM_KEYDOWN) && (wParam == VK_P))
-    {
-        if(GetAsyncKeyState(VK_CONTROL))
-        {
-            ItemsView_SelectPrevious(self->itemsView);
-            return 1;
-        }
-    }
-    if((uMsg == WM_KEYDOWN) && (wParam == VK_R))
-    {
-        if(GetAsyncKeyState(VK_LCONTROL))
-        {
-            ItemsView_HandleReload(self->itemsView);
-            return 1;
-        }
     }
 
     if((uMsg == WM_KEYDOWN))
@@ -641,7 +705,12 @@ LRESULT CALLBACK SearchView_MessageProcessor(HWND hWnd, UINT uMsg, WPARAM wParam
         {
             if(wParam == current->key)
             {
-                if(GetAsyncKeyState(current->modifier) & 0x8000)
+                if(current->modifier == 0)
+                {
+                    ItemsView_HandleBinding(self->itemsView, current->command);
+                    return 1;
+                }
+                else if(GetAsyncKeyState(current->modifier) & 0x8000)
                 {
                     if(current->isLoadCommand)
                     {
@@ -658,18 +727,20 @@ LRESULT CALLBACK SearchView_MessageProcessor(HWND hWnd, UINT uMsg, WPARAM wParam
                     {
                         ItemsView_HandleBinding(self->itemsView, current->command);
                     }
+
                     return 1;
                 }
             }
             current = current->next;
         }
     }
+
     if((uMsg == WM_CHAR || uMsg == WM_KEYDOWN))
     {
         //Prevent BEEP
         if(GetAsyncKeyState(VK_CONTROL))
         {
-            return 1;
+            return 0;
         }
     }
 
@@ -1033,6 +1104,11 @@ void ItemsView_Move(ItemsView *self, int left, int top, int width, int height)
     self->maxDisplayItems = (listHeight - 3) / listBoxItemHeight;
 }
 
+void HelpView_Move(HWND hwnd, int left, int top, int width, int height)
+{
+    MoveWindow(hwnd, left, top, width, height, TRUE);
+}
+
 void MenuView_FitChildControls(MenuView *self)
 {
     RECT xrect;
@@ -1058,6 +1134,17 @@ void MenuView_FitChildControls(MenuView *self)
             width,
             self->height - itemsTop - padding);
     SetFocus(self->searchView->hwnd);
+
+    int helpTop = padding;
+    int helpLeft = padding;
+    int helpWidth = width;
+    int helpHeight = self->height - (padding * 2);
+    HelpView_Move(
+            self->searchView->helpHwnd,
+            helpLeft,
+            helpTop,
+            helpWidth,
+            helpHeight);
 }
 
 void MenuView_CreateChildControls(MenuView *self)
@@ -1066,7 +1153,7 @@ void MenuView_CreateChildControls(MenuView *self)
     self->searchView->hwnd = CreateWindowA(
             "Edit", 
             NULL, 
-            WS_VISIBLE | WS_CHILD,
+            WS_VISIBLE | WS_CHILD | WS_CLIPSIBLINGS,
             10, 
             10, 
             600, 
@@ -1081,7 +1168,7 @@ void MenuView_CreateChildControls(MenuView *self)
     self->itemsView->headerHwnd = CreateWindowA(
             "STATIC", 
             NULL, 
-            WS_VISIBLE | WS_CHILD | SS_LEFT | WS_BORDER,
+            WS_VISIBLE | WS_CHILD | SS_LEFT | WS_BORDER | WS_CLIPSIBLINGS,
             10, 
             10, 
             600, 
@@ -1095,7 +1182,7 @@ void MenuView_CreateChildControls(MenuView *self)
     self->itemsView->summaryHwnd = CreateWindow(
             L"STATIC", 
             NULL, 
-            WS_VISIBLE | WS_CHILD | SS_RIGHT | SS_OWNERDRAW,
+            WS_VISIBLE | WS_CHILD | SS_RIGHT | SS_OWNERDRAW | WS_CLIPSIBLINGS,
             10, 
             10, 
             600, 
@@ -1110,7 +1197,7 @@ void MenuView_CreateChildControls(MenuView *self)
     self->itemsView->hwnd = CreateWindowA(
             "LISTBOX", 
             NULL, 
-            WS_VISIBLE | WS_CHILD | LBS_STANDARD | LBS_HASSTRINGS | LBS_OWNERDRAWFIXED,
+            WS_VISIBLE | WS_CHILD | LBS_STANDARD | LBS_HASSTRINGS | LBS_OWNERDRAWFIXED | WS_CLIPSIBLINGS,
             260, 
             260, 
             900, 
@@ -1120,6 +1207,20 @@ void MenuView_CreateChildControls(MenuView *self)
             (HINSTANCE)GetWindowLongPtr(self->hwnd, GWLP_HINSTANCE),
             NULL);
     SendMessageA(self->itemsView->hwnd, WM_SETFONT, (WPARAM)font, (LPARAM)TRUE);
+
+    self->searchView->helpHwnd = CreateWindowA(
+            "STATIC", 
+            NULL, 
+            WS_VISIBLE | WS_CHILD | SS_LEFT | WS_BORDER | WS_CLIPSIBLINGS,
+            260, 
+            260, 
+            900, 
+            600,
+            self->hwnd, 
+            (HMENU)IDC_HELP_TEXT, 
+            (HINSTANCE)GetWindowLongPtr(self->hwnd, GWLP_HINSTANCE),
+            NULL);
+    ShowWindow(self->searchView->helpHwnd, SW_HIDE);
 
     SetTimer(self->hwnd,
             IDT_LOADINGTIMER,
@@ -1562,6 +1663,17 @@ NamedCommand* MenuDefinition_AddActionNamedCommand(MenuDefinition *self, CHAR *n
     return command;
 }
 
+NamedCommand* MenuDefinition_AddAction2NamedCommand(MenuDefinition *self, CHAR *nameBuff, void *state, void (*action)(void *state), BOOL reloadAfter, BOOL quitAfter)
+{
+    NamedCommand *command = MenuDefinition_FindOrAddNamedCommand(self, nameBuff);
+    command->quitAfter = quitAfter;
+    command->reloadAfter = reloadAfter;
+    command->action2 = action;
+    command->action2State = state;
+    command->hasTextRange = TRUE;
+    return command;
+}
+
 MenuView *menu_create(int left, int top, int width, int height, TCHAR *title)
 {
     MenuView *menuView = calloc(1, sizeof(MenuView));
@@ -1645,11 +1757,29 @@ MenuView *menu_create(int left, int top, int width, int height, TCHAR *title)
     return menuView;
 }
 
-MenuDefinition* menu_definition_create(void)
+MenuDefinition* menu_definition_create(MenuView *menuView)
 {
     MenuDefinition *result = calloc(1, sizeof(MenuDefinition));
     MenuDefinition_AddNamedCommand(result, "copytoclipboard:cmd /c echo {} | clip", FALSE, FALSE);
     MenuDefinition_ParseAndAddKeyBinding(result, "ctl-c:copytoclipboard", FALSE);
+
+    NamedCommand *exitCommand = MenuDefinition_AddAction2NamedCommand(result, "exit", menuView->searchView, SearchView_HandleEscape, FALSE, FALSE);
+    MenuDefinition_AddKeyBindingToNamedCommand(result, exitCommand, 0, VK_ESCAPE, FALSE);
+
+    NamedCommand *selectCommand = MenuDefinition_AddAction2NamedCommand(result, "select", menuView->itemsView, ItemsView_HandleSelection, FALSE, FALSE);
+    MenuDefinition_AddKeyBindingToNamedCommand(result, selectCommand, 0, VK_RETURN, FALSE);
+
+    NamedCommand *helpCommand = MenuDefinition_AddAction2NamedCommand(result, "show help", menuView->searchView, SearchView_ShowHelp, FALSE, FALSE);
+    MenuDefinition_AddKeyBindingToNamedCommand(result, helpCommand, VK_CONTROL, VK_OEM_PLUS, FALSE);
+    MenuDefinition_AddKeyBindingToNamedCommand(result, helpCommand, VK_CONTROL, VK_OEM_2, FALSE);
+
+    NamedCommand *itemDownCommand = MenuDefinition_AddAction2NamedCommand(result, "select next item", menuView->itemsView, ItemsView_SelectNext, FALSE, FALSE);
+    MenuDefinition_AddKeyBindingToNamedCommand(result, itemDownCommand, VK_CONTROL, VK_N, FALSE);
+    MenuDefinition_AddKeyBindingToNamedCommand(result, itemDownCommand, 0, VK_DOWN, FALSE);
+
+    NamedCommand *itemUpCommand = MenuDefinition_AddAction2NamedCommand(result, "select previous item", menuView->itemsView, ItemsView_SelectPrevious, FALSE, FALSE);
+    MenuDefinition_AddKeyBindingToNamedCommand(result, itemUpCommand, VK_CONTROL, VK_P, FALSE);
+    MenuDefinition_AddKeyBindingToNamedCommand(result, itemUpCommand, 0, VK_UP, FALSE);
 
     return result;
 }

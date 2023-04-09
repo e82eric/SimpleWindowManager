@@ -1,5 +1,11 @@
 #define BUF_LEN 4096
 
+enum Mode
+{
+    Normal = 1,
+    Help = 2,
+};
+
 typedef struct MenuKeyBinding MenuKeyBinding;
 typedef struct NamedCommand NamedCommand;
 
@@ -25,6 +31,8 @@ struct NamedCommand
     char* name;
     char* expression;
     void (*action)(char* stdOut);
+    void (*action2)(void* state);
+    void* action2State;
     int expressionLen;
     BOOL trimEnd;
     BOOL hasReplacement;
@@ -91,6 +99,8 @@ typedef struct DisplayItemList
 typedef struct SearchView
 {
     HWND hwnd;
+    enum Mode mode;
+    HWND helpHwnd;
     CHAR *searchString;
     ItemsView *itemsView;
     MenuKeyBinding *keyBindings;
@@ -177,7 +187,6 @@ void menu_run_definition(MenuView *self, MenuDefinition *menuDefinition);
 void MenuDefinition_ParseAndAddLoadCommand(MenuDefinition *self, char *argText);
 void MenuDefinition_ParseAndSetRange(MenuDefinition *self, char *argText);
 void MenuDefinition_AddLoadActionKeyBinding(MenuDefinition *self, unsigned int modifier, unsigned int key, int (*loadAction)(int maxItems, CHAR**));
-MenuDefinition* menu_definition_create(void);
 void menu_definition_set_load_action(MenuDefinition *self, int (*loadAction)(int maxItems, CHAR** items));
 void menu_definition_set_load_command(MenuDefinition *self, NamedCommand *loadCommand);
-MenuDefinition* menu_definition_create(void);
+MenuDefinition* menu_definition_create(MenuView *menuView);

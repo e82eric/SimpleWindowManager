@@ -26,7 +26,7 @@ void onSelection(char *stdOut)
     MenuDefinition *menuDefinition2 = calloc(1, sizeof(MenuDefinition));
     menuDefinition2->onEscape = onEscape;
     menuDefinition2->onSelection = onSelection;
-    MenuDefinition_AddNamedCommand(menuDefinition2, "ld:fd . c:\\");
+    MenuDefinition_AddNamedCommand(menuDefinition2, "ld:fd . c:\\", FALSE, TRUE);
     MenuDefinition_ParseAndAddLoadCommand(menuDefinition2, "ld");
     menu_run_definition(mView, menuDefinition2);
 }
@@ -41,7 +41,7 @@ int main(int argc, char* argv[])
     TCHAR title[BUF_LEN] = L"Blah";
 
     mView = menu_create(top, left, width, height, title);
-    MenuDefinition *menuDefinition = calloc(1, sizeof(MenuDefinition));
+    MenuDefinition *menuDefinition = menu_definition_create(mView);
     menuDefinition->onSelection = onSelection;
     menuDefinition->onEscape = onEscape;
 
@@ -92,7 +92,7 @@ int main(int argc, char* argv[])
             if(i + 1 < argc)
             {
                 i++;
-                MenuDefinition_AddNamedCommand(menuDefinition, argv[i]);
+                MenuDefinition_AddNamedCommand(menuDefinition, argv[i], FALSE, TRUE);
             }
         }
         if(strcmp(argv[i], "--returnRange") == 0)
