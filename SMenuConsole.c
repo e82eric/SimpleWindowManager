@@ -40,7 +40,7 @@ int main(int argc, char* argv[])
     int width = 2050;
     TCHAR title[BUF_LEN] = L"Blah";
 
-    mView = menu_create(top, left, width, height, title);
+    mView = menu_create_with_size(top, left, width, height, title);
     MenuDefinition *menuDefinition = menu_definition_create(mView);
     menuDefinition->onSelection = onSelection;
     menuDefinition->onEscape = onEscape;

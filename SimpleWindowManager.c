@@ -2636,7 +2636,7 @@ void scratch_windows_add_to_end(ScratchWindow *scratchWindow)
 
 MenuDefinition* menu_create_and_register(void)
 {
-    MenuDefinition *result = menu_definition_create();
+    MenuDefinition *result = menu_definition_create(mView);
     return result;
 }
 
@@ -4492,6 +4492,10 @@ int run (void)
         }
     }
 
+    TCHAR menuTitle[BUF_LEN] = L"Blah";
+    mView = menu_create(menuTitle);
+    ShowWindow(mView->hwnd, SW_HIDE);
+
     configuration = calloc(1, sizeof(Configuration));
     configuration->monitors = monitors;
     configuration->workspaces = workspaces;
@@ -4619,10 +4623,7 @@ int run (void)
     int menuTop = scratchWindowsScreenPadding;
     int menuWidth = selectedMonitor->w - (scratchWindowsScreenPadding * 2);
     int menuHeight = selectedMonitor->h - (scratchWindowsScreenPadding * 2);
-    TCHAR menuTitle[BUF_LEN] = L"Blah";
-
-    mView = menu_create(menuTop, menuLeft, menuWidth, menuHeight, menuTitle);
-    ShowWindow(mView->hwnd, SW_HIDE);
+    SetWindowPos(mView->hwnd, HWND_TOPMOST, menuLeft, menuTop, menuWidth, menuHeight, SWP_HIDEWINDOW);
 
     IWbemLocator *locator  = NULL;
 

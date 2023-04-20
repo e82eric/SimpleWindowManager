@@ -53,6 +53,7 @@ struct MenuKeyBinding
     MenuKeyBinding* next;
     BOOL isLoadCommand;
     int (*loadAction)(int maxItems, CHAR** items);
+    char *loadActionDescription;
 };
 
 typedef struct ItemsView ItemsView;
@@ -101,6 +102,7 @@ typedef struct SearchView
     HWND hwnd;
     enum Mode mode;
     HWND helpHwnd;
+    HWND helpHeaderHwnd;
     CHAR *searchString;
     ItemsView *itemsView;
     MenuKeyBinding *keyBindings;
@@ -182,11 +184,12 @@ void MenuDefinition_ParseAndAddKeyBinding(MenuDefinition *self, char *argText, B
 NamedCommand *MenuDefinition_AddNamedCommand(MenuDefinition *self, char *argText, BOOL reloadAfter, BOOL quitAfter);
 void NamedCommand_SetTextRange(NamedCommand *self, int start, int end, BOOL trimEnd);
 NamedCommand* MenuDefinition_AddActionNamedCommand_WithTextRange(MenuDefinition *self, CHAR *nameBuff, void (*action)(CHAR *text), BOOL reloadAfter, BOOL quitAfter);
-MenuView *menu_create(int left, int top, int width, int height, TCHAR *title);
+MenuView *menu_create_with_size(int left, int top, int width, int height, TCHAR *title);
+MenuView *menu_create(TCHAR *title);
 void menu_run_definition(MenuView *self, MenuDefinition *menuDefinition);
 void MenuDefinition_ParseAndAddLoadCommand(MenuDefinition *self, char *argText);
 void MenuDefinition_ParseAndSetRange(MenuDefinition *self, char *argText);
-void MenuDefinition_AddLoadActionKeyBinding(MenuDefinition *self, unsigned int modifier, unsigned int key, int (*loadAction)(int maxItems, CHAR**));
+void MenuDefinition_AddLoadActionKeyBinding(MenuDefinition *self, unsigned int modifier, unsigned int key, int (*loadAction)(int maxItems, CHAR**), char* loadActionDescription);
 void menu_definition_set_load_action(MenuDefinition *self, int (*loadAction)(int maxItems, CHAR** items));
 void menu_definition_set_load_command(MenuDefinition *self, NamedCommand *loadCommand);
 MenuDefinition* menu_definition_create(MenuView *menuView);

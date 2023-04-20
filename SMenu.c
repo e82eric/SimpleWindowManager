@@ -15,6 +15,7 @@
 #define IDC_SUMMARY_TEXT 1003
 #define IDT_LOADINGTIMER 1004
 #define IDC_HELP_TEXT 1005
+#define IDC_HELP_HEADER_TEXT 1006
 
 #define VK_P 0x50
 #define VK_R 0x52
@@ -587,6 +588,16 @@ void ItemsView_HandleBinding(ItemsView *self, NamedCommand *command)
 void SearchView_ShowHelp(SearchView *self)
 {
     CHAR helpStr[2048];
+    CHAR headerStr[256];
+
+    sprintf_s(
+            headerStr,
+            256,
+            "%-25s%-25s%-25s",
+            "Binding",
+            "Name",
+            "Expression");
+
     MenuKeyBinding *current = self->keyBindings;
     int ctr = 0;
 
@@ -618,6 +629,48 @@ void SearchView_ShowHelp(SearchView *self)
                 }
         }
 
+        CHAR description[MAX_PATH];
+        CHAR expression[MAX_PATH];
+        if(current->command)
+        {
+            sprintf_s(
+                    description,
+                    MAX_PATH,
+                    "%s",
+                    current->command->name);
+            sprintf_s(
+                    expression,
+                    MAX_PATH,
+                    "%.75s",
+                    current->command->expression);
+        }
+        else if(current->loadActionDescription)
+        {
+            sprintf_s(
+                    description,
+                    MAX_PATH,
+                    "%s",
+                    current->loadActionDescription);
+            sprintf_s(
+                    expression,
+                    MAX_PATH,
+                    "%s",
+                    "");
+        }
+        else
+        {
+            sprintf_s(
+                    description,
+                    MAX_PATH,
+                    "%s",
+                    "");
+            sprintf_s(
+                    expression,
+                    MAX_PATH,
+                    "%s",
+                    "");
+        }
+
         CHAR keyStrBuff[MAX_PATH];
         GetKeyNameTextA(scanCode << 16, keyStrBuff, MAX_PATH);
 
@@ -635,8 +688,8 @@ void SearchView_ShowHelp(SearchView *self)
                     2048,
                     "%-25s%-25s%-25s",
                     bindStr,
-                    current->command->name,
-                    current->command->expression);
+                    description,
+                    expression);
         }
         else
         {
@@ -646,19 +699,23 @@ void SearchView_ShowHelp(SearchView *self)
                     "%s\n%-25s%-25s%-25s",
                     helpStr,
                     bindStr,
-                    current->command->name,
-                    current->command->expression);
+                    description,
+                    expression);
         }
 
-        current = current->next;
         ctr++;
+        current = current->next;
     }
 
+    SetWindowTextA(self->helpHeaderHwnd, headerStr);
     SetWindowTextA(self->helpHwnd, helpStr);
     ShowWindow(self->helpHwnd, SW_SHOW);
+    ShowWindow(self->helpHeaderHwnd, SW_SHOW);
     SetWindowPos(self->helpHwnd, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
+    SetWindowPos(self->helpHeaderHwnd, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
     SendMessage(self->hwnd, EM_SETREADONLY, (WPARAM)TRUE, (LPARAM)NULL);
     SendMessage(self->helpHwnd, WM_SETFONT, (WPARAM)font, (LPARAM)TRUE);
+    SendMessage(self->helpHeaderHwnd, WM_SETFONT, (WPARAM)font, (LPARAM)TRUE);
 
     self->mode =  Help;
 }
@@ -666,6 +723,7 @@ void SearchView_ShowHelp(SearchView *self)
 void SearchView_HideHelp(SearchView *self)
 {
     ShowWindow(self->helpHwnd, SW_HIDE);
+    ShowWindow(self->helpHeaderHwnd, SW_HIDE);
     SendMessage(self->hwnd, EM_SETREADONLY, (WPARAM)FALSE, (LPARAM)NULL);
     self->mode = Normal;
 }
@@ -696,6 +754,22 @@ LRESULT CALLBACK SearchView_MessageProcessor(HWND hWnd, UINT uMsg, WPARAM wParam
                 ItemsView_HandleDisplayItemsUpdate(self->itemsView);
             }
             break;
+        case WM_CHAR:
+            {
+                MenuKeyBinding *current = self->keyBindings;
+                while(current)
+                {
+                    if(wParam == current->key)
+                    {
+                        if(current->modifier == 0)
+                        {
+                            ItemsView_HandleBinding(self->itemsView, current->command);
+                            return 0;
+                        }
+                    }
+                    current = current->next;
+                }
+            }
     }
 
     if((uMsg == WM_KEYDOWN))
@@ -708,9 +782,9 @@ LRESULT CALLBACK SearchView_MessageProcessor(HWND hWnd, UINT uMsg, WPARAM wParam
                 if(current->modifier == 0)
                 {
                     ItemsView_HandleBinding(self->itemsView, current->command);
-                    return 1;
+                    return 0;
                 }
-                else if(GetAsyncKeyState(current->modifier) & 0x8000)
+                if(current->modifier != 0 && GetAsyncKeyState(current->modifier) & 0x8000)
                 {
                     if(current->isLoadCommand)
                     {
@@ -728,7 +802,7 @@ LRESULT CALLBACK SearchView_MessageProcessor(HWND hWnd, UINT uMsg, WPARAM wParam
                         ItemsView_HandleBinding(self->itemsView, current->command);
                     }
 
-                    return 1;
+                    return 0;
                 }
             }
             current = current->next;
@@ -1135,16 +1209,27 @@ void MenuView_FitChildControls(MenuView *self)
             self->height - itemsTop - padding);
     SetFocus(self->searchView->hwnd);
 
-    int helpTop = padding;
+    int helpHeaderTop = padding;
+    int helpHeaderLeft = padding;
+    int helpHeaderWidth = width;
+    int helpHeaderHeight = 25;
+
+    int helpTop = helpHeaderTop + helpHeaderHeight;
     int helpLeft = padding;
     int helpWidth = width;
-    int helpHeight = self->height - (padding * 2);
+    int helpHeight = self->height - (padding * 2) - helpHeaderHeight;
     HelpView_Move(
             self->searchView->helpHwnd,
             helpLeft,
             helpTop,
             helpWidth,
             helpHeight);
+    HelpView_Move(
+            self->searchView->helpHeaderHwnd,
+            helpHeaderLeft,
+            helpHeaderTop,
+            helpHeaderWidth,
+            helpHeaderHeight);
 }
 
 void MenuView_CreateChildControls(MenuView *self)
@@ -1208,10 +1293,23 @@ void MenuView_CreateChildControls(MenuView *self)
             NULL);
     SendMessageA(self->itemsView->hwnd, WM_SETFONT, (WPARAM)font, (LPARAM)TRUE);
 
+    self->searchView->helpHeaderHwnd = CreateWindow(
+            L"STATIC", 
+            NULL, 
+            WS_VISIBLE | WS_CHILD | SS_LEFT |  WS_CLIPSIBLINGS,
+            10, 
+            10, 
+            600, 
+            10,
+            self->hwnd, 
+            (HMENU)IDC_HELP_HEADER_TEXT,
+            hinstance,
+            NULL);
+
     self->searchView->helpHwnd = CreateWindowA(
             "STATIC", 
             NULL, 
-            WS_VISIBLE | WS_CHILD | SS_LEFT | WS_BORDER | WS_CLIPSIBLINGS,
+            WS_VISIBLE | WS_CHILD | SS_LEFT |  WS_CLIPSIBLINGS,
             260, 
             260, 
             900, 
@@ -1221,6 +1319,7 @@ void MenuView_CreateChildControls(MenuView *self)
             (HINSTANCE)GetWindowLongPtr(self->hwnd, GWLP_HINSTANCE),
             NULL);
     ShowWindow(self->searchView->helpHwnd, SW_HIDE);
+    ShowWindow(self->searchView->helpHeaderHwnd, SW_HIDE);
 
     SetTimer(self->hwnd,
             IDT_LOADINGTIMER,
@@ -1266,6 +1365,13 @@ LRESULT CALLBACK Menu_MessageProcessor(
         case WM_CTLCOLORSTATIC:
             {
                 if((HWND)lParam == self->itemsView->headerHwnd)
+                {
+                    HDC hdcStatic = (HDC)wParam;
+                    SetTextColor(hdcStatic, headerTextColor);
+                    SetBkColor(hdcStatic, backgroundColor);
+                    return (INT_PTR)backgrounBrush;
+                }
+                else if((HWND)lParam == self->searchView->helpHeaderHwnd)
                 {
                     HDC hdcStatic = (HDC)wParam;
                     SetTextColor(hdcStatic, headerTextColor);
@@ -1460,13 +1566,19 @@ NamedCommand* MenuDefinition_FindNamedCommandByName(MenuDefinition *self, char *
     return command;
 }
 
-void MenuDefinition_AddLoadActionKeyBinding(MenuDefinition *self, unsigned int modifier, unsigned int key, int (*loadAction)(int, CHAR**))
+void MenuDefinition_AddLoadActionKeyBinding(
+        MenuDefinition *self,
+        unsigned int modifier,
+        unsigned int key,
+        int (*loadAction)(int, CHAR**),
+        char *loadActionDescription)
 {
     MenuKeyBinding *binding = calloc(1, sizeof(MenuKeyBinding));
     binding->modifier = modifier;
     binding->key = key;
     binding->isLoadCommand = TRUE;
     binding->loadAction = loadAction;
+    binding->loadActionDescription = _strdup(loadActionDescription);
 
     if(!self->keyBindings)
     {
@@ -1674,7 +1786,13 @@ NamedCommand* MenuDefinition_AddAction2NamedCommand(MenuDefinition *self, CHAR *
     return command;
 }
 
-MenuView *menu_create(int left, int top, int width, int height, TCHAR *title)
+MenuView *menu_create(TCHAR *title)
+{
+    MenuView *menuView = menu_create_with_size(0, 0, 0, 0, title);
+    return menuView;
+}
+
+MenuView *menu_create_with_size(int left, int top, int width, int height, TCHAR *title)
 {
     MenuView *menuView = calloc(1, sizeof(MenuView));
 
@@ -1760,18 +1878,8 @@ MenuView *menu_create(int left, int top, int width, int height, TCHAR *title)
 MenuDefinition* menu_definition_create(MenuView *menuView)
 {
     MenuDefinition *result = calloc(1, sizeof(MenuDefinition));
-    MenuDefinition_AddNamedCommand(result, "copytoclipboard:cmd /c echo {} | clip", FALSE, FALSE);
-    MenuDefinition_ParseAndAddKeyBinding(result, "ctl-c:copytoclipboard", FALSE);
-
     NamedCommand *exitCommand = MenuDefinition_AddAction2NamedCommand(result, "exit", menuView->searchView, SearchView_HandleEscape, FALSE, FALSE);
     MenuDefinition_AddKeyBindingToNamedCommand(result, exitCommand, 0, VK_ESCAPE, FALSE);
-
-    NamedCommand *selectCommand = MenuDefinition_AddAction2NamedCommand(result, "select", menuView->itemsView, ItemsView_HandleSelection, FALSE, FALSE);
-    MenuDefinition_AddKeyBindingToNamedCommand(result, selectCommand, 0, VK_RETURN, FALSE);
-
-    NamedCommand *helpCommand = MenuDefinition_AddAction2NamedCommand(result, "show help", menuView->searchView, SearchView_ShowHelp, FALSE, FALSE);
-    MenuDefinition_AddKeyBindingToNamedCommand(result, helpCommand, VK_CONTROL, VK_OEM_PLUS, FALSE);
-    MenuDefinition_AddKeyBindingToNamedCommand(result, helpCommand, VK_CONTROL, VK_OEM_2, FALSE);
 
     NamedCommand *itemDownCommand = MenuDefinition_AddAction2NamedCommand(result, "select next item", menuView->itemsView, ItemsView_SelectNext, FALSE, FALSE);
     MenuDefinition_AddKeyBindingToNamedCommand(result, itemDownCommand, VK_CONTROL, VK_N, FALSE);
@@ -1781,13 +1889,22 @@ MenuDefinition* menu_definition_create(MenuView *menuView)
     MenuDefinition_AddKeyBindingToNamedCommand(result, itemUpCommand, VK_CONTROL, VK_P, FALSE);
     MenuDefinition_AddKeyBindingToNamedCommand(result, itemUpCommand, 0, VK_UP, FALSE);
 
+    NamedCommand *selectCommand = MenuDefinition_AddAction2NamedCommand(result, "select", menuView->itemsView, ItemsView_HandleSelection, FALSE, FALSE);
+    MenuDefinition_AddKeyBindingToNamedCommand(result, selectCommand, 0, VK_RETURN, FALSE);
+
+    MenuDefinition_AddNamedCommand(result, "copytoclipboard:cmd /c echo {} | clip", FALSE, FALSE);
+    MenuDefinition_ParseAndAddKeyBinding(result, "ctl-c:copytoclipboard", FALSE);
+
+    NamedCommand *helpCommand = MenuDefinition_AddAction2NamedCommand(result, "show help", menuView->searchView, SearchView_ShowHelp, FALSE, FALSE);
+    MenuDefinition_AddKeyBindingToNamedCommand(result, helpCommand, VK_CONTROL, VK_OEM_2, FALSE);
+
     return result;
 }
 
 void menu_definition_set_load_action(MenuDefinition *self, int (*loadAction)(int maxItems, CHAR** items))
 {
     self->itemsAction = loadAction;
-    MenuDefinition_AddLoadActionKeyBinding(self, VK_CONTROL, VkKeyScanW('r'), self->itemsAction);
+    MenuDefinition_AddLoadActionKeyBinding(self, VK_CONTROL, VkKeyScanW('r'), self->itemsAction, "Reload");
 }
 
 void menu_definition_set_load_command(MenuDefinition *self, NamedCommand *loadCommand)
