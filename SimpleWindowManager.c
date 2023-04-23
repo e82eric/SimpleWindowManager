@@ -150,6 +150,8 @@ static Workspace **workspaces;
 int numberOfMonitors;
 static Monitor **monitors;
 int numberOfDisplayMonitors;
+static Monitor *primaryMonitor;
+static Monitor *secondaryMonitor;
 
 Bar **bars;
 int numberOfBars;
@@ -366,6 +368,15 @@ void move_focused_window_to_workspace(Workspace *workspace)
     HWND foregroundHwnd = GetForegroundWindow();
     windowManager_move_window_to_workspace_and_arrange(foregroundHwnd, workspace);
     workspace_focus_selected_window(selectedMonitor->workspace);
+}
+
+void move_workspace_to_secondary_monitor_without_focus(Workspace *workspace)
+{
+    windowManager_move_workspace_to_monitor(secondaryMonitor, workspace);
+    if(primaryMonitor->workspace)
+    {
+        workspace_focus_selected_window(primaryMonitor->workspace);
+    }
 }
 
 void move_focused_window_to_master(void)
@@ -4033,6 +4044,22 @@ void keybindings_register_defaults(void)
     keybinding_create_with_no_arg("redraw_focused_window", LAlt, VK_R, redraw_focused_window);
 
     keybinding_create_with_no_arg("quit", LAlt, VK_F9, quit);
+}
+
+void register_secondary_monitor_default_bindings(Monitor *pMonitor, Monitor *sMonitor, Workspace **spaces)
+{
+    primaryMonitor = pMonitor;
+    secondaryMonitor = sMonitor;
+
+    keybinding_create_with_workspace_arg("move_workspace_to_secondary_monitor_without_focus[1]", LAlt | LCtl, VK_1, move_workspace_to_secondary_monitor_without_focus, spaces[0]);
+    keybinding_create_with_workspace_arg("move_workspace_to_secondary_monitor_without_focus[2]", LAlt | LCtl, VK_2, move_workspace_to_secondary_monitor_without_focus, spaces[1]);
+    keybinding_create_with_workspace_arg("move_workspace_to_secondary_monitor_without_focus[3]", LAlt | LCtl, VK_3, move_workspace_to_secondary_monitor_without_focus, spaces[2]);
+    keybinding_create_with_workspace_arg("move_workspace_to_secondary_monitor_without_focus[4]", LAlt | LCtl, VK_4, move_workspace_to_secondary_monitor_without_focus, spaces[3]);
+    keybinding_create_with_workspace_arg("move_workspace_to_secondary_monitor_without_focus[5]", LAlt | LCtl, VK_5, move_workspace_to_secondary_monitor_without_focus, spaces[4]);
+    keybinding_create_with_workspace_arg("move_workspace_to_secondary_monitor_without_focus[6]", LAlt | LCtl, VK_6, move_workspace_to_secondary_monitor_without_focus, spaces[5]);
+    keybinding_create_with_workspace_arg("move_workspace_to_secondary_monitor_without_focus[7]", LAlt | LCtl, VK_7, move_workspace_to_secondary_monitor_without_focus, spaces[6]);
+    keybinding_create_with_workspace_arg("move_workspace_to_secondary_monitor_without_focus[8]", LAlt | LCtl, VK_8, move_workspace_to_secondary_monitor_without_focus, spaces[7]);
+    keybinding_create_with_workspace_arg("move_workspace_to_secondary_monitor_without_focus[9]", LAlt | LCtl, VK_9, move_workspace_to_secondary_monitor_without_focus, spaces[8]);
 }
 
 void start_process(CHAR *processExe, CHAR *cmdArgs, DWORD creationFlags)
