@@ -143,7 +143,6 @@ struct ScratchWindow
     CHAR *name;
     CHAR *cmd;
     CHAR *cmdArgs;
-    /* CHAR *runProcessMenuAdditionalParams; */
     TCHAR *uniqueStr;
     Client *client;
     void (*stdOutCallback) (CHAR *);
@@ -167,6 +166,7 @@ struct ClientData
     BOOL isElevated;
     BOOL isMinimized;
     BOOL isScratchWindow;
+    BOOL isScratchWindowBoundToWorkspace;
 };
 
 struct Monitor
@@ -269,6 +269,7 @@ void workspace_register_processimagename_contains_filter(Workspace *workspace, T
 void workspace_register_classname_contains_filter(Workspace *workspace, TCHAR *className);
 void workspace_register_title_contains_filter(Workspace *workspace, TCHAR *title);
 void workspace_register_title_not_contains_filter(Workspace *workspace, TCHAR *title);
+void workspace_focus_selected_window(Workspace *workspace);
 Workspace* workspace_create(TCHAR *name, WindowFilter windowFilter, WCHAR* tag, Layout *layout, int numberOfButtons);
 
 void keybinding_create_with_no_arg(CHAR *name, int modifiers, unsigned int key, void (*action) (void));

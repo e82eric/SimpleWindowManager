@@ -79,7 +79,6 @@ void start_process(CHAR *processExe, CHAR *cmdArgs, DWORD creationFlags);
 void process_with_stdout_start(CHAR *cmdArgs, void (*onSuccess) (CHAR *));
 
 static void windowMnaager_remove_client_if_found_by_hwnd(HWND hwnd);
-/* static void windowManager_move_workspace_to_monitor(Monitor *monitor, Workspace *workspace); */
 static void windowManager_move_window_to_workspace_and_arrange(HWND hwnd, Workspace *workspace);
 static Workspace* windowManager_find_client_workspace_using_filters(Client *client);
 static Client* windowManager_find_client_in_workspaces_by_hwnd(HWND hwnd);
@@ -94,7 +93,6 @@ static void workspace_add_unminimized_client(Workspace *workspace, Client *clien
 static void workspace_remove_minimized_client(Workspace *workspace, Client *client);
 static void workspace_remove_unminimized_client(Workspace *workspace, Client *client);
 static void workspace_remove_client_and_arrange(Workspace *workspace, Client *client);
-static void workspace_focus_selected_window(Workspace *workspace);
 static int workspace_update_client_counts(Workspace *workspace);
 static int workspace_get_number_of_clients(Workspace *workspace);
 static KeyBinding* keybindings_find_existing_or_create(CHAR* name, int modifiers, unsigned int key);
@@ -911,20 +909,23 @@ void CALLBACK handle_windows_event(
 
             Client *client = clientFactory_create_from_hwnd(hwnd);
 
-            ScratchWindow *sWindow = scratch_windows_find_from_client(client);
-            if(sWindow)
+            if(!client->data->isScratchWindowBoundToWorkspace)
             {
-                if(sWindow->client)
+                ScratchWindow *sWindow = scratch_windows_find_from_client(client);
+                if(sWindow)
                 {
-                    free_client(client);
+                    if(sWindow->client)
+                    {
+                        free_client(client);
+                    }
+                    else
+                    {
+                        sWindow->client = client;
+                        scratch_window_add(sWindow);
+                        scratch_window_show(sWindow);
+                    }
+                    return;
                 }
-                else
-                {
-                    sWindow->client = client;
-                    scratch_window_add(sWindow);
-                    scratch_window_show(sWindow);
-                }
-                return;
             }
 
             if(is_float_window(client, styles, exStyles))
@@ -1096,25 +1097,42 @@ void windowMnaager_remove_client_if_found_by_hwnd(HWND hwnd)
 
 void windowManager_move_window_to_workspace_and_arrange(HWND hwnd, Workspace *workspace)
 {
+    ScratchWindow *scratchWindow = scratch_windows_find_from_hwnd(hwnd);
     Client* existingClient = windowManager_find_client_in_workspaces_by_hwnd(hwnd);
-    Client* client;
-    if(!existingClient)
+    Client* client = NULL;
+    if(!existingClient && !scratchWindow)
     {
         client = clientFactory_create_from_hwnd(hwnd);
     }
-    else
+    else if(existingClient)
     {
         if(existingClient->workspace == workspace)
         {
             return;
         }
-        //If the client is already in another workspace we need to remove it
-        workspace_remove_client_and_arrange(existingClient->workspace, existingClient);
-        client = existingClient;
+        else
+        {
+            //If the client is already in another workspace we need to remove it
+            workspace_remove_client_and_arrange(existingClient->workspace, existingClient);
+            client = existingClient;
+        }
+    }
+    else if(scratchWindow)
+    {
+        client = scratchWindow->client;
+        client->data->isScratchWindowBoundToWorkspace = TRUE;
+        if(selectedMonitor->scratchWindow == scratchWindow)
+        {
+            selectedMonitor->scratchWindow = NULL;
+        }
+        scratchWindow->client = NULL;
     }
 
-    worksapce_add_client(workspace, client);
-    workspace_arrange_windows(workspace);
+    if(client)
+    {
+        worksapce_add_client(workspace, client);
+        workspace_arrange_windows(workspace);
+    }
 }
 
 Client* windowManager_find_client_in_workspaces_by_hwnd(HWND hwnd)
@@ -1264,7 +1282,6 @@ void windowManager_move_workspace_to_monitor(Monitor *monitor, Workspace *worksp
 
     HDWP hdwp = BeginDeferWindowPos(workspaceNumberOfClients + selectedMonitorCurrentWorkspaceNumberOfClients);
     monitor_set_workspace_and_arrange(workspace, monitor, hdwp);
-    /* workspace_focus_selected_window(workspace); */
     monitor_set_workspace_and_arrange(selectedMonitorCurrentWorkspace, currentMonitor, hdwp);
     EndDeferWindowPos(hdwp);
 }
@@ -2513,7 +2530,6 @@ void scratch_window_focus(ScratchWindow *self)
 
     LONG lStyle = GetWindowLong(self->client->data->hwnd, GWL_STYLE);
     lStyle &= ~(WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_SYSMENU | WS_VSCROLL);
-    /* lStyle &= ~(WS_CAPTION | WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_SYSMENU); */
     SetWindowLong(self->client->data->hwnd, GWL_STYLE, lStyle);
     ShowWindow(borderWindowHwnd, SW_HIDE);
     HDWP hdwp = BeginDeferWindowPos(2);
@@ -2558,6 +2574,16 @@ void scratch_window_add(ScratchWindow *self)
 
 ScratchWindow* scratch_windows_find_from_hwnd(HWND hwnd)
 {
+    Client *client = windowManager_find_client_in_workspaces_by_hwnd(hwnd);
+
+    if(client)
+    {
+        if(client->data->isScratchWindowBoundToWorkspace)
+        {
+            return NULL;
+        } 
+    }
+
     ScratchWindow *current = scratchWindows;
     while(current)
     {
@@ -2577,6 +2603,11 @@ ScratchWindow* scratch_windows_find_from_hwnd(HWND hwnd)
 
 ScratchWindow* scratch_windows_find_from_client(Client *client)
 {
+    if(!client->data->isScratchWindowBoundToWorkspace)
+    {
+        return NULL;
+    }
+
     ScratchWindow *current = scratchWindows;
     while(current)
     {
@@ -2731,7 +2762,6 @@ void scratch_window_toggle(ScratchWindow *self)
         if(!self->client->data->isMinimized)
         {
             scratch_window_hide(self);
-            /* workspace_focus_selected_window(selectedMonitor->workspace); */
         }
         else
         {
@@ -3608,7 +3638,6 @@ static LRESULT border_window_message_loop(HWND h, UINT msg, WPARAM wp, LPARAM lp
                 if(selectedMonitor->workspace->selected)
                 {
                     windowPos->hwndInsertAfter = HWND_BOTTOM;
-                    /* windowPos->hwndInsertAfter = selectedMonitor->workspace->selected->data->hwnd; */
                 }
             }
             else
