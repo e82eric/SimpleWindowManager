@@ -4514,6 +4514,7 @@ void configuration_add_bar_segment(Configuration *self, TCHAR *headerText, int v
 
 int run (void)
 {
+    SetProcessDPIAware();
     HANDLE hMutex;
     hMutex = CreateMutex(NULL, TRUE, TEXT("SimpleWindowManagerSingleInstanceLock"));
     if (GetLastError() == ERROR_ALREADY_EXISTS)
@@ -4591,7 +4592,6 @@ int run (void)
         barTextColor = configuration->barTextColor;
     }
 
-    SetProcessDPIAware();
     HINSTANCE moduleHandle = GetModuleHandle(NULL);
     g_main_tid = GetCurrentThreadId ();
     selectPen = CreatePen(PS_SOLID, 6, RGB(250, 189, 47));
