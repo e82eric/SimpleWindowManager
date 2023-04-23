@@ -67,6 +67,8 @@ BOOL should_use_old_move_logic(Client* client)
 
 void configure(Configuration *configuration)
 {
+    keybindings_register_defaults();
+
     configuration->isFloatWindowFunc = is_float_window_from_config;
     configuration->shouldFloatBeFocusedFunc = should_float_be_focused;
     configuration->useOldMoveLogicFunc = should_use_old_move_logic;
@@ -98,7 +100,7 @@ void configure(Configuration *configuration)
     workspace_register(L"8", L"8", &tileLayout);
     workspace_register(L"9", L"9", &tileLayout);
 
-    keybindings_register_defaults();
+    workspace_register(L"Desktop", L"0", &tileLayout);
 
     keybinding_create_with_shell_arg("NewTerminalWindow", LWin, VK_T, start_app, L"wt.exe");
 
@@ -168,17 +170,17 @@ void configure(Configuration *configuration)
     NamedCommand *killProcessCommand = MenuDefinition_AddNamedCommand(listProcessMenu, "procKill:cmd /c taskkill /f /pid {}", TRUE, FALSE);
     NamedCommand_SetTextRange(killProcessCommand, 76, 8, TRUE);
     MenuDefinition_AddNamedCommand(listProcessMenu, "windbg:powershell.exe -C '{}' -match '\\d{8}';windbg -p \"\"\"$([int]$Matches[0])\"\"\"", FALSE, TRUE);
-    MenuDefinition_AddLoadActionKeyBinding(listProcessMenu, VK_CONTROL, VK_1, list_processes_run_sorted_by_private_bytes);
-    MenuDefinition_AddLoadActionKeyBinding(listProcessMenu, VK_CONTROL, VK_2, list_processes_run_sorted_by_working_set);
-    MenuDefinition_AddLoadActionKeyBinding(listProcessMenu, VK_CONTROL, VK_3, list_processes_run_sorted_by_cpu);
-    MenuDefinition_AddLoadActionKeyBinding(listProcessMenu, VK_CONTROL, VK_4, list_processes_run_sorted_by_pid);
+    MenuDefinition_AddLoadActionKeyBinding(listProcessMenu, VK_CONTROL, VK_1, list_processes_run_sorted_by_private_bytes, "Sort Pvt Bytes");
+    MenuDefinition_AddLoadActionKeyBinding(listProcessMenu, VK_CONTROL, VK_2, list_processes_run_sorted_by_working_set, "Sort Wrk Set");
+    MenuDefinition_AddLoadActionKeyBinding(listProcessMenu, VK_CONTROL, VK_3, list_processes_run_sorted_by_cpu, "Sort Cpu");
+    MenuDefinition_AddLoadActionKeyBinding(listProcessMenu, VK_CONTROL, VK_4, list_processes_run_sorted_by_pid, "Sort Pid");
     MenuDefinition_ParseAndSetRange(listProcessMenu, "76,8");
     MenuDefinition_ParseAndAddKeyBinding(listProcessMenu, "ctl-k:procKill", FALSE);
     MenuDefinition_ParseAndAddKeyBinding(listProcessMenu, "ctl-d:windbg", FALSE);
     listProcessMenu->hasHeader = TRUE;
     keybinding_create_with_menu_arg("ProcessListMenu", LWin, VK_9, menu_run, listProcessMenu);
 
-    searchDriveMenuDefinition = menu_definition_create();
+    searchDriveMenuDefinition = menu_create_and_register();
     MenuDefinition *searchAllDrivesMenu = menu_create_and_register();
     MenuDefinition_AddNamedCommand(searchAllDrivesMenu, "ld:powershell -c \"(Get-PSDrive -PSProvider FileSystem).Root\"", FALSE, FALSE);
     MenuDefinition_ParseAndAddLoadCommand(searchAllDrivesMenu, "ld");
@@ -191,4 +193,6 @@ void configure(Configuration *configuration)
     configuration_add_bar_segment(configuration, L"Memory", 6, fill_memory_percent);
     configuration_add_bar_segment(configuration, L"Volume", 6, fill_volume_percent);
     configuration_add_bar_segment(configuration, L"Internet", 3, fill_is_connected_to_internet);
+
+    register_secondary_monitor_default_bindings(configuration->monitors[0], configuration->monitors[1], configuration->workspaces);
 }
