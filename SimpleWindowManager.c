@@ -1137,6 +1137,7 @@ void windowManager_move_window_to_workspace_and_arrange(HWND hwnd, Workspace *wo
             selectedMonitor->scratchWindow = NULL;
         }
         scratchWindow->client = NULL;
+        SetWindowPos(client->data->hwnd, HWND_NOTOPMOST, 0, 0, 0, 0,  SWP_NOSIZE | SWP_NOMOVE);
     }
 
     if(client)
