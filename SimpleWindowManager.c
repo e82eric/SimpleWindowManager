@@ -1399,6 +1399,7 @@ Client* clientFactory_create_from_hwnd(HWND hwnd)
     clientData->title = _wcsdup(title);
     clientData->isElevated = isElevated;
     clientData->isMinimized = isMinimized;
+    clientData->isScratchWindowBoundToWorkspace = FALSE;
 
     Client *c;
     c = calloc(1, sizeof(Client));
@@ -2614,7 +2615,7 @@ ScratchWindow* scratch_windows_find_from_hwnd(HWND hwnd)
 
 ScratchWindow* scratch_windows_find_from_client(Client *client)
 {
-    if(!client->data->isScratchWindowBoundToWorkspace)
+    if(client->data->isScratchWindowBoundToWorkspace)
     {
         return NULL;
     }

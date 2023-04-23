@@ -347,6 +347,7 @@ void show_clients(void);
 void show_keybindings(ScratchWindow *self, Monitor *monitor, int scratchWindowsScreenPadding);
 void keybindings_register_defaults(void);
 void register_default_scratch_windows(void);
+void register_secondary_monitor_default_bindings(Monitor *pMonitor, Monitor *sMonitor, Workspace **spaces);
 BOOL should_use_old_move_logic(Client* client);
 BOOL is_float_window(Client *client, LONG_PTR styles, LONG_PTR exStyles);
 HFONT initalize_font();
