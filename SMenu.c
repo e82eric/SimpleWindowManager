@@ -763,7 +763,6 @@ LRESULT CALLBACK SearchView_MessageProcessor(HWND hWnd, UINT uMsg, WPARAM wParam
                     {
                         if(current->modifier == 0)
                         {
-                            ItemsView_HandleBinding(self->itemsView, current->command);
                             return 0;
                         }
                     }
@@ -784,7 +783,7 @@ LRESULT CALLBACK SearchView_MessageProcessor(HWND hWnd, UINT uMsg, WPARAM wParam
                     ItemsView_HandleBinding(self->itemsView, current->command);
                     return 0;
                 }
-                if(current->modifier != 0 && GetAsyncKeyState(current->modifier) & 0x8000)
+                else if(current->modifier != 0 && GetAsyncKeyState(current->modifier) & 0x8000)
                 {
                     if(current->isLoadCommand)
                     {
