@@ -64,6 +64,7 @@ void tilelayout_move_client_previous(Client *client);
 void tilelayout_calulate_and_apply_client_sizes(Workspace *workspace);
 void deckLayout_select_next_window(Workspace *workspace);
 void deckLayout_move_client_next(Client *client);
+void deckLayout_client_to_master(Client *client);
 void deckLayout_move_client_previous(Client *client);
 void deckLayout_apply_to_workspace(Workspace *workspace);
 void monacleLayout_select_next_client(Workspace *workspace);
@@ -178,7 +179,7 @@ Layout deckLayout = {
     //using the same function for next and previous since there will only be 2 windows to swicth between.
     //It will always be moving between the 2
     .select_previous_window = deckLayout_select_next_window,
-    .move_client_to_master = tileLayout_move_client_to_master,
+    .move_client_to_master = deckLayout_client_to_master,
     .move_client_next = deckLayout_move_client_next,
     .move_client_previous = deckLayout_move_client_previous,
     .apply_to_workspace = deckLayout_apply_to_workspace,
@@ -2179,6 +2180,18 @@ void tileLayout_select_previous_window(Workspace *workspace)
     else
     {
         workspace->selected = workspace->lastClient;
+    }
+}
+
+void deckLayout_client_to_master(Client *client)
+{
+    if(client->workspace->clients->next)
+    {
+        ClientData *temp = client->workspace->clients->data;
+        client->workspace->clients->data = client->workspace->clients->next->data;
+        client->workspace->clients->next->data = temp;
+        workspace_arrange_windows(client->workspace);
+        workspace_focus_selected_window(client->workspace);
     }
 }
 
