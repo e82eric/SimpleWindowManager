@@ -2211,7 +2211,30 @@ void deckLayout_move_client_next(Client *client)
 
     if(!client->previous)
     {
-        //Exit we are in the master position
+        //We are in the master
+        //The end result is that the master is put to the bottom of the deck and the first non visible client is moved to the master
+        //To do this we shift the entire deck up on positon and then swap the new master with the secondary
+        Client *c = client->workspace->clients;
+        ClientData *topOfDeckData = c->data;
+        while(c)
+        {
+            if(c->next)
+            {
+                c->data = c->next->data;
+            }
+            else
+            {
+                c->data = topOfDeckData;
+            }
+            c = c->next;
+        }
+
+        ClientData *temp = client->workspace->clients->data;
+        client->workspace->clients->data = client->workspace->clients->next->data;
+        client->workspace->clients->next->data = temp;
+
+        workspace_arrange_windows(client->workspace);
+        workspace_focus_selected_window(client->workspace);
         return;
     }
 
