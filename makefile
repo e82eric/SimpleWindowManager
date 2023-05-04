@@ -1,3 +1,4 @@
+INCLUDE props.mk
 outdir = tmp
 publishdir = bin
 winlibs = Gdi32.lib user32.lib ComCtl32.lib
@@ -11,7 +12,7 @@ clean:
 	mkdir $(outdir)
 
 Config.obj:
-	CL $(cflags) ..\simplewindowmanagerconfig\Config.c /Fd"$(outdir)\Config.pdb" /Fo"$(outdir)\Config.obj"
+	CL $(cflags) /I ./ /Ifzf $(configFile) /Fd"$(outdir)\Config.pdb" /Fo"$(outdir)\Config.obj"
 
 fzf.obj:
 	CL $(nowarncflags) fzf\fzf.c /Fd"$(outdir)\fzf.pdb" /Fo"$(outdir)\fzf.obj"
