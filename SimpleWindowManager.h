@@ -220,7 +220,8 @@ struct Bar
 struct BarSegment
 {
     TCHAR *headerText;
-    TCHAR lastVariableText[MAX_PATH];
+    TCHAR variableText[MAX_PATH];
+    int variableTextLen;
     int variableTextFixedWidth;
     RECT *headerRect;
     RECT *variableRect;

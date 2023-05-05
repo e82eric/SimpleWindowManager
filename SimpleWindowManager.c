@@ -3079,11 +3079,10 @@ void bar_segment_render_header(BarSegment *self, HDC hdc, HBRUSH brush)
             L" | %ls: ",
             self->headerText);
 
-    FillRect(hdc, self->headerRect, brush);
     DrawText(hdc, headerBuff, headerTextLen, self->headerRect, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
 }
 
-void bar_segment_render_variable_text(BarSegment *self, HDC hdc, HBRUSH brush)
+void bar_segment_set_variable_text(BarSegment *self)
 {
     TCHAR variableTextBuff[MAX_PATH];
     TCHAR variableValueBuff[MAX_PATH];
@@ -3095,12 +3094,13 @@ void bar_segment_render_variable_text(BarSegment *self, HDC hdc, HBRUSH brush)
             self->variableTextFixedWidth,
             variableValueBuff);
 
-    if(wcscmp(variableTextBuff, self->lastVariableText) != 0)
-    {
-        FillRect(hdc, self->variableRect, brush);
-        DrawText(hdc, variableTextBuff, variableTextLen, self->variableRect, DT_RIGHT | DT_VCENTER | DT_SINGLELINE);
-        memcpy(self->lastVariableText, variableTextBuff, variableTextLen + 1);
-    }
+    self->variableTextLen = variableTextLen;
+    _tcscpy_s(self->variableText, MAX_PATH, variableTextBuff);
+}
+
+void bar_segment_render_variable_text(BarSegment *self, HDC hdc, HBRUSH brush)
+{
+    DrawText(hdc, self->variableText, self->variableTextLen, self->variableRect, DT_RIGHT | DT_VCENTER | DT_SINGLELINE);
 }
 
 void bar_segment_initalize_rectangles(BarSegment *self, HDC hdc, int right, Bar *bar)
@@ -3238,11 +3238,7 @@ LRESULT CALLBACK bar_message_loop(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPa
                 SetTextColor(hdc, barTextColor);
                 SetBkMode(hdc, TRANSPARENT);
 
-                if(ps.rcPaint.left == msgBar->timesRect->left)
-                {
-                    bar_render_times(msgBar, hdc, brush);
-                }
-                else if(ps.rcPaint.left == msgBar->selectedWindowDescRect->left)
+                if(ps.rcPaint.left == msgBar->selectedWindowDescRect->left)
                 {
                     FillRect(hdc, msgBar->selectedWindowDescRect, brush);
                     bar_render_selected_window_description(msgBar, hdc);
@@ -3262,9 +3258,13 @@ LRESULT CALLBACK bar_message_loop(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPa
             return TRUE;
         case WM_TIMER:
             msgBar = (Bar *) GetWindowLongPtr(hwnd, GWLP_USERDATA);
+            for(int i = 0; i < msgBar->numberOfSegments; i++)
+            {
+                bar_segment_set_variable_text(msgBar->segments[i]);
+            }
             InvalidateRect(
               msgBar->hwnd,
-              msgBar->timesRect,
+              NULL,
               FALSE);
             return 0;
         case WM_CLOSE:
