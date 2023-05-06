@@ -384,9 +384,12 @@ void move_focused_window_to_master(void)
 {
     HWND focusedHwnd = GetForegroundWindow();
     Client *client = windowManager_find_client_in_workspaces_by_hwnd(focusedHwnd);
-    client->workspace->layout->move_client_to_master(client);
-    workspace_arrange_windows(client->workspace);
-    workspace_focus_selected_window(client->workspace);
+    if(client)
+    {
+        client->workspace->layout->move_client_to_master(client);
+        workspace_arrange_windows(client->workspace);
+        workspace_focus_selected_window(client->workspace);
+    }
 }
 
 void toggle_create_window_in_current_workspace(void)
