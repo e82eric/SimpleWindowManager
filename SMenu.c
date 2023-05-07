@@ -536,6 +536,11 @@ void ItemsView_HandleBinding(ItemsView *self, NamedCommand *command)
     {
         if(command)
         {
+            if(command->quitAfter)
+            {
+                self->searchView->onEscape();
+            }
+
             LRESULT dwSel = SendMessageA(self->hwnd, LB_GETCURSEL, 0, 0);
             char newBindCommand[BUF_LEN];
             CHAR curSelStr[BUF_LEN] = "";
