@@ -580,22 +580,26 @@ void move_focused_window_down(void)
 
 void select_next_window(void)
 {
+    Workspace *workspace = selectedMonitor->workspace;
     if(selectedMonitor->scratchWindow)
     {
         scratch_window_hide(selectedMonitor->scratchWindow);
+        workspace_focus_selected_window(workspace);
+        return;
     }
-    Workspace *workspace = selectedMonitor->workspace;
     workspace->layout->select_next_window(workspace);
     workspace_focus_selected_window(workspace);
 }
 
 void select_previous_window(void)
 {
+    Workspace *workspace = selectedMonitor->workspace;
     if(selectedMonitor->scratchWindow)
     {
         scratch_window_hide(selectedMonitor->scratchWindow);
+        workspace_focus_selected_window(workspace);
+        return;
     }
-    Workspace *workspace = selectedMonitor->workspace;
     workspace->layout->select_previous_window(workspace);
     workspace_focus_selected_window(workspace);
 }
