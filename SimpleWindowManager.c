@@ -582,7 +582,7 @@ void select_next_window(void)
 {
     if(selectedMonitor->scratchWindow)
     {
-        return;
+        scratch_window_hide(selectedMonitor->scratchWindow);
     }
     Workspace *workspace = selectedMonitor->workspace;
     workspace->layout->select_next_window(workspace);
@@ -591,6 +591,10 @@ void select_next_window(void)
 
 void select_previous_window(void)
 {
+    if(selectedMonitor->scratchWindow)
+    {
+        scratch_window_hide(selectedMonitor->scratchWindow);
+    }
     Workspace *workspace = selectedMonitor->workspace;
     workspace->layout->select_previous_window(workspace);
     workspace_focus_selected_window(workspace);
@@ -1283,14 +1287,14 @@ void windowManager_move_workspace_to_monitor(Monitor *monitor, Workspace *worksp
 
     Workspace *selectedMonitorCurrentWorkspace = monitor->workspace;
 
-    if(currentMonitor == monitor)
-    {
-        return;
-    }
-
     if(monitor->scratchWindow)
     {
         scratch_window_hide(monitor->scratchWindow);
+    }
+
+    if(currentMonitor == monitor)
+    {
+        return;
     }
 
     int workspaceNumberOfClients = workspace_get_number_of_clients(workspace);
