@@ -3077,7 +3077,7 @@ HBRUSH bar_get_background_brush(Bar *self)
     return brush;
 }
 
-void bar_segment_render_header(BarSegment *self, HDC hdc, HBRUSH brush)
+void bar_segment_render_header(BarSegment *self, HDC hdc)
 {
     TCHAR headerBuff[MAX_PATH];
     int headerTextLen = swprintf(
@@ -3105,7 +3105,7 @@ void bar_segment_set_variable_text(BarSegment *self)
     _tcscpy_s(self->variableText, MAX_PATH, variableTextBuff);
 }
 
-void bar_segment_render_variable_text(BarSegment *self, HDC hdc, HBRUSH brush)
+void bar_segment_render_variable_text(BarSegment *self, HDC hdc)
 {
     DrawText(hdc, self->variableText, self->variableTextLen, self->variableRect, DT_RIGHT | DT_VCENTER | DT_SINGLELINE);
 }
@@ -3174,19 +3174,19 @@ void bar_add_segments_from_configuration(Bar *self, HDC hdc, Configuration *conf
     }
 }
 
-void bar_render_headers(Bar *bar, HDC hdc, HBRUSH brush)
+void bar_render_headers(Bar *bar, HDC hdc)
 {
     for(int i = 0; i < bar->numberOfSegments; i++)
     {
-        bar_segment_render_header(bar->segments[i], hdc, brush);
+        bar_segment_render_header(bar->segments[i], hdc);
     }
 }
 
-void bar_render_times(Bar *bar, HDC hdc, HBRUSH brush)
+void bar_render_times(Bar *bar, HDC hdc)
 {
     for(int i = 0; i < bar->numberOfSegments; i++)
     {
-        bar_segment_render_variable_text(bar->segments[i], hdc, brush);
+        bar_segment_render_variable_text(bar->segments[i], hdc);
     }
 }
 
@@ -3253,8 +3253,8 @@ LRESULT CALLBACK bar_message_loop(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPa
                 else
                 {
                     FillRect(hdc, &ps.rcPaint, brush);
-                    bar_render_headers(msgBar, hdc, brush);
-                    bar_render_times(msgBar, hdc, brush);
+                    bar_render_headers(msgBar, hdc);
+                    bar_render_times(msgBar, hdc);
                     FillRect(hdc, msgBar->selectedWindowDescRect, brush);
                     bar_render_selected_window_description(msgBar, hdc);
                 }
