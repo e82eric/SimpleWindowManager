@@ -3249,14 +3249,18 @@ LRESULT CALLBACK bar_message_loop(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPa
                 SetTextColor(hdc, barTextColor);
                 SetBkMode(hdc, TRANSPARENT);
 
+                FillRect(hdc, &ps.rcPaint, brush);
                 if(ps.rcPaint.left == msgBar->selectedWindowDescRect->left)
                 {
-                    FillRect(hdc, msgBar->selectedWindowDescRect, brush);
                     bar_render_selected_window_description(msgBar, hdc);
+                }
+                else if(ps.rcPaint.left == msgBar->timesRect->left)
+                {
+                    bar_render_headers(msgBar, hdc);
+                    bar_render_times(msgBar, hdc);
                 }
                 else
                 {
-                    FillRect(hdc, &ps.rcPaint, brush);
                     bar_render_headers(msgBar, hdc);
                     bar_render_times(msgBar, hdc);
                     FillRect(hdc, msgBar->selectedWindowDescRect, brush);
@@ -3275,7 +3279,7 @@ LRESULT CALLBACK bar_message_loop(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPa
             }
             InvalidateRect(
               msgBar->hwnd,
-              NULL,
+              msgBar->timesRect,
               FALSE);
             return 0;
         case WM_CLOSE:
@@ -4705,7 +4709,7 @@ int run (void)
 
             int selectWindowLeft = (buttonWidth * numberOfWorkspaces) + 2;
             RECT *timesRect = malloc(sizeof(RECT));
-            timesRect->left = monitors[i]->w - 1000;
+            timesRect->left = (monitors[i]->w / 2);
             timesRect->right = monitors[i]->w - 10;
             timesRect->top = barTop;
             timesRect->bottom = barBottom;
