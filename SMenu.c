@@ -652,7 +652,7 @@ void ItemsView_HandleBinding(ItemsView *self, NamedCommand *command)
                 sprintf_s(
                         cmdBuf,
                         MAX_PATH,
-                        "Command: %.50s\r\n",
+                        "Command: %.200s\r\n",
                         newBindCommand);
                 SetWindowTextA(self->cmdResultHwnd, cmdBuf); 
                 ItemsView_StartBindingProcess(self, newBindCommand, BindProcessFinishCallback, command->reloadAfter, command->quitAfter);
@@ -1290,12 +1290,11 @@ void MenuView_FitChildControls(MenuView *self)
             self->height - itemsTop - padding - cmdResultHeight);
     SetFocus(self->searchView->hwnd);
 
-    listBottom = self->itemsView->maxDisplayItems * listBoxItemHeight + itemsTop;
     RECT listRect;
     GetClientRect(self->itemsView->hwnd, &listRect);
     int cmdResultTop = listBottom + padding;
     cmdResultHeight = bottom - cmdResultTop;
-    MoveWindow(self->itemsView->cmdResultHwnd, padding, cmdResultTop + 40, width, cmdResultHeight - 40, TRUE);
+    MoveWindow(self->itemsView->cmdResultHwnd, padding, cmdResultTop, width, cmdResultHeight, TRUE);
 
     int helpHeaderTop = padding;
     int helpHeaderLeft = padding;
@@ -1412,7 +1411,7 @@ void MenuView_CreateChildControls(MenuView *self)
     self->itemsView->cmdResultHwnd = CreateWindowA(
             "EDIT", 
             NULL, 
-            WS_CHILD  | WS_BORDER | WS_VISIBLE | WS_VSCROLL | ES_LEFT | ES_MULTILINE | ES_AUTOVSCROLL,
+            WS_CHILD  | WS_BORDER | WS_VISIBLE | WS_VSCROLL | ES_LEFT | ES_MULTILINE | ES_AUTOVSCROLL | ES_NOHIDESEL,
             260, 
             260, 
             900, 
@@ -2041,4 +2040,5 @@ void menu_run_definition(MenuView *self, MenuDefinition *menuDefinition)
     }
 
     MenuView_FitChildControls(self);
+    SetWindowTextA(self->itemsView->cmdResultHwnd, 0);
 }
