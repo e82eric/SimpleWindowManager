@@ -16,6 +16,7 @@
 #define IDT_LOADINGTIMER 1004
 #define IDC_HELP_TEXT 1005
 #define IDC_HELP_HEADER_TEXT 1006
+#define IDC_CMD_RESULT_TEXT 1007
 
 #define VK_P 0x50
 #define VK_R 0x52
@@ -313,13 +314,28 @@ void ItemsView_SelectPrevious(ItemsView *self)
 void ItemsView_StartBindingProcess(ItemsView *itemsView, char *cmdArgs, WAITORTIMERCALLBACK callback, BOOL reloadAfter, BOOL quitAfter)
 {
     PROCESS_INFORMATION pi = { 0 };
+    HANDLE readFileHandle;
+    HANDLE stdOutWriteHandle;
 
     SECURITY_ATTRIBUTES sattr;
     sattr.nLength = sizeof(SECURITY_ATTRIBUTES);
     sattr.lpSecurityDescriptor = NULL;
     sattr.bInheritHandle = TRUE;
 
+    if(!CreatePipe(&readFileHandle, &stdOutWriteHandle, &sattr, 0))
+    {
+        return;
+    }
+
+    if(SetHandleInformation(&readFileHandle, HANDLE_FLAG_INHERIT, 0))
+    {
+        return;
+    }
+
     STARTUPINFOA si = { 0 };
+    si.dwFlags = STARTF_USESTDHANDLES;
+    si.hStdOutput = stdOutWriteHandle;
+    si.hStdError = stdOutWriteHandle;
 
     if(!CreateProcessA(
         NULL,
@@ -334,8 +350,12 @@ void ItemsView_StartBindingProcess(ItemsView *itemsView, char *cmdArgs, WAITORTI
         &pi)
     ) 
     {
+        CloseHandle(readFileHandle);
+        CloseHandle(stdOutWriteHandle);
         return;
     }
+
+    CloseHandle(stdOutWriteHandle);
 
     ProcessAsyncState *processAsyncState = calloc(1, sizeof(ProcessAsyncState));
     processAsyncState->thread = pi.hThread;
@@ -343,22 +363,24 @@ void ItemsView_StartBindingProcess(ItemsView *itemsView, char *cmdArgs, WAITORTI
     processAsyncState->itemsView = itemsView;
     processAsyncState->reloadAfter = reloadAfter;
     processAsyncState->quitAfter = quitAfter;
+    processAsyncState->readFileHandle = readFileHandle;
 
-    BOOL result = RegisterWaitForSingleObject(
+    RegisterWaitForSingleObject(
         &processAsyncState->waitHandle,
         pi.hProcess,
         callback,
         (void*)processAsyncState,
         INFINITE,
         WT_EXECUTEINWAITTHREAD | WT_EXECUTEONLYONCE);
-
-    if (!result)
-    {
-    }
 }
 
 void NamedCommand_Parse(char *dest, char *curSel, NamedCommand *command, size_t maxLen)
 {
+    if(!command->hasReplacement)
+    {
+        strcpy_s(dest, maxLen, command->expression);
+        return;
+    }
     int destCtr = 0;
     for(int i = 0; i < command->expressionLen; i++)
     {
@@ -519,8 +541,47 @@ void CALLBACK BindProcessFinishCallback(void* lpParameter, BOOLEAN isTimeout)
         ItemsView_HandleReload(asyncState->itemsView);
     }
     UnregisterWait(asyncState->waitHandle);
+
+    DWORD exitCode;
+    GetExitCodeProcess(asyncState->processId, &exitCode);
+
     CloseHandle(asyncState->thread);
     CloseHandle(asyncState->processId);
+
+    CHAR buffer[BUF_LEN];
+    CHAR winBuffer[BUF_LEN];
+    CHAR existingText[BUF_LEN];
+    DWORD readBytes = 0;
+    while(ReadFile(asyncState->readFileHandle, buffer, BUF_LEN, &readBytes, NULL))
+    {
+        buffer[readBytes] = '\0';
+        GetWindowTextA(
+                asyncState->itemsView->cmdResultHwnd,
+                existingText,
+                BUF_LEN);
+        sprintf_s(
+                winBuffer,
+                BUF_LEN,
+                "%s%s",
+                existingText,
+                buffer);
+        SetWindowTextA(asyncState->itemsView->cmdResultHwnd, winBuffer);
+    }
+    CloseHandle(asyncState->readFileHandle);
+
+    CHAR exitCodeBuf[BUF_LEN];
+    GetWindowTextA(
+        asyncState->itemsView->cmdResultHwnd,
+        existingText,
+        BUF_LEN);
+    sprintf_s(
+            exitCodeBuf,
+            BUF_LEN,
+            "%sExit code: %d",
+            existingText,
+            exitCode);
+    SetWindowTextA(asyncState->itemsView->cmdResultHwnd, exitCodeBuf);
+
     if(asyncState->quitAfter)
     {
         asyncState->itemsView->searchView->onEscape();
@@ -572,7 +633,10 @@ void ItemsView_HandleBinding(ItemsView *self, NamedCommand *command)
                 }
             }
 
-            NamedCommand_Parse(newBindCommand, text, command, BUF_LEN);
+            if(command->expression)
+            {
+                NamedCommand_Parse(newBindCommand, text, command, BUF_LEN);
+            }
 
             if(command->action)
             {
@@ -584,6 +648,13 @@ void ItemsView_HandleBinding(ItemsView *self, NamedCommand *command)
             }
             else
             {
+                CHAR cmdBuf[MAX_PATH];
+                sprintf_s(
+                        cmdBuf,
+                        MAX_PATH,
+                        "Command: %.50s\r\n",
+                        newBindCommand);
+                SetWindowTextA(self->cmdResultHwnd, cmdBuf); 
                 ItemsView_StartBindingProcess(self, newBindCommand, BindProcessFinishCallback, command->reloadAfter, command->quitAfter);
             }
         }
@@ -1155,7 +1226,7 @@ void ItemsView_SetDoneLoading(ItemsView *self)
     self->isReading = FALSE;
 }
 
-void ItemsView_Move(ItemsView *self, int left, int top, int width, int height)
+int ItemsView_Move(ItemsView *self, int left, int top, int width, int height)
 {
     int listTop;
     int listHeight;
@@ -1180,6 +1251,8 @@ void ItemsView_Move(ItemsView *self, int left, int top, int width, int height)
     MoveWindow(self->hwnd, left, listTop, width, listHeight, TRUE);
     self->height = listHeight;
     self->maxDisplayItems = (listHeight - 3) / listBoxItemHeight;
+
+    return listTop + listHeight;
 }
 
 void HelpView_Move(HWND hwnd, int left, int top, int width, int height)
@@ -1194,6 +1267,7 @@ void MenuView_FitChildControls(MenuView *self)
 
     int padding = 10;
     int width = self->width - (padding * 2);
+    int bottom = xrect.bottom - padding;
 
     int summaryWidth = 400;
 
@@ -1201,17 +1275,27 @@ void MenuView_FitChildControls(MenuView *self)
     int summaryLeft = searchWidth + padding;
     int searchTop = padding;
     int searchHeight = 30;
+
+    int cmdResultHeight = 90;
+
     MoveWindow(self->searchView->hwnd, padding, searchTop, searchWidth, searchHeight, TRUE);
     MoveWindow(self->itemsView->summaryHwnd, summaryLeft, searchTop, summaryWidth, searchHeight, TRUE);
 
     int itemsTop = searchTop + searchHeight + padding;
-    ItemsView_Move(
+    int listBottom = ItemsView_Move(
             self->itemsView,
             padding,
             itemsTop,
             width,
-            self->height - itemsTop - padding);
+            self->height - itemsTop - padding - cmdResultHeight);
     SetFocus(self->searchView->hwnd);
+
+    listBottom = self->itemsView->maxDisplayItems * listBoxItemHeight + itemsTop;
+    RECT listRect;
+    GetClientRect(self->itemsView->hwnd, &listRect);
+    int cmdResultTop = listBottom + padding;
+    cmdResultHeight = bottom - cmdResultTop;
+    MoveWindow(self->itemsView->cmdResultHwnd, padding, cmdResultTop + 40, width, cmdResultHeight - 40, TRUE);
 
     int helpHeaderTop = padding;
     int helpHeaderLeft = padding;
@@ -1324,6 +1408,20 @@ void MenuView_CreateChildControls(MenuView *self)
             NULL);
     ShowWindow(self->searchView->helpHwnd, SW_HIDE);
     ShowWindow(self->searchView->helpHeaderHwnd, SW_HIDE);
+
+    self->itemsView->cmdResultHwnd = CreateWindowA(
+            "EDIT", 
+            NULL, 
+            WS_CHILD  | WS_BORDER | WS_VISIBLE | WS_VSCROLL | ES_LEFT | ES_MULTILINE | ES_AUTOVSCROLL,
+            260, 
+            260, 
+            900, 
+            600,
+            self->hwnd, 
+            (HMENU)IDC_CMD_RESULT_TEXT, 
+            (HINSTANCE)GetWindowLongPtr(self->hwnd, GWLP_HINSTANCE),
+            NULL);
+    SendMessageA(self->itemsView->cmdResultHwnd, WM_SETFONT, (WPARAM)font, (LPARAM)TRUE);
 
     SetTimer(self->hwnd,
             IDT_LOADINGTIMER,

@@ -134,6 +134,7 @@ struct ItemsView
     HWND hwnd;
     HWND headerHwnd;
     HWND summaryHwnd;
+    HWND cmdResultHwnd;
     int height;
     int width;
     BOOL hasHeader;
