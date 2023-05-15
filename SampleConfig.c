@@ -1,12 +1,12 @@
 #include <windows.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include "..\\SimpleWindowManager2\\fzf\\fzf.h"
-#include "..\\SimpleWindowManager2\\SMenu.h"
-#include "..\\SimpleWindowManager2\\SimpleWindowManager.h"
-#include "..\\SimpleWindowManager2\\ListWindows.h"
-#include "..\\SimpleWindowManager2\\ListProcesses.h"
-#include "..\\SimpleWindowManager2\\ListServices.h"
+#include "fzf.h"
+#include "SMenu.h"
+#include "SimpleWindowManager.h"
+#include "ListWindows.h"
+#include "ListProcesses.h"
+#include "ListServices.h"
 
 MenuDefinition *searchDriveMenuDefinition;
 
@@ -78,10 +78,6 @@ void configure(Configuration *configuration)
     WCHAR riderTag = { 0xf668 };
     WCHAR teamsTag = { 0xf865 };
 
-    Workspace *browserWorkspace = workspace_register(L"Chrome", &chromeTag, &tileLayout);
-    workspace_register_processimagename_contains_filter(browserWorkspace, L"chrome.exe");
-    workspace_register_processimagename_contains_filter(browserWorkspace, L"brave.exe");
-    workspace_register_processimagename_contains_filter(browserWorkspace, L"firefox.exe");
     workspace_register_processimagename_contains_filter(browserWorkspace, L"msedge.exe");
 
     Workspace *terminalWorkspace = workspace_register(L"Terminal", &terminalTag, &deckLayout);
@@ -91,7 +87,7 @@ void configure(Configuration *configuration)
     workspace_register_processimagename_contains_filter(ideWorkspace, L"rider64.exe");
     workspace_register_processimagename_contains_filter(ideWorkspace, L"Code.exe");
 
-    Workspace *teamsWorkspace = workspace_register(L"Teams", &teamsTag, &tileLayout);
+    Workspace *teamsWorkspace = workspace_register(L"Teams", &teamsTag, &deckLayout);
     workspace_register_processimagename_contains_filter(teamsWorkspace, L"Teams.exe");
 
     workspace_register(L"5", L"4", &tileLayout);
@@ -100,9 +96,9 @@ void configure(Configuration *configuration)
     workspace_register(L"8", L"8", &tileLayout);
     workspace_register(L"9", L"9", &tileLayout);
 
-    workspace_register(L"Desktop", L"0", &tileLayout);
+    workspace_register(L"Desktop", L"0", &deckLayout);
 
-    keybinding_create_with_shell_arg("NewTerminalWindow", LWin, VK_T, start_app, L"wt.exe");
+    keybinding_create_with_shell_arg("NewTerminalWindow", LAlt, VK_I, start_launcher, "/c start \"\" \"wt.exe\"");
 
     register_default_scratch_windows();
 
@@ -169,7 +165,10 @@ void configure(Configuration *configuration)
     menu_definition_set_load_action(listProcessMenu, list_processes_run_no_sort);
     NamedCommand *killProcessCommand = MenuDefinition_AddNamedCommand(listProcessMenu, "procKill:cmd /c taskkill /f /pid {}", TRUE, FALSE);
     NamedCommand_SetTextRange(killProcessCommand, 76, 8, TRUE);
-    MenuDefinition_AddNamedCommand(listProcessMenu, "windbg:powershell.exe -C '{}' -match '\\d{8}';windbg -p \"\"\"$([int]$Matches[0])\"\"\"", FALSE, TRUE);
+    NamedCommand *windbgCommand = MenuDefinition_AddNamedCommand(listProcessMenu, "windbg:windbgx -p {}", FALSE, TRUE);
+    NamedCommand_SetTextRange(windbgCommand, 76, 8, TRUE);
+    NamedCommand *procDumpNamedCommand = MenuDefinition_AddNamedCommand(listProcessMenu, "procdump:cmd /c procdump -accepteula -ma {} %USERPROFILE%\\memory_dumps", FALSE, FALSE);
+    NamedCommand_SetTextRange(procDumpNamedCommand, 76, 8, TRUE);
     MenuDefinition_AddLoadActionKeyBinding(listProcessMenu, VK_CONTROL, VK_1, list_processes_run_sorted_by_private_bytes, "Sort Pvt Bytes");
     MenuDefinition_AddLoadActionKeyBinding(listProcessMenu, VK_CONTROL, VK_2, list_processes_run_sorted_by_working_set, "Sort Wrk Set");
     MenuDefinition_AddLoadActionKeyBinding(listProcessMenu, VK_CONTROL, VK_3, list_processes_run_sorted_by_cpu, "Sort Cpu");
@@ -177,6 +176,7 @@ void configure(Configuration *configuration)
     MenuDefinition_ParseAndSetRange(listProcessMenu, "76,8");
     MenuDefinition_ParseAndAddKeyBinding(listProcessMenu, "ctl-k:procKill", FALSE);
     MenuDefinition_ParseAndAddKeyBinding(listProcessMenu, "ctl-d:windbg", FALSE);
+    MenuDefinition_ParseAndAddKeyBinding(listProcessMenu, "ctl-x:procdump", FALSE);
     listProcessMenu->hasHeader = TRUE;
     keybinding_create_with_menu_arg("ProcessListMenu", LWin, VK_9, menu_run, listProcessMenu);
 
@@ -191,7 +191,7 @@ void configure(Configuration *configuration)
     configuration_add_bar_segment(configuration, L"Time", 16, fill_local_time);
     configuration_add_bar_segment(configuration, L"CPU", 6, fill_cpu);
     configuration_add_bar_segment(configuration, L"Memory", 6, fill_memory_percent);
-    configuration_add_bar_segment(configuration, L"Volume", 6, fill_volume_percent);
+    configuration_add_bar_segment(configuration, L"Volume", 7, fill_volume_percent);
     configuration_add_bar_segment(configuration, L"Internet", 3, fill_is_connected_to_internet);
 
     register_secondary_monitor_default_bindings(configuration->monitors[0], configuration->monitors[1], configuration->workspaces);
