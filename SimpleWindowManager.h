@@ -66,6 +66,14 @@ enum Modifiers
     LCtl = 0x80
 };
 
+enum WindowRoutingMode
+{
+    FilteredAndRoutedToWorkspace = 0x1,
+    FilteredCurrentWorkspace = 0x2,
+    NotFilteredCurrentWorkspace = 0x4,
+    FilteredRoutedNonFilteredCurrentWorkspace = 0x8
+};
+
 struct BarSegmentConfiguration
 {
     TCHAR *headerText;
@@ -92,6 +100,7 @@ struct Configuration
     int numberOfBarSegments;
     Monitor **monitors;
     Workspace **workspaces;
+    enum WindowRoutingMode windowRoutingMode;
 };
 
 struct WorkspaceFilterData

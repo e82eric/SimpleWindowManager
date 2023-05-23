@@ -131,14 +131,6 @@ static int get_cpu_usage(void);
 static int get_memory_percent(void);
 static int run (void);
 
-enum WindowRoutingMode
-{
-    FilteredAndRoutedToWorkspace = 0x1,
-    FilteredCurrentWorkspace = 0x2,
-    NotFilteredCurrentWorkspace = 0x4,
-    FilteredRoutedNonFilteredCurrentWorkspace = 0x8
-};
-
 static IAudioEndpointVolume *audioEndpointVolume;
 static INetworkListManager *networkListManager;
 
@@ -223,7 +215,7 @@ BOOL menuVisible;
 Command *commands[MAX_COMMANDS];
 int numberOfCommands = 0;
 
-enum WindowRoutingMode currentWindowRoutingMode = FilteredAndRoutedToWorkspace;
+enum WindowRoutingMode currentWindowRoutingMode;
 int scratchWindowsScreenPadding = 250;
 
 DWORD scratchProcessId;
@@ -439,7 +431,7 @@ void toggle_non_filtered_windows_assigned_to_current_workspace(void)
     }
     else
     {
-        currentWindowRoutingMode = FilteredRoutedNonFilteredCurrentWorkspace;
+        currentWindowRoutingMode = FilteredAndRoutedToWorkspace;
     }
     for(int i = 0; i < numberOfMonitors; i++)
     {
@@ -4631,7 +4623,9 @@ int run (void)
     configuration = calloc(1, sizeof(Configuration));
     configuration->monitors = monitors;
     configuration->workspaces = workspaces;
+    configuration->windowRoutingMode = FilteredAndRoutedToWorkspace;
     configure(configuration);
+    currentWindowRoutingMode = configuration->windowRoutingMode;
 
     if(configuration->barHeight)
     {
