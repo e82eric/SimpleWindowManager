@@ -1503,6 +1503,11 @@ void client_move_to_location_on_screen(Client *client, HDWP hdwp)
     }
     else
     {
+        UINT flags = SWP_SHOWWINDOW;
+        if(!configuration->alwaysRedraw)
+        {
+            flags = SWP_NOREDRAW;
+        }
         DeferWindowPos(
             hdwp,
             client->data->hwnd,
@@ -1511,7 +1516,7 @@ void client_move_to_location_on_screen(Client *client, HDWP hdwp)
             targetTop,
             targetWidth,
             targetHeight,
-            SWP_NOREDRAW);
+            flags);
     }
 }
 
@@ -4624,6 +4629,7 @@ int run (void)
     configuration->monitors = monitors;
     configuration->workspaces = workspaces;
     configuration->windowRoutingMode = FilteredAndRoutedToWorkspace;
+    configuration->alwaysRedraw = FALSE;
     configure(configuration);
     currentWindowRoutingMode = configuration->windowRoutingMode;
 

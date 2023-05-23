@@ -101,6 +101,7 @@ struct Configuration
     Monitor **monitors;
     Workspace **workspaces;
     enum WindowRoutingMode windowRoutingMode;
+    BOOL alwaysRedraw;
 };
 
 struct WorkspaceFilterData
