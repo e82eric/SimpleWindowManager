@@ -1987,6 +1987,13 @@ void tileLayout_move_client_to_master(Client *client)
 {
     if(client->workspace->clients == client)
     {
+        if(client->workspace->clients->next)
+        {
+            ClientData *temp = client->workspace->clients->next->data;
+            client->workspace->clients->next->data = client->workspace->clients->data;
+            client->workspace->clients->data = temp;
+            client->workspace->selected = client->workspace->clients;
+        }
         //This is the master do nothing
         return;
     }
