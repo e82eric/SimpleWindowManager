@@ -136,6 +136,7 @@ enum WindowRoutingMode
     FilteredAndRoutedToWorkspace = 0x1,
     FilteredCurrentWorkspace = 0x2,
     NotFilteredCurrentWorkspace = 0x4,
+    FilteredRoutedNonFilteredCurrentWorkspace = 0x8
 };
 
 static IAudioEndpointVolume *audioEndpointVolume;
@@ -420,6 +421,25 @@ void toggle_ignore_workspace_filters(void)
     else
     {
         currentWindowRoutingMode = FilteredAndRoutedToWorkspace;
+    }
+    for(int i = 0; i < numberOfMonitors; i++)
+    {
+        if(!monitors[i]->isHidden)
+        {
+            bar_trigger_selected_window_paint(monitors[i]->bar);
+        }
+    }
+}
+
+void toggle_non_filtered_windows_assigned_to_current_workspace(void)
+{
+    if(currentWindowRoutingMode != FilteredRoutedNonFilteredCurrentWorkspace)
+    {
+        currentWindowRoutingMode = FilteredRoutedNonFilteredCurrentWorkspace;
+    }
+    else
+    {
+        currentWindowRoutingMode = FilteredRoutedNonFilteredCurrentWorkspace;
     }
     for(int i = 0; i < numberOfMonitors; i++)
     {
@@ -1223,7 +1243,7 @@ BOOL windowManager_find_client_workspace_using_filter_data(WorkspaceFilterData *
 Workspace* windowManager_find_client_workspace_using_filters(Client *client)
 {
     Workspace *workspaceFoundByFilter = NULL;
-    Workspace *workspace = NULL;
+    Workspace *result = NULL;
 
     BOOL alwaysExclude = FALSE;
     if(configuration->shouldAlwaysExcludeFunc)
@@ -1270,19 +1290,17 @@ Workspace* windowManager_find_client_workspace_using_filters(Client *client)
 
     if(workspaceFoundByFilter)
     {
-        workspace = workspaceFoundByFilter;
+        result = workspaceFoundByFilter;
     }
     else
     {
-        return NULL;
+        if(currentWindowRoutingMode == FilteredRoutedNonFilteredCurrentWorkspace && !alwaysExclude)
+        {
+            result = selectedMonitor->workspace;
+        }
     }
 
-    if(workspace)
-    {
-        return workspace;
-    }
-
-    return NULL;
+    return result;
 }
 
 void windowManager_move_workspace_to_monitor(Monitor *monitor, Workspace *workspace)
@@ -3013,6 +3031,9 @@ void bar_render_selected_window_description(Bar *bar, HDC hdc)
         case NotFilteredCurrentWorkspace:
             windowRoutingMode = L"NotFilteredCurrentWorkspace";
             break;
+        case FilteredRoutedNonFilteredCurrentWorkspace:
+            windowRoutingMode = L"FilteredRoutedNonFilteredCurrentWorkspace";
+            break;
     }
 
     HWND foregroundHwnd = GetForegroundWindow();
@@ -4089,6 +4110,7 @@ void keybindings_register_defaults(void)
 
     keybinding_create_with_no_arg("toggle_create_window_in_current_workspace", LAlt, VK_B, toggle_create_window_in_current_workspace);
     keybinding_create_with_no_arg("toggle_ignore_workspace_filters", LAlt, VK_Z, toggle_ignore_workspace_filters);
+    keybinding_create_with_no_arg("toggle_non_filtered_windows_assigned_to_current_workspace", LAlt, VK_B, toggle_non_filtered_windows_assigned_to_current_workspace);
     keybinding_create_with_no_arg("client_stop_managing", LAlt, VK_F, client_stop_managing);
 
     keybinding_create_with_no_arg("swap_selected_monitor_to_monacle_layout", LAlt, VK_M, swap_selected_monitor_to_monacle_layout);
