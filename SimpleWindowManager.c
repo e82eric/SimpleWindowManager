@@ -1998,12 +1998,21 @@ void tileLayout_move_client_to_master(Client *client)
         return;
     }
 
+    if(client->workspace->clients->next == client &&
+            client->workspace->clients->next &&
+            !client->workspace->clients->next->next)
+    {
+        ClientData *temp = client->workspace->clients->next->data;
+        client->workspace->clients->next->data = client->workspace->clients->data;
+        client->workspace->clients->data = temp;
+        client->workspace->selected = client->workspace->clients->next;
+        return;
+    }
+
     ClientData *temp = client->data;
     client->data = client->workspace->clients->data;
     client->workspace->clients->data = temp;
     client->workspace->selected = client->workspace->clients;
-    workspace_arrange_windows(client->workspace);
-    workspace_focus_selected_window(client->workspace);
 }
 
 void tilelayout_move_client_next(Client *client)
