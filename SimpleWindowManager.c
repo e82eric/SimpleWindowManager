@@ -3621,6 +3621,7 @@ void button_redraw(Button *button)
 
 void button_press_handle(Button *button)
 {
+    monitor_select(button->bar->monitor);
     windowManager_move_workspace_to_monitor(button->bar->monitor, button->workspace);
     workspace_focus_selected_window(button->workspace);
 }
