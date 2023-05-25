@@ -889,6 +889,28 @@ BOOL isFullscreen(HWND windowHandle)
         && windowRect.bottom == monitorInfo.rcMonitor.bottom;
 }
 
+BOOL hit_test_hwnd(HWND hwnd)
+{
+    RECT windowRect;
+    GetWindowRect(
+            hwnd,
+            &windowRect);
+
+    POINT cursorPoint;
+    GetCursorPos(&cursorPoint);
+
+    BOOL result = FALSE;
+    if( cursorPoint.x > windowRect.left &&
+            cursorPoint.x < windowRect.right &&
+            cursorPoint.y > windowRect.top &&
+            cursorPoint.y < windowRect.bottom)
+    {
+        result = TRUE;
+    }
+
+    return result;
+}
+
 void CALLBACK handle_windows_event(
         HWINEVENTHOOK hook,
         DWORD event,
@@ -1090,18 +1112,21 @@ void CALLBACK handle_windows_event(
         else if(event == EVENT_SYSTEM_FOREGROUND)
         {
             bar_trigger_selected_window_paint(selectedMonitor->bar);
-            Client* client = windowManager_find_client_in_workspaces_by_hwnd(hwnd);
-            if(client)
+            if(hit_test_hwnd(hwnd))
             {
-                if(focusHWNDToIgnore == hwnd)
+                Client* client = windowManager_find_client_in_workspaces_by_hwnd(hwnd);
+                if(client)
                 {
+                    if(focusHWNDToIgnore == hwnd)
+                    {
+                    }
+                    else if(selectedMonitor->workspace->selected != client)
+                    {
+                        client->workspace->selected = client;
+                        monitor_select(client->workspace->monitor);
+                    }
+                    focusHWNDToIgnore = NULL;
                 }
-                else if(selectedMonitor->workspace->selected != client)
-                {
-                    client->workspace->selected = client;
-                    monitor_select(client->workspace->monitor);
-                }
-                focusHWNDToIgnore = NULL;
             }
         }
     }
@@ -3039,13 +3064,13 @@ void bar_render_selected_window_description(Bar *bar, HDC hdc)
             windowRoutingMode = L"Normal";
             break;
         case FilteredCurrentWorkspace:
-            windowRoutingMode = L"FilteredCurrentWorkspace";
+            windowRoutingMode = L"CurrentWorkspace";
             break;
         case NotFilteredCurrentWorkspace:
-            windowRoutingMode = L"NotFilteredCurrentWorkspace";
+            windowRoutingMode = L"CurrentWorkspace*";
             break;
         case FilteredRoutedNonFilteredCurrentWorkspace:
-            windowRoutingMode = L"FilteredRoutedNonFilteredCurrentWorkspace";
+            windowRoutingMode = L"NotMappedCurrentWorkspace";
             break;
     }
 
