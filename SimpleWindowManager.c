@@ -67,6 +67,7 @@ void deckLayout_move_client_next(Client *client);
 void deckLayout_client_to_master(Client *client);
 void deckLayout_move_client_previous(Client *client);
 void deckLayout_apply_to_workspace(Workspace *workspace);
+void horizontaldeckLayout_apply_to_workspace(Workspace *workspace);
 void monacleLayout_select_next_client(Workspace *workspace);
 void monacleLayout_select_previous_client(Workspace *workspace);
 void monacleLayout_move_client_next(Client *client);
@@ -176,6 +177,19 @@ Layout deckLayout = {
     .move_client_next = deckLayout_move_client_next,
     .move_client_previous = deckLayout_move_client_previous,
     .apply_to_workspace = deckLayout_apply_to_workspace,
+    .next = NULL,
+    .tag = L"D"
+};
+
+Layout horizontaldeckLayout = {
+    .select_next_window = deckLayout_select_next_window,
+    //using the same function for next and previous since there will only be 2 windows to swicth between.
+    //It will always be moving between the 2
+    .select_previous_window = deckLayout_select_next_window,
+    .move_client_to_master = deckLayout_client_to_master,
+    .move_client_next = deckLayout_move_client_next,
+    .move_client_previous = deckLayout_move_client_previous,
+    .apply_to_workspace = horizontaldeckLayout_apply_to_workspace,
     .next = NULL,
     .tag = L"D"
 };
@@ -638,6 +652,11 @@ void swap_selected_monitor_to_monacle_layout(void)
 void swap_selected_monitor_to_deck_layout(void)
 {
     monitor_set_layout(&deckLayout);
+}
+
+void swap_selected_monitor_to_horizontaldeck_layout(void)
+{
+    monitor_set_layout(&horizontaldeckLayout);
 }
 
 void swap_selected_monitor_to_tile_layout(void)
@@ -1545,6 +1564,22 @@ void client_move_to_location_on_screen(Client *client, HDWP hdwp)
     }
 }
 
+void client_set_screen_coordinates_from_rect(Client *client, RECT *rect)
+{
+    int x = rect->left;
+    int y = rect->top;
+    int w = rect->right - rect->left;
+    int h = rect->bottom - rect->top;
+
+    if(client->data->x != x || client->data->w != w || client->data->h != h || client->data->y != y) {
+        client->data->isDirty = TRUE;
+        client->data->w = w;
+        client->data->h = h;
+        client->data->x = x;
+        client->data->y = y;
+    }
+}
+
 void client_set_screen_coordinates(Client *client, int w, int h, int x, int y)
 {
     if(client->data->x != x || client->data->w != w || client->data->h != h || client->data->y != y) {
@@ -2377,7 +2412,80 @@ void deckLayout_move_client_previous(Client *client)
     workspace_focus_selected_window(client->workspace);
 }
 
-void deckLayout_apply_to_workspace(Workspace *workspace)
+void verticaldeckLayout_calcluate_rect(Monitor *monitor, int mainXOffset, int numberOfClients, RECT *masterToFill, RECT *secondaryToFill)
+{
+    int screenHeight = monitor->h;
+    int screenWidth = monitor -> w;
+    int monitorXOffset = monitor->xOffset;
+
+    int masterX = monitorXOffset + gapWidth;
+
+    int masterWidth;
+    int secondaryWidth;
+    if(numberOfClients == 1)
+    {
+        masterWidth = screenWidth - (gapWidth * 2);
+        secondaryWidth = 0;
+    }
+    else
+    {
+        masterWidth = (screenWidth / 2) - gapWidth - (gapWidth / 2) + mainXOffset;
+        secondaryWidth = (screenWidth / 2) - gapWidth - (gapWidth / 2) - mainXOffset;
+    }
+
+    int allHeight = screenHeight - barHeight - (gapWidth * 2);
+    int allY = barHeight + gapWidth;
+    int secondaryX = monitorXOffset + masterWidth + (gapWidth * 2);
+
+    masterToFill->top = allY;
+    masterToFill->bottom = allY + allHeight;
+    masterToFill->left = masterX;
+    masterToFill->right = masterX + masterWidth;
+
+    secondaryToFill->top = allY;
+    secondaryToFill->bottom = allY + allHeight;
+    secondaryToFill->left = secondaryX;
+    secondaryToFill->right = secondaryX + secondaryWidth;
+}
+
+void horizontaldeckLayout_calcluate_rect(Monitor *monitor, int mainXOffset, int numberOfClients, RECT *masterToFill, RECT *secondaryToFill)
+{
+    int screenHeight = monitor->h;
+    int screenWidth = monitor -> w;
+    int monitorXOffset = monitor->xOffset;
+
+    int masterY = barHeight + gapWidth;
+
+    int masterHeight;
+    int secondaryHeight;
+    int heightNoBarNoGaps = screenHeight - barHeight - (gapWidth * 2);
+    if(numberOfClients == 1)
+    {
+        masterHeight = heightNoBarNoGaps;
+        secondaryHeight = 0;
+    }
+    else
+    {
+        masterHeight = (heightNoBarNoGaps / 2) - (gapWidth / 2) + mainXOffset;
+        secondaryHeight = (heightNoBarNoGaps / 2) - (gapWidth / 2) - mainXOffset;
+    }
+
+    int allWidth = screenWidth - (gapWidth * 2);
+    int allX = monitorXOffset + gapWidth;
+    int secondaryY = masterY + masterHeight + gapWidth;
+
+    masterToFill->top = masterY;
+    masterToFill->bottom = masterY + masterHeight;
+    masterToFill->left = allX;
+    masterToFill->right = allX + allWidth;
+
+    secondaryToFill->top = secondaryY;
+    secondaryToFill->bottom = secondaryY + secondaryHeight;
+    secondaryToFill->left = allX;
+    secondaryToFill->right = allX + allWidth;
+}
+
+void deckLayout_apply_to_workspace_base(Workspace *workspace, void (*calcRects)(Monitor*, int, int, RECT*, RECT*))
 {
     //if we are switching to deck layout.  We want to make sure that selected window is either the master or top of secondary stack
     if(workspace->selected && workspace->clients)
@@ -2397,29 +2505,11 @@ void deckLayout_apply_to_workspace(Workspace *workspace)
         }
     }
 
-    int screenWidth = workspace->monitor->w;
-    int screenHeight = workspace->monitor->h;
+    RECT mainRect;
+    RECT secondaryRect;
 
     int numberOfClients = workspace_get_number_of_clients(workspace);
-
-    int masterX = workspace->monitor->xOffset + gapWidth;
-
-    int masterWidth;
-    int secondaryWidth;
-    if(numberOfClients == 1)
-    {
-        masterWidth = screenWidth - (gapWidth * 2);
-        secondaryWidth = 0;
-    }
-    else
-    {
-        masterWidth = (screenWidth / 2) - gapWidth - (gapWidth / 2) + workspace->masterOffset;
-        secondaryWidth = (screenWidth / 2) - gapWidth - (gapWidth / 2) - workspace->masterOffset;
-    }
-
-    int allHeight = screenHeight - barHeight - (gapWidth * 2);
-    int allY = barHeight + gapWidth;
-    int secondaryX = workspace->monitor->xOffset + masterWidth + (gapWidth * 2);
+    calcRects(workspace->monitor, workspace->masterOffset, numberOfClients, &mainRect, &secondaryRect); 
 
     Client *c  = workspace->clients;
     int numberOfClients2 = 0;
@@ -2427,11 +2517,11 @@ void deckLayout_apply_to_workspace(Workspace *workspace)
     {
       if(numberOfClients2 == 0)
       {
-          client_set_screen_coordinates(c, masterWidth, allHeight, masterX, allY);
+          client_set_screen_coordinates_from_rect(c, &mainRect);
       }
       else
       {
-          client_set_screen_coordinates(c, secondaryWidth, allHeight, secondaryX, allY);
+          client_set_screen_coordinates_from_rect(c, &secondaryRect);
       }
       if(numberOfClients2 == 0 || numberOfClients2 == 1)
       {
@@ -2445,6 +2535,16 @@ void deckLayout_apply_to_workspace(Workspace *workspace)
       numberOfClients2++;
       c = c->next;
     }
+}
+
+void horizontaldeckLayout_apply_to_workspace(Workspace *workspace)
+{
+    deckLayout_apply_to_workspace_base(workspace, horizontaldeckLayout_calcluate_rect);
+}
+
+void deckLayout_apply_to_workspace(Workspace *workspace)
+{
+    deckLayout_apply_to_workspace_base(workspace, verticaldeckLayout_calcluate_rect);
 }
 
 void deckLayout_select_next_window(Workspace *workspace)
@@ -4154,6 +4254,7 @@ void keybindings_register_defaults(void)
 
     keybinding_create_with_no_arg("swap_selected_monitor_to_monacle_layout", LAlt, VK_M, swap_selected_monitor_to_monacle_layout);
     keybinding_create_with_no_arg("swap_selected_monitor_to_deck_layout", LAlt, VK_D, swap_selected_monitor_to_deck_layout);
+    keybinding_create_with_no_arg("swap_selected_monitor_to_horizontaldeck_layout", LAlt, VK_H, swap_selected_monitor_to_horizontaldeck_layout);
     keybinding_create_with_no_arg("swap_selected_monitor_to_tile_layout", LAlt, VK_T, swap_selected_monitor_to_tile_layout);
     keybinding_create_with_no_arg("redraw_focused_window", LAlt, VK_R, redraw_focused_window);
 
