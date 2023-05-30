@@ -1596,24 +1596,25 @@ void client_stop_managing(void)
     Client *client = selectedMonitor->workspace->selected;
     if(client)
     {
+        HWND hwnd = client->data->hwnd;
+        int workspaceNumberOfClients = workspace_get_number_of_clients(client->workspace);
+        Workspace *workspace = client->workspace;
         workspace_remove_client(client->workspace, client);
         free_client(client);
-        int workspaceNumberOfClients = workspace_get_number_of_clients(client->workspace);
         HDWP hdwp = BeginDeferWindowPos(workspaceNumberOfClients + 1);
-        workspace_arrange_windows_with_defer_handle(client->workspace, hdwp);
 
-        DeferWindowPos(
-            hdwp,
-            client->data->hwnd,
-            HWND_NOTOPMOST,
+        workspace_arrange_windows(workspace);
+        workspace_focus_selected_window(workspace);
+        SetWindowPos(
+            hwnd,
+            HWND_TOP,
             selectedMonitor->xOffset + scratchWindowsScreenPadding,
             scratchWindowsScreenPadding,
             selectedMonitor->w - (scratchWindowsScreenPadding * 2),
             selectedMonitor->h - (scratchWindowsScreenPadding * 2),
             SWP_SHOWWINDOW);
 
-        EndDeferWindowPos(hdwp);
-        SetForegroundWindow(client->data->hwnd);
+        SetForegroundWindow(hwnd);
     }
 }
 
