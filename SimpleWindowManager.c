@@ -153,7 +153,8 @@ int numberOfBars;
 
 HFONT font;
 
-HPEN selectPen;
+HPEN borderForegroundPen;
+HPEN borderNotForegroundPen;
 HBRUSH barSelectedBackgroundBrush;
 HBRUSH backgroundBrush;
 HWND borderWindowHwnd;
@@ -218,7 +219,6 @@ Layout tileLayout = {
 
 Layout *headLayoutNode = &tileLayout;
 static CHAR *cmdLineExe = "C:\\Windows\\System32\\cmd.exe";
-static TCHAR *cmdLineExe2 = L"C:\\Windows\\System32\\cmd.exe";
 
 IWbemServices *services = NULL;
 
@@ -228,6 +228,7 @@ MenuView * mView;
 BOOL menuVisible;
 Command *commands[MAX_COMMANDS];
 int numberOfCommands = 0;
+BOOL isForegroundWindowManaged;
 
 enum WindowRoutingMode currentWindowRoutingMode;
 int scratchWindowsScreenPadding = 250;
@@ -1147,6 +1148,19 @@ void CALLBACK handle_windows_event(
                     focusHWNDToIgnore = NULL;
                 }
             }
+
+            isForegroundWindowManaged = FALSE;
+            if(selectedMonitor)
+            {
+                if(selectedMonitor->workspace->selected)
+                {
+                    if(selectedMonitor->workspace->selected->data->hwnd == hwnd)
+                    {
+                        isForegroundWindowManaged = TRUE;
+                    }
+                }
+            }
+            border_window_update();
         }
     }
 }
@@ -1597,15 +1611,15 @@ void client_stop_managing(void)
     if(client)
     {
         HWND hwnd = client->data->hwnd;
-        int workspaceNumberOfClients = workspace_get_number_of_clients(client->workspace);
         Workspace *workspace = client->workspace;
         workspace_remove_client(client->workspace, client);
         free_client(client);
-        HDWP hdwp = BeginDeferWindowPos(workspaceNumberOfClients + 1);
-
         workspace_arrange_windows(workspace);
         workspace_focus_selected_window(workspace);
-        SetWindowPos(
+
+        HDWP hdwp = BeginDeferWindowPos(1);
+        DeferWindowPos(
+            hdwp,
             hwnd,
             HWND_TOP,
             selectedMonitor->xOffset + scratchWindowsScreenPadding,
@@ -1613,6 +1627,7 @@ void client_stop_managing(void)
             selectedMonitor->w - (scratchWindowsScreenPadding * 2),
             selectedMonitor->h - (scratchWindowsScreenPadding * 2),
             SWP_SHOWWINDOW);
+        EndDeferWindowPos(hdwp);
 
         SetForegroundWindow(hwnd);
     }
@@ -3815,7 +3830,6 @@ void border_window_update(void)
         }
         else
         {
-            RedrawWindow(borderWindowHwnd, NULL, NULL, RDW_ERASE | RDW_INVALIDATE);
             SetWindowPos(
                 borderWindowHwnd,
                 HWND_BOTTOM,
@@ -3825,6 +3839,7 @@ void border_window_update(void)
                 0,
                 SWP_HIDEWINDOW);
         }
+        RedrawWindow(borderWindowHwnd, NULL, NULL, RDW_ERASE | RDW_INVALIDATE);
     }
 }
 
@@ -3834,9 +3849,14 @@ void border_window_paint(HWND hWnd)
     {
         PAINTSTRUCT ps;
         HDC hDC = BeginPaint(hWnd, &ps);
-        HPEN hpenOld = SelectObject(hDC, selectPen);
+        HPEN hpenOld;
         HBRUSH hbrushOld = (HBRUSH)(SelectObject(hDC, GetStockObject(NULL_BRUSH)));
-        SetDCPenColor(hDC, RGB(255, 0, 0));
+        SetDCPenColor(hDC, RGB(100, 0, 0));
+        if(isForegroundWindowManaged) {
+            hpenOld = SelectObject(hDC, borderForegroundPen);
+        } else {
+            hpenOld = SelectObject(hDC, borderNotForegroundPen);
+        }
 
         RECT rcWindow;
         GetClientRect(hWnd, &rcWindow);
@@ -4812,7 +4832,8 @@ int run (void)
 
     HINSTANCE moduleHandle = GetModuleHandle(NULL);
     g_main_tid = GetCurrentThreadId ();
-    selectPen = CreatePen(PS_SOLID, 6, RGB(250, 189, 47));
+    borderForegroundPen = CreatePen(PS_SOLID, 6, RGB(250, 189, 47));
+    borderNotForegroundPen = CreatePen(PS_SOLID, 6, RGB(142, 192, 124));
     barSelectedBackgroundBrush = CreateSolidBrush(barSelectedBackgroundColor);
     backgroundBrush = CreateSolidBrush(barBackgroundColor);
 
