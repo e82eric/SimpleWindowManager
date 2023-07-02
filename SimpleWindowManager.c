@@ -1149,17 +1149,6 @@ void CALLBACK handle_windows_event(
                 }
             }
 
-            isForegroundWindowManaged = FALSE;
-            if(selectedMonitor)
-            {
-                if(selectedMonitor->workspace->selected)
-                {
-                    if(selectedMonitor->workspace->selected->data->hwnd == hwnd)
-                    {
-                        isForegroundWindowManaged = TRUE;
-                    }
-                }
-            }
             border_window_update();
         }
     }
@@ -3799,6 +3788,15 @@ void border_window_update(void)
         if(selectedMonitor->workspace->selected)
         {
             ClientData *selectedClientData = selectedMonitor->workspace->selected->data;
+            HWND foregroundHwnd = GetForegroundWindow();
+            if(foregroundHwnd == selectedClientData->hwnd)
+            {
+                isForegroundWindowManaged = TRUE;
+            }
+            else
+            {
+                isForegroundWindowManaged = FALSE;
+            }
 
             RECT currentPosition;
             GetWindowRect(borderWindowHwnd, &currentPosition);
@@ -3839,7 +3837,7 @@ void border_window_update(void)
                 0,
                 SWP_HIDEWINDOW);
         }
-        RedrawWindow(borderWindowHwnd, NULL, NULL, RDW_ERASE | RDW_INVALIDATE);
+        RedrawWindow(borderWindowHwnd, NULL, NULL, RDW_INVALIDATE);
     }
 }
 
@@ -3852,7 +3850,7 @@ void border_window_paint(HWND hWnd)
         HPEN hpenOld;
         HBRUSH hbrushOld = (HBRUSH)(SelectObject(hDC, GetStockObject(NULL_BRUSH)));
         SetDCPenColor(hDC, RGB(100, 0, 0));
-        if(isForegroundWindowManaged) {
+        if(isForegroundWindowManaged || menuVisible) {
             hpenOld = SelectObject(hDC, borderForegroundPen);
         } else {
             hpenOld = SelectObject(hDC, borderNotForegroundPen);
