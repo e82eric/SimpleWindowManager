@@ -90,12 +90,15 @@ struct Configuration
     HFONT (*initalizeFontFunc) (void);
     long barHeight;
     long gapWidth;
+    int scratchWindowsScreenPadding;
     COLORREF barBackgroundColor;
     COLORREF barSelectedBackgroundColor;
     COLORREF buttonSelectedTextColor;
     COLORREF buttonWithWindowsTextColor;
     COLORREF buttonWithoutWindowsTextColor;
     COLORREF barTextColor;
+    HPEN borderForegroundPen;
+    HPEN borderNotForegroundPen;
     BarSegmentConfiguration **barSegments;
     int numberOfBarSegments;
     Monitor **monitors;

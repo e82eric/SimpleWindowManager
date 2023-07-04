@@ -49,7 +49,6 @@ struct LauncherProcess
     void (*onSuccess) (CHAR *stdOut);
 };
 
-DWORD g_main_tid = 0;
 HHOOK g_kb_hook = 0;
 
 HWINEVENTHOOK g_win_hook;
@@ -162,12 +161,13 @@ HWND borderWindowHwnd;
 //defualts maybe there is a better way to do this
 long barHeight = 29;
 long gapWidth = 13;
+int scratchWindowsScreenPadding = 250;
 COLORREF barBackgroundColor = 0x282828;
 COLORREF barSelectedBackgroundColor = RGB(84, 133, 36);
 COLORREF buttonSelectedTextColor = RGB(204, 36, 29);
 COLORREF buttonWithWindowsTextColor = RGB(255, 255, 247);
 COLORREF buttonWithoutWindowsTextColor = 0x504945;
-COLORREF barTextColor =RGB(235, 219, 178);
+COLORREF barTextColor = RGB(235, 219, 178);
 
 Layout deckLayout = {
     .select_next_window = deckLayout_select_next_window,
@@ -231,9 +231,7 @@ int numberOfCommands = 0;
 BOOL isForegroundWindowManaged;
 
 enum WindowRoutingMode currentWindowRoutingMode;
-int scratchWindowsScreenPadding = 250;
 
-DWORD scratchProcessId;
 Configuration *configuration;
 
 void run_command_from_menu(char *stdOut)
@@ -4792,8 +4790,12 @@ int run (void)
     configuration->workspaces = workspaces;
     configuration->windowRoutingMode = FilteredAndRoutedToWorkspace;
     configuration->alwaysRedraw = FALSE;
+    configuration->scratchWindowsScreenPadding = 0;
     configure(configuration);
     currentWindowRoutingMode = configuration->windowRoutingMode;
+
+    borderForegroundPen = CreatePen(PS_SOLID, 6, RGB(250, 189, 47));
+    borderNotForegroundPen = CreatePen(PS_SOLID, 6, RGB(142, 192, 124));
 
     if(configuration->barHeight)
     {
@@ -4827,11 +4829,20 @@ int run (void)
     {
         barTextColor = configuration->barTextColor;
     }
+    if(configuration->borderForegroundPen)
+    {
+        borderForegroundPen = configuration->borderForegroundPen;
+    }
+    if(configuration->borderNotForegroundPen)
+    {
+        borderNotForegroundPen = configuration->borderNotForegroundPen;
+    }
+    if(configuration->scratchWindowsScreenPadding != 0)
+    {
+        scratchWindowsScreenPadding = configuration->scratchWindowsScreenPadding;
+    }
 
     HINSTANCE moduleHandle = GetModuleHandle(NULL);
-    g_main_tid = GetCurrentThreadId ();
-    borderForegroundPen = CreatePen(PS_SOLID, 6, RGB(250, 189, 47));
-    borderNotForegroundPen = CreatePen(PS_SOLID, 6, RGB(142, 192, 124));
     barSelectedBackgroundBrush = CreateSolidBrush(barSelectedBackgroundColor);
     backgroundBrush = CreateSolidBrush(barBackgroundColor);
 
