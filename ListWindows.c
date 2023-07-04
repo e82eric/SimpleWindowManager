@@ -4,26 +4,26 @@
 #include <shlwapi.h>
 #include <strsafe.h>
 
-typedef struct Client Client;
-typedef struct Workspace Workspace;
-typedef struct ClientData ClientData;
+typedef struct ListWindowsClient ListWindowsClient;
+typedef struct ListWindowsWorkspace ListWindowsWorkspace;
+typedef struct ListWindowsClientData ListWindowsClientData;
 
 static const WCHAR UNICODE_BOM = 0xFEFF;
 
-struct Workspace
+struct ListWindowsWorkspace
 {
-    Client *clients;
-    Client *lastClient;
+    ListWindowsClient *clients;
+    ListWindowsClient *lastClient;
     size_t maxProcessNameLen;
 };
 
-struct Client
+struct ListWindowsClient
 {
-    ClientData *data;
-    Client *next;
+    ListWindowsClientData *data;
+    ListWindowsClient *next;
 };
 
-struct ClientData
+struct ListWindowsClientData
 {
     HWND hwnd;
     DWORD processId;
@@ -89,7 +89,7 @@ BOOL is_root_window(HWND hwnd, LONG styles, LONG exStyles)
     return TRUE;
 }
 
-Client* clientFactory_create_from_hwnd(HWND hwnd)
+ListWindowsClient* clientFactory_create_from_hwnd(HWND hwnd)
 {
     DWORD processId = 0;
     GetWindowThreadProcessId(hwnd, &processId);
@@ -127,7 +127,7 @@ Client* clientFactory_create_from_hwnd(HWND hwnd)
     BOOL isMinimized = IsIconic(hwnd);
 
     LPCSTR processShortFileName = PathFindFileNameA(processImageFileName);
-    ClientData *clientData = calloc(1, sizeof(ClientData));
+    ListWindowsClientData *clientData = calloc(1, sizeof(ListWindowsClientData));
     clientData->hwnd = hwnd;
     clientData->processId = processId;
     clientData->className = _strdup(className);
@@ -135,14 +135,14 @@ Client* clientFactory_create_from_hwnd(HWND hwnd)
     clientData->title = _strdup(title);
     clientData->isMinimized = isMinimized;
 
-    Client *c;
-    c = calloc(1, sizeof(Client));
+    ListWindowsClient *c;
+    c = calloc(1, sizeof(ListWindowsClient));
     c->data = clientData;
 
     return c;
 }
 
-static void client_free(Client *self)
+static void client_free(ListWindowsClient *self)
 {
     free(self->data->title);
     free(self->data->processName);
@@ -159,7 +159,7 @@ static BOOL CALLBACK enum_windows_callback(HWND hwnd, LPARAM lparam)
         return TRUE;
     }
 
-    Workspace *workspace = (Workspace*)lparam;
+    ListWindowsWorkspace *workspace = (ListWindowsWorkspace*)lparam;
 
     LONG styles = GetWindowLong(hwnd, GWL_STYLE);
     LONG exStyles = GetWindowLong(hwnd, GWL_EXSTYLE);
@@ -174,7 +174,7 @@ static BOOL CALLBACK enum_windows_callback(HWND hwnd, LPARAM lparam)
         return TRUE;
     }
 
-    Client *client = clientFactory_create_from_hwnd(hwnd);
+    ListWindowsClient *client = clientFactory_create_from_hwnd(hwnd);
 
     if(strstr(client->data->className, "Progman"))
     {
@@ -208,7 +208,7 @@ static BOOL CALLBACK enum_windows_callback(HWND hwnd, LPARAM lparam)
 
 int list_windows_run(int maxItems, CHAR** toFill)
 {
-    Workspace *workspace = calloc(1, sizeof(Workspace));
+    ListWindowsWorkspace *workspace = calloc(1, sizeof(ListWindowsWorkspace));
     EnumWindows(enum_windows_callback, (LPARAM)workspace);
 
     size_t cchStringSize;
@@ -223,7 +223,7 @@ int list_windows_run(int maxItems, CHAR** toFill)
             "%-*s %-*s %-*s %s\n", 8, "HWND", 8, "PID", (int)workspace->maxProcessNameLen, "Name", "Title");
     toFill[0] = _strdup(header);
 
-    Client *c = workspace->clients;
+    ListWindowsClient *c = workspace->clients;
 
     int numberOfResults = 1;
     CHAR lineBuf[1024];
@@ -239,7 +239,7 @@ int list_windows_run(int maxItems, CHAR** toFill)
                 c->data->hwnd, c->data->processId, (int)workspace->maxProcessNameLen, c->data->processName, c->data->title);
 
         toFill[numberOfResults] = _strdup(lineBuf);
-        Client *cPrev = c;
+        ListWindowsClient *cPrev = c;
         c = c->next;
 
         client_free(cPrev);
