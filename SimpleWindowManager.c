@@ -104,7 +104,7 @@ static void scratch_window_show(ScratchWindow *self);
 static void scratch_window_hide(ScratchWindow *self);
 static Client* workspace_find_client_by_hwnd(Workspace *workspace, HWND hwnd);
 static Client* clientFactory_create_from_hwnd(HWND hwnd);
-static void client_move_to_location_on_screen(Client *client, HDWP hdwp);
+static void client_move_to_location_on_screen(Client *client, HDWP hdwp, BOOL setZOrder);
 static void client_move_from_unminimized_to_minimized(Client *client);
 static void client_move_from_minimized_to_unminimized(Client *client);
 static void client_set_screen_coordinates(Client *client, int w, int h, int x, int y);
@@ -137,7 +137,6 @@ static INetworkListManager *networkListManager;
 static Monitor *selectedMonitor = NULL;
 static Monitor *hiddenWindowMonitor = NULL;
 
-HWND focusHWNDToIgnore = NULL;
 int numberOfWorkspaces;
 static Workspace **workspaces;
 
@@ -1100,7 +1099,7 @@ void CALLBACK handle_windows_event(
                         }
 
                         HDWP hdwp = BeginDeferWindowPos(1);
-                        client_move_to_location_on_screen(client, hdwp);
+                        client_move_to_location_on_screen(client, hdwp, FALSE);
                         EndDeferWindowPos(hdwp);
                     }
                 }
@@ -1113,9 +1112,8 @@ void CALLBACK handle_windows_event(
                     {
                         if(!selectedMonitor->scratchWindow->client->data->isMinimized)
                         {
-
                             HDWP hdwp = BeginDeferWindowPos(1);
-                            client_move_to_location_on_screen(selectedMonitor->scratchWindow->client, hdwp);
+                            client_move_to_location_on_screen(selectedMonitor->scratchWindow->client, hdwp, TRUE);
                             EndDeferWindowPos(hdwp);
                         }
                         return;
@@ -1135,15 +1133,11 @@ void CALLBACK handle_windows_event(
                 Client* client = windowManager_find_client_in_workspaces_by_hwnd(hwnd);
                 if(client)
                 {
-                    if(focusHWNDToIgnore == hwnd)
-                    {
-                    }
-                    else if(selectedMonitor->workspace->selected != client)
+                    if(selectedMonitor->workspace->selected != client)
                     {
                         client->workspace->selected = client;
                         monitor_select(client->workspace->monitor);
                     }
-                    focusHWNDToIgnore = NULL;
                 }
             }
 
@@ -1516,7 +1510,7 @@ void client_move_from_unminimized_to_minimized(Client *client)
     }
 }
 
-void client_move_to_location_on_screen(Client *client, HDWP hdwp)
+void client_move_to_location_on_screen(Client *client, HDWP hdwp, BOOL setZOrder)
 {
     RECT wrect;
     RECT xrect;
@@ -1566,6 +1560,10 @@ void client_move_to_location_on_screen(Client *client, HDWP hdwp)
         if(!configuration->alwaysRedraw)
         {
             flags = SWP_NOREDRAW;
+        }
+        if(!setZOrder)
+        {
+            flags |= SWP_NOZORDER;
         }
         DeferWindowPos(
             hdwp,
@@ -1618,9 +1616,7 @@ void client_stop_managing(void)
         workspace_arrange_windows(workspace);
         workspace_focus_selected_window(workspace);
 
-        HDWP hdwp = BeginDeferWindowPos(1);
-        DeferWindowPos(
-            hdwp,
+        SetWindowPos(
             hwnd,
             HWND_TOP,
             selectedMonitor->xOffset + scratchWindowsScreenPadding,
@@ -1628,7 +1624,6 @@ void client_stop_managing(void)
             selectedMonitor->w - (scratchWindowsScreenPadding * 2),
             selectedMonitor->h - (scratchWindowsScreenPadding * 2),
             SWP_SHOWWINDOW);
-        EndDeferWindowPos(hdwp);
 
         SetForegroundWindow(hwnd);
     }
@@ -1840,7 +1835,7 @@ void workspace_arrange_clients(Workspace *workspace, HDWP hdwp)
     c = lastClient;
     while(c)
     {
-        client_move_to_location_on_screen(c, hdwp);
+        client_move_to_location_on_screen(c, hdwp, TRUE);
         c = c->previous;
     }
 }
@@ -2043,7 +2038,6 @@ void workspace_focus_selected_window(Workspace *workspace)
         HWND focusedHwnd = GetForegroundWindow();
         if(workspace->selected->data->hwnd != focusedHwnd)
         {
-            focusHWNDToIgnore = focusedHwnd;
             SetForegroundWindow(workspace->selected->data->hwnd);
         }
     }
