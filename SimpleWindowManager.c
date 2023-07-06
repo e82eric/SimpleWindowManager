@@ -1147,6 +1147,20 @@ void CALLBACK handle_windows_event(
                 }
             }
 
+            if(selectedMonitor)
+            {
+                if(selectedMonitor->workspace->selected)
+                {
+                    if(selectedMonitor->workspace->selected->data->hwnd != hwnd && !selectedMonitor->scratchWindow && !menuVisible)
+                    {
+                        isForegroundWindowManaged = FALSE;
+                    }
+                    else
+                    {
+                        isForegroundWindowManaged = TRUE;
+                    }
+                }
+            }
             border_window_update();
         }
     }
@@ -3783,7 +3797,11 @@ void border_window_update(void)
 {
     if(selectedMonitor)
     {
-        if(selectedMonitor->workspace->selected)
+        if(selectedMonitor->scratchWindow)
+        {
+            InvalidateRect(borderWindowHwnd, NULL, FALSE);
+        }
+        else if(selectedMonitor->workspace->selected)
         {
             ClientData *selectedClientData = selectedMonitor->workspace->selected->data;
             HWND foregroundHwnd = GetForegroundWindow();
@@ -3823,6 +3841,7 @@ void border_window_update(void)
                 targetRight,
                 targetBottom,
                 positionFlags);
+            InvalidateRect(borderWindowHwnd, NULL, FALSE);
         }
         else
         {
@@ -3834,8 +3853,8 @@ void border_window_update(void)
                 0,
                 0,
                 SWP_HIDEWINDOW);
+            RedrawWindow(borderWindowHwnd, NULL, NULL, RDW_ERASE | RDW_INVALIDATE);
         }
-        RedrawWindow(borderWindowHwnd, NULL, NULL, RDW_INVALIDATE);
     }
 }
 
