@@ -2040,6 +2040,7 @@ void workspace_focus_selected_window(Workspace *workspace)
         {
             SetForegroundWindow(workspace->selected->data->hwnd);
         }
+        isForegroundWindowManaged = TRUE;
     }
     if(workspace->monitor->bar)
     {
@@ -3798,15 +3799,6 @@ void border_window_update(void)
         else if(selectedMonitor->workspace->selected)
         {
             ClientData *selectedClientData = selectedMonitor->workspace->selected->data;
-            HWND foregroundHwnd = GetForegroundWindow();
-            if(foregroundHwnd == selectedClientData->hwnd)
-            {
-                isForegroundWindowManaged = TRUE;
-            }
-            else
-            {
-                isForegroundWindowManaged = FALSE;
-            }
 
             RECT currentPosition;
             GetWindowRect(borderWindowHwnd, &currentPosition);
