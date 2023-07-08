@@ -227,7 +227,8 @@ MenuView * mView;
 BOOL menuVisible;
 Command *commands[MAX_COMMANDS];
 int numberOfCommands = 0;
-BOOL isForegroundWindowManaged;
+BOOL isForegroundWindowSameAsSelectMonitorSelected;
+HWND eventForegroundHwnd;
 
 enum WindowRoutingMode currentWindowRoutingMode;
 
@@ -1147,15 +1148,17 @@ void CALLBACK handle_windows_event(
                 {
                     if(selectedMonitor->workspace->selected->data->hwnd != hwnd && !selectedMonitor->scratchWindow && !menuVisible)
                     {
-                        isForegroundWindowManaged = FALSE;
+                        isForegroundWindowSameAsSelectMonitorSelected = FALSE;
                     }
                     else
                     {
-                        isForegroundWindowManaged = TRUE;
+                        isForegroundWindowSameAsSelectMonitorSelected = TRUE;
                     }
                 }
             }
+            eventForegroundHwnd = hwnd;
             border_window_update();
+            bar_trigger_selected_window_paint(selectedMonitor->bar);
         }
     }
 }
@@ -2040,7 +2043,7 @@ void workspace_focus_selected_window(Workspace *workspace)
         {
             SetForegroundWindow(workspace->selected->data->hwnd);
         }
-        isForegroundWindowManaged = TRUE;
+        isForegroundWindowSameAsSelectMonitorSelected = TRUE;
     }
     if(workspace->monitor->bar)
     {
@@ -3186,9 +3189,26 @@ void bar_render_selected_window_description(Bar *bar, HDC hdc)
             break;
     }
 
-    HWND foregroundHwnd = GetForegroundWindow();
+    HWND foregroundHwnd = eventForegroundHwnd;
     Client* focusedClient = windowManager_find_client_in_workspaces_by_hwnd(foregroundHwnd);
     Client* clientToRender;
+
+    TCHAR *isManagedIndicator = L"UNKNOWN";
+    if(focusedClient)
+    {
+        if(isForegroundWindowSameAsSelectMonitorSelected)
+        {
+            isManagedIndicator = L"M";
+        }
+        else
+        {
+            isManagedIndicator = L"M*";
+        }
+    }
+    else
+    {
+        isManagedIndicator = L"U";
+    }
 
     if(!focusedClient)
     {
@@ -3206,10 +3226,11 @@ void bar_render_selected_window_description(Bar *bar, HDC hdc)
         int numberOfWorkspaceClients = workspace_get_number_of_clients(bar->monitor->workspace);
         LPCWSTR processShortFileName = PathFindFileName(clientToRender->data->processImageName);
 
-        displayStrLen = swprintf(displayStr, MAX_PATH, L"[%ls:%d] : %ls (%d) (IsAdmin: %d) (Mode: %ls)",
+        displayStrLen = swprintf(displayStr, MAX_PATH, L"[%ls:%d] : %ls (%ls) (%d) (IsAdmin: %d) (Mode: %ls)",
             bar->monitor->workspace->layout->tag,
             numberOfWorkspaceClients,
             processShortFileName,
+            isManagedIndicator,
             clientToRender->data->processId,
             clientToRender->data->isElevated,
             windowRoutingMode);
@@ -3853,7 +3874,7 @@ void border_window_paint(HWND hWnd)
         HPEN hpenOld;
         HBRUSH hbrushOld = (HBRUSH)(SelectObject(hDC, GetStockObject(NULL_BRUSH)));
         SetDCPenColor(hDC, RGB(100, 0, 0));
-        if(isForegroundWindowManaged || menuVisible) {
+        if(isForegroundWindowSameAsSelectMonitorSelected || menuVisible) {
             hpenOld = SelectObject(hDC, borderForegroundPen);
         } else {
             hpenOld = SelectObject(hDC, borderNotForegroundPen);
