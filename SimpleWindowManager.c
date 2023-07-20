@@ -3813,7 +3813,7 @@ void border_window_update(void)
 {
     if(selectedMonitor)
     {
-        if(selectedMonitor->scratchWindow)
+        if(selectedMonitor->scratchWindow || menuVisible)
         {
             InvalidateRect(borderWindowHwnd, NULL, FALSE);
         }
