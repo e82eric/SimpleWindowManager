@@ -388,13 +388,15 @@ void move_workspace_to_secondary_monitor_without_focus(Workspace *workspace)
 
 void move_focused_window_to_master(void)
 {
-    HWND focusedHwnd = GetForegroundWindow();
-    Client *client = windowManager_find_client_in_workspaces_by_hwnd(focusedHwnd);
-    if(client)
+    if(selectedMonitor->workspace)
     {
-        client->workspace->layout->move_client_to_master(client);
-        workspace_arrange_windows(client->workspace);
-        workspace_focus_selected_window(client->workspace);
+        Client *client = selectedMonitor->workspace->selected;
+        if(client)
+        {
+            client->workspace->layout->move_client_to_master(client);
+            workspace_arrange_windows(client->workspace);
+            workspace_focus_selected_window(client->workspace);
+        }
     }
 }
 
