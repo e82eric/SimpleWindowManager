@@ -702,7 +702,13 @@ void quit(void)
 
 BOOL is_float_window(Client *client, LONG_PTR styles, LONG_PTR exStyles)
 {
-    UNREFERENCED_PARAMETER(client);
+    if(configuration->isFloatWindowFunc)
+    {
+        if(configuration->isFloatWindowFunc(client, styles, exStyles))
+        {
+            return TRUE;
+        }
+    }
 
     if(exStyles & WS_EX_APPWINDOW)
     {
@@ -744,14 +750,6 @@ static BOOL CALLBACK enum_windows_callback(HWND hwnd, LPARAM lparam)
         }
         scratch_window_add(scratchWindow);
         return TRUE;
-    }
-
-    if(configuration->isFloatWindowFunc)
-    {
-        if(configuration->isFloatWindowFunc(client, styles, exStyles))
-        {
-            return TRUE;
-        }
     }
 
     if(is_float_window(client, styles, exStyles))
