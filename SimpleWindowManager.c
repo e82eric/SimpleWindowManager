@@ -710,6 +710,16 @@ BOOL is_float_window(Client *client, LONG_PTR styles, LONG_PTR exStyles)
         }
     }
 
+    RECT rect;
+    if(GetWindowRect(client->data->hwnd, &rect))
+    {
+        int height = rect.bottom - rect.top;
+        if(height < configuration->nonFloatWindowHeightMinimum)
+        {
+            return TRUE;
+        }
+    }
+
     if(exStyles & WS_EX_APPWINDOW)
     {
         return FALSE;
@@ -2906,7 +2916,6 @@ void menu_hide(void)
 {
     menuVisible = FALSE;
     ShowWindow(mView->hwnd, SW_HIDE);
-
     HWND foregroundHwnd = GetForegroundWindow();
     if((foregroundHwnd == mView->hwnd || foregroundHwnd == borderWindowHwnd) && selectedMonitor->workspace)
     {
@@ -2916,6 +2925,7 @@ void menu_hide(void)
     {
         border_window_update();
     }
+
     bar_trigger_selected_window_paint(selectedMonitor->bar);
 }
 
@@ -4827,6 +4837,7 @@ int run (void)
     configuration->windowRoutingMode = FilteredAndRoutedToWorkspace;
     configuration->alwaysRedraw = FALSE;
     configuration->scratchWindowsScreenPadding = 0;
+    configuration->nonFloatWindowHeightMinimum = 500;
     configure(configuration);
     currentWindowRoutingMode = configuration->windowRoutingMode;
 
