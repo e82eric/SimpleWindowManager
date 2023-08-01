@@ -466,14 +466,7 @@ void swap_selected_monitor_to(Workspace *workspace)
 void close_focused_window(void)
 {
     HWND foregroundHwnd = GetForegroundWindow();
-    Client* existingClient = windowManager_find_client_in_workspaces_by_hwnd(foregroundHwnd);
     SendMessage(foregroundHwnd, WM_CLOSE, (WPARAM)NULL, (LPARAM)NULL);
-    CloseHandle(foregroundHwnd);
-
-    if(existingClient)
-    {
-        workspace_remove_client_and_arrange(existingClient->workspace, existingClient);
-    }
 }
 
 void float_window_move_up(HWND hwnd)
@@ -525,14 +518,9 @@ void kill_focused_window(void)
     HWND foregroundHwnd = GetForegroundWindow();
     DWORD processId = 0;
     GetWindowThreadProcessId(foregroundHwnd, &processId);
-    Client* existingClient = windowManager_find_client_in_workspaces_by_hwnd(foregroundHwnd);
     HANDLE processHandle = OpenProcess(PROCESS_TERMINATE, FALSE, processId);
     TerminateProcess(processHandle, 1);
     CloseHandle(processHandle);
-    if(existingClient)
-    {
-        workspace_remove_client_and_arrange(existingClient->workspace, existingClient);
-    }
 }
 
 void redraw_focused_window(void)
