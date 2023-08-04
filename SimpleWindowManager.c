@@ -5107,6 +5107,14 @@ int run (void)
         WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
 
     g_win_hook = SetWinEventHook(
+        EVENT_OBJECT_HIDE, EVENT_OBJECT_HIDE,
+        NULL,
+        handle_windows_event,
+        0,
+        0,
+        WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
+
+    g_win_hook = SetWinEventHook(
         EVENT_SYSTEM_MOVESIZEEND, EVENT_SYSTEM_MOVESIZEEND,
         NULL,
         handle_windows_event,
