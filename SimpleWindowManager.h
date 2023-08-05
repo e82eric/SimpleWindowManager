@@ -106,6 +106,7 @@ struct Configuration
     enum WindowRoutingMode windowRoutingMode;
     BOOL alwaysRedraw;
     int nonFloatWindowHeightMinimum;
+    BOOL floatUwpWindows;
 };
 
 struct WorkspaceFilterData
