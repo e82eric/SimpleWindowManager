@@ -106,8 +106,6 @@ void configure(Configuration *configuration)
 
     workspace_register(L"Desktop", L"0", &deckLayout);
 
-    register_default_scratch_windows();
-
     ScratchWindow *vifmScratch = register_scratch_terminal_with_unique_string(
             "VIFM",
             "cmd /c vifm",
@@ -124,66 +122,27 @@ void configure(Configuration *configuration)
             L"643763f5-f5cd-416e-a5c9-bef1f516863c");
     keybinding_create_with_scratchwindow_arg("NvimPowershellScratchWindow", modifiers, VK_F13, nPowershellScratch);
 
-    MenuDefinition *listWindowsMenu = menu_create_and_register();
-    listWindowsMenu->hasHeader = TRUE;
-    menu_definition_set_load_action(listWindowsMenu, list_windows_run);
-    listWindowsMenu->onSelection = open_windows_scratch_exit_callback;
-    keybinding_create_with_menu_arg("ListWindowsMenu", modifiers, VK_SPACE, menu_run, listWindowsMenu);
+    register_list_windows_memu(modifiers, VK_SPACE);
+    register_list_services_menu(modifiers, VK_F14);
+    register_list_processes_menu(modifiers, VK_F15);
+    register_keybindings_menu_with_modifiers(modifiers, VK_F17);
 
-    MenuDefinition *listServicesMenu = menu_create_and_register();
-    listServicesMenu->hasHeader = TRUE;
-    menu_definition_set_load_action(listServicesMenu, list_services_run_no_sort);
-    NamedCommand *serviceStartCommand = MenuDefinition_AddNamedCommand(listServicesMenu, "start:sc start \"\"{}\"\"", TRUE, FALSE);
-    NamedCommand *serviceStopCommand = MenuDefinition_AddNamedCommand(listServicesMenu, "stop:sc stop \"\"{}\"\"", TRUE, FALSE);
-    NamedCommand_SetTextRange(serviceStartCommand, 0, 45, TRUE);
-    NamedCommand_SetTextRange(serviceStopCommand, 0, 45, TRUE);
-    MenuDefinition_ParseAndAddKeyBinding(listServicesMenu, "ctl-s:start", FALSE);
-    MenuDefinition_ParseAndAddKeyBinding(listServicesMenu, "ctl-x:stop", FALSE);
-    keybinding_create_with_menu_arg("ListServicesMenu", modifiers, VK_F14, menu_run, listServicesMenu);
+    char* notElevatedDirectories[] = {
+        "%USERPROFILE%\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\",
+        "C:\\ProgramData\\Microsoft\\Windows\\Start Menu\\",
+        "%USERPROFILE%\\AppData\\Local\\Microsoft\\WindowsApps\\",
+        "%USERPROFILE%\\Utilites\\"
+    };
+    register_program_launcher_menu(modifiers, VK_P, notElevatedDirectories, 4, FALSE);
 
-    MenuDefinition *programLauncher = menu_create_and_register();
-    MenuDefinition_AddNamedCommand(programLauncher, "ld:cmd /c fd -t f -g \"*{.lnk,.exe}\" \
-            \"%USERPROFILE%\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\" \
-            \"C:\\ProgramData\\Microsoft\\Windows\\Start Menu\" \
-            \"%USERPROFILE%\\AppData\\Local\\Microsoft\\WindowsApps\" \
-            \"C:\\Program Files\\sysinternals\" \
-            \"%USERPROFILE%\\Utilites\"",
-            FALSE,
-            FALSE);
-    MenuDefinition_ParseAndAddLoadCommand(programLauncher, "ld");
-    programLauncher->onSelection = open_program_scratch_callback;
-    keybinding_create_with_menu_arg("ProgramLauncherNotElevatedMenu", modifiers, VK_P, menu_run, programLauncher);
-
-    MenuDefinition *programLauncherNotElevatedMenu = menu_create_and_register();
-    MenuDefinition_AddNamedCommand(programLauncherNotElevatedMenu, "ld:cmd /c fd -t f -g \"*{.lnk,.exe}\" \
-            \"%USERPROFILE%\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\" \
-            \"C:\\ProgramData\\Microsoft\\Windows\\Start Menu\" \
-            \"%USERPROFILE%\\AppData\\Local\\Microsoft\\WindowsApps\" \
-            \"%USERPROFILE%\\Utilites\"",
-            FALSE,
-            FALSE);
-    MenuDefinition_ParseAndAddLoadCommand(programLauncherNotElevatedMenu, "ld");
-    programLauncherNotElevatedMenu->onSelection = open_program_scratch_callback_not_elevated;
-    keybinding_create_with_menu_arg("ProgramLauncherNotElevatedMenu", modifiers, VK_P, menu_run, programLauncherNotElevatedMenu);
-
-    MenuDefinition *listProcessMenu = menu_create_and_register();
-    menu_definition_set_load_action(listProcessMenu, list_processes_run_no_sort);
-    NamedCommand *killProcessCommand = MenuDefinition_AddNamedCommand(listProcessMenu, "procKill:cmd /c taskkill /f /pid {}", TRUE, FALSE);
-    NamedCommand_SetTextRange(killProcessCommand, 76, 8, TRUE);
-    NamedCommand *windbgCommand = MenuDefinition_AddNamedCommand(listProcessMenu, "windbg:windbgx -p {}", FALSE, TRUE);
-    NamedCommand_SetTextRange(windbgCommand, 76, 8, TRUE);
-    NamedCommand *procDumpNamedCommand = MenuDefinition_AddNamedCommand(listProcessMenu, "procdump:cmd /c procdump -accepteula -ma {} %USERPROFILE%\\memory_dumps", FALSE, FALSE);
-    NamedCommand_SetTextRange(procDumpNamedCommand, 76, 8, TRUE);
-    MenuDefinition_AddLoadActionKeyBinding(listProcessMenu, VK_CONTROL, VK_1, list_processes_run_sorted_by_private_bytes, "Sort Pvt Bytes");
-    MenuDefinition_AddLoadActionKeyBinding(listProcessMenu, VK_CONTROL, VK_2, list_processes_run_sorted_by_working_set, "Sort Wrk Set");
-    MenuDefinition_AddLoadActionKeyBinding(listProcessMenu, VK_CONTROL, VK_3, list_processes_run_sorted_by_cpu, "Sort Cpu");
-    MenuDefinition_AddLoadActionKeyBinding(listProcessMenu, VK_CONTROL, VK_4, list_processes_run_sorted_by_pid, "Sort Pid");
-    MenuDefinition_ParseAndSetRange(listProcessMenu, "76,8");
-    MenuDefinition_ParseAndAddKeyBinding(listProcessMenu, "ctl-k:procKill", FALSE);
-    MenuDefinition_ParseAndAddKeyBinding(listProcessMenu, "ctl-d:windbg", FALSE);
-    MenuDefinition_ParseAndAddKeyBinding(listProcessMenu, "ctl-x:procdump", FALSE);
-    listProcessMenu->hasHeader = TRUE;
-    keybinding_create_with_menu_arg("ProcessListMenu", modifiers, VK_F15, menu_run, listProcessMenu);
+    char* elevatedDirectories[] = {
+        "%USERPROFILE%\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\",
+        "C:\\ProgramData\\Microsoft\\Windows\\Start Menu\\",
+        "%USERPROFILE%\\AppData\\Local\\Microsoft\\WindowsApps\\",
+        "C:\\Program Files\\sysinternals\\",
+        "%USERPROFILE%\\Utilites\\"
+    };
+    register_program_launcher_menu(modifiers | LShift, VK_P, elevatedDirectories, 5, TRUE);
 
     searchDriveMenuDefinition = menu_create_and_register();
     MenuDefinition *searchAllDrivesMenu = menu_create_and_register();

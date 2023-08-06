@@ -25,6 +25,9 @@
 
 #include "fzf\\fzf.h"
 #include "SMenu.h"
+#include "ListProcesses.h"
+#include "ListWindows.h"
+#include "ListServices.h"
 #include "SimpleWindowManager.h"
 
 #define MAX_WORKSPACES 10
@@ -336,13 +339,99 @@ int commands_list(int maxItems, CHAR **lines)
     return numberOfBindings;
 }
 
-void register_default_scratch_windows(void)
+void register_keybindings_menu_with_modifiers(int modifiers, int virtualKey)
 {
     MenuDefinition *definition = menu_create_and_register();
     definition->itemsAction = commands_list;
     definition->hasHeader = TRUE;
     definition->onSelection = run_command_from_menu;
-    keybinding_create_with_menu_arg("ListKeyBindings", LAlt, VK_X, menu_run, definition);
+    keybinding_create_with_menu_arg("ListKeyBindings", modifiers, virtualKey, menu_run, definition);
+}
+
+void register_keybindings_menu(void)
+{
+    register_keybindings_menu_with_modifiers(LAlt, VK_OEM_2);
+}
+
+void register_list_processes_menu(int modifiers, int virtualKey)
+{
+    MenuDefinition *listProcessMenu = menu_create_and_register();
+    menu_definition_set_load_action(listProcessMenu, list_processes_run_no_sort);
+    NamedCommand *killProcessCommand = MenuDefinition_AddNamedCommand(listProcessMenu, "procKill:cmd /c taskkill /f /pid {}", TRUE, FALSE);
+    NamedCommand_SetTextRange(killProcessCommand, 76, 8, TRUE);
+    NamedCommand *windbgCommand = MenuDefinition_AddNamedCommand(listProcessMenu, "windbg:windbgx -p {}", FALSE, TRUE);
+    NamedCommand_SetTextRange(windbgCommand, 76, 8, TRUE);
+    NamedCommand *procDumpNamedCommand = MenuDefinition_AddNamedCommand(listProcessMenu, "procdump:cmd /c procdump -accepteula -ma {} %USERPROFILE%\\memory_dumps", FALSE, FALSE);
+    NamedCommand_SetTextRange(procDumpNamedCommand, 76, 8, TRUE);
+    MenuDefinition_AddLoadActionKeyBinding(listProcessMenu, VK_CONTROL, VK_1, list_processes_run_sorted_by_private_bytes, "Sort Pvt Bytes");
+    MenuDefinition_AddLoadActionKeyBinding(listProcessMenu, VK_CONTROL, VK_2, list_processes_run_sorted_by_working_set, "Sort Wrk Set");
+    MenuDefinition_AddLoadActionKeyBinding(listProcessMenu, VK_CONTROL, VK_3, list_processes_run_sorted_by_cpu, "Sort Cpu");
+    MenuDefinition_AddLoadActionKeyBinding(listProcessMenu, VK_CONTROL, VK_4, list_processes_run_sorted_by_pid, "Sort Pid");
+    MenuDefinition_ParseAndSetRange(listProcessMenu, "76,8");
+    MenuDefinition_ParseAndAddKeyBinding(listProcessMenu, "ctl-k:procKill", FALSE);
+    MenuDefinition_ParseAndAddKeyBinding(listProcessMenu, "ctl-d:windbg", FALSE);
+    MenuDefinition_ParseAndAddKeyBinding(listProcessMenu, "ctl-x:procdump", FALSE);
+    listProcessMenu->hasHeader = TRUE;
+    keybinding_create_with_menu_arg("ProcessListMenu", modifiers, virtualKey, menu_run, listProcessMenu);
+}
+
+void register_list_windows_memu(int modifiers, int virtualKey)
+{
+    MenuDefinition *listWindowsMenu = menu_create_and_register();
+    listWindowsMenu->hasHeader = TRUE;
+    menu_definition_set_load_action(listWindowsMenu, list_windows_run);
+    listWindowsMenu->onSelection = open_windows_scratch_exit_callback;
+    keybinding_create_with_menu_arg("ListWindowsMenu", modifiers, virtualKey, menu_run, listWindowsMenu);
+}
+
+void register_list_services_menu(int modifiers, int virtualKey)
+{
+    MenuDefinition *listServicesMenu = menu_create_and_register();
+    listServicesMenu->hasHeader = TRUE;
+    menu_definition_set_load_action(listServicesMenu, list_services_run_no_sort);
+    NamedCommand *serviceStartCommand = MenuDefinition_AddNamedCommand(listServicesMenu, "start:sc start \"\"{}\"\"", TRUE, FALSE);
+    NamedCommand *serviceStopCommand = MenuDefinition_AddNamedCommand(listServicesMenu, "stop:sc stop \"\"{}\"\"", TRUE, FALSE);
+    NamedCommand_SetTextRange(serviceStartCommand, 0, 45, TRUE);
+    NamedCommand_SetTextRange(serviceStopCommand, 0, 45, TRUE);
+    MenuDefinition_ParseAndAddKeyBinding(listServicesMenu, "ctl-s:start", FALSE);
+    MenuDefinition_ParseAndAddKeyBinding(listServicesMenu, "ctl-x:stop", FALSE);
+    keybinding_create_with_menu_arg("ListServicesMenu", modifiers, virtualKey, menu_run, listServicesMenu);
+}
+
+void build_list_directories_cmd(char* buffer, size_t bufferSize, char* strings[], size_t numStrings)
+{
+    buffer[0] = '\0';
+
+    strcat_s(buffer, bufferSize, "ld:cmd /c dir /s /b");
+    strcat_s(buffer, bufferSize, " ");
+
+    for (size_t i = 0; i < numStrings; i++) {
+        strcat_s(buffer, bufferSize, "\"");
+        strcat_s(buffer, bufferSize, strings[i]);
+        strcat_s(buffer, bufferSize, "\" ");
+    }
+    strcat_s(buffer, bufferSize, " | findstr /i \"\\.lnk$ \\.exe$\"");
+}
+
+void register_program_launcher_menu(int modifiers, int virtualKey, CHAR** directories, size_t numberOfDirectories, BOOL isElevated)
+{
+    CHAR cmdBuf[4096];
+
+    build_list_directories_cmd(cmdBuf, 4096, directories, numberOfDirectories);
+
+    MenuDefinition *programLauncher = menu_create_and_register();
+    MenuDefinition_AddNamedCommand(programLauncher, cmdBuf, FALSE, FALSE);
+    MenuDefinition_ParseAndAddLoadCommand(programLauncher, "ld");
+    if(isElevated)
+    {
+        programLauncher->onSelection = open_program_scratch_callback;
+        keybinding_create_with_menu_arg("ProgramLauncherMenu", modifiers, virtualKey, menu_run, programLauncher);
+    }
+    else
+    {
+        programLauncher->onSelection = open_program_scratch_callback_not_elevated;
+        keybinding_create_with_menu_arg("ProgramLauncherNotElevatedMenu", modifiers, virtualKey, menu_run, programLauncher);
+    }
 }
 
 void mimimize_focused_window(void)
