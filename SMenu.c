@@ -1993,7 +1993,7 @@ MenuDefinition* menu_definition_create(MenuView *menuView)
     NamedCommand *selectCommand = MenuDefinition_AddAction2NamedCommand(result, "select", menuView->itemsView, ItemsView_HandleSelection, FALSE, FALSE);
     MenuDefinition_AddKeyBindingToNamedCommand(result, selectCommand, 0, VK_RETURN, FALSE);
 
-    MenuDefinition_AddNamedCommand(result, "copytoclipboard:cmd /c echo {} | clip", FALSE, FALSE);
+    MenuDefinition_AddNamedCommand(result, "copytoclipboard:cmd /c echo | (set /p=\"{}\" & echo.) | clip", FALSE, FALSE);
     MenuDefinition_ParseAndAddKeyBinding(result, "ctl-c:copytoclipboard", FALSE);
 
     NamedCommand *helpCommand = MenuDefinition_AddAction2NamedCommand(result, "show help", menuView->searchView, SearchView_ShowHelp, FALSE, FALSE);

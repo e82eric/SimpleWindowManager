@@ -257,13 +257,19 @@ void run_command_from_menu(char *stdOut)
 
 int commands_list(int maxItems, CHAR **lines)
 {
+    const int nameWidth = 45;
+    const int typeWidth = 25;
+    const int keyBindingWidth = 30;
     CHAR header[1024];
     sprintf_s(
             header,
             1024,
-            "%-45s %-25s %-15s %s",
+            "%-*s %-*s %-*s %s",
+            nameWidth,
             "Name",
+            typeWidth,
             "Type",
+            keyBindingWidth,
             "KeyBinding",
             "Description");
 
@@ -275,21 +281,27 @@ int commands_list(int maxItems, CHAR **lines)
     {
         Command *command = commands[i];
         CHAR keyBindingStr[MAX_PATH];
+        keyBindingStr[0] = '\0';
 
         if(command->keyBinding)
         {
             CHAR modifiersKeyName[MAX_PATH];
-            if(command->keyBinding->modifiers & LAlt && command->keyBinding->modifiers & LShift)
+            modifiersKeyName[0] = '\0';
+            if(command->keyBinding->modifiers & LAlt)
             {
-                memcpy(modifiersKeyName, "ALT+SHIFT", 50);
+                strcat_s(modifiersKeyName, MAX_PATH, "+ALT");
             }
-            else if(command->keyBinding->modifiers & LAlt)
+            if(command->keyBinding->modifiers & LCtl)
             {
-                memcpy(modifiersKeyName, "ALT", 50);
+                strcat_s(modifiersKeyName, MAX_PATH, "+CTL");
             }
-            else if(command->keyBinding->modifiers & LWin)
+            if(command->keyBinding->modifiers & LWin)
             {
-                memcpy(modifiersKeyName, "WIN", 50);
+                strcat_s(modifiersKeyName, MAX_PATH, "+WIN");
+            }
+            if(command->keyBinding->modifiers & LShift)
+            {
+                strcat_s(modifiersKeyName, MAX_PATH, "+SHIFT");
             }
 
             unsigned int scanCode = MapVirtualKey(command->keyBinding->key, MAPVK_VK_TO_VSC);
@@ -315,7 +327,8 @@ int commands_list(int maxItems, CHAR **lines)
                     keyBindingStr,
                     50,
                     "%s+%s",
-                    modifiersKeyName,
+                    //+1 is hack to remove first + from concatentation
+                    modifiersKeyName + 1,
                     keyStrBuff);
         }
 
@@ -326,9 +339,12 @@ int commands_list(int maxItems, CHAR **lines)
         sprintf_s(
                 stringToAdd,
                 1024,
-                "%-45s %-25s %-15s %s",
+                "%-*s %-*s %-*s %s",
+                nameWidth,
                 command->name,
+                typeWidth,
                 command->type,
+                keyBindingWidth,
                 keyBindingStr,
                 commandDescription);
 
