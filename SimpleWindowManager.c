@@ -895,10 +895,38 @@ BOOL is_alt_tab_window(HWND hwnd)
     return hwndWalk == hwnd;
 }
 
+BOOL IsWindowCloaked(HWND hwnd)
+{
+    BOOL isCloaked = FALSE;
+    return (SUCCEEDED(DwmGetWindowAttribute(hwnd, DWMWA_CLOAKED,
+                    &isCloaked, sizeof(isCloaked))) && isCloaked);
+}
+
+BOOL CALLBACK PropEnumProcEx(HWND hwndSubclass, LPTSTR lpszString, HANDLE hData, ULONG_PTR dwData)
+{
+    UNREFERENCED_PARAMETER(hwndSubclass);
+    if(((DWORD_PTR)lpszString & 0xffff0000) != 0)
+    {
+        if (wcscmp(lpszString, L"ApplicationViewCloakType") == 0)
+        {
+            BOOL *hasAppropriateApplicationViewCloakTypePtr = (BOOL *)dwData;
+            //0 seems to be when it is running on the current desktop
+            *hasAppropriateApplicationViewCloakTypePtr = (int)hData == 0;
+            return FALSE;
+        }
+    }
+    return TRUE;
+}
+
 BOOL is_root_window(HWND hwnd, LONG styles, LONG exStyles)
 {
     BOOL isWindowVisible = IsWindowVisible(hwnd);
     HWND desktopWindow = GetDesktopWindow();
+
+    if(IsWindowCloaked(hwnd))
+    {
+        return FALSE;
+    }
 
     if(hwnd == desktopWindow)
     {
@@ -914,7 +942,16 @@ BOOL is_root_window(HWND hwnd, LONG styles, LONG exStyles)
     GetClassName(hwnd, className, sizeof(className)/sizeof(TCHAR));
     if(wcsstr(className, UWP_WRAPPER_CLASS) && !configuration->floatUwpWindows)
     {
-        return TRUE;
+        BOOL hasCorrectCloakedProperty = FALSE;
+        EnumPropsEx(hwnd, PropEnumProcEx, (ULONG_PTR)&hasCorrectCloakedProperty);
+        if(hasCorrectCloakedProperty)
+        {
+            return TRUE;
+        }
+        else
+        {
+            return FALSE;
+        }
     }
 
     if(exStyles & WS_EX_NOACTIVATE)
@@ -1084,7 +1121,7 @@ void CALLBACK handle_windows_event(
             return;
         }
 
-        if (event == EVENT_OBJECT_SHOW)
+        if (event == EVENT_OBJECT_SHOW || event == EVENT_OBJECT_UNCLOAKED)
         {
             if(!isRootWindow)
             {
@@ -5252,6 +5289,14 @@ int run (void)
 
     g_win_hook = SetWinEventHook(
         EVENT_OBJECT_NAMECHANGE, EVENT_OBJECT_NAMECHANGE,
+        NULL,
+        handle_windows_event,
+        0,
+        0,
+        WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
+
+    g_win_hook = SetWinEventHook(
+        EVENT_OBJECT_UNCLOAKED, EVENT_OBJECT_UNCLOAKED,
         NULL,
         handle_windows_event,
         0,
