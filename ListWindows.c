@@ -71,7 +71,7 @@ BOOL CALLBACK list_windows_prop_enum_callback(HWND hwndSubclass, LPTSTR lpszStri
     return TRUE;
 }
 
-BOOL is_root_window(HWND hwnd, LONG styles, LONG exStyles)
+BOOL list_windows_is_root_window(HWND hwnd, LONG styles, LONG exStyles)
 {
     BOOL isWindowVisible = IsWindowVisible(hwnd);
     HWND desktopWindow = GetDesktopWindow();
@@ -82,6 +82,11 @@ BOOL is_root_window(HWND hwnd, LONG styles, LONG exStyles)
     }
 
     if(isWindowVisible == FALSE)
+    {
+        return FALSE;
+    }
+
+    if(exStyles & WS_EX_TOOLWINDOW)
     {
         return FALSE;
     }
@@ -208,7 +213,7 @@ static BOOL CALLBACK enum_windows_callback(HWND hwnd, LPARAM lparam)
 
     LONG styles = GetWindowLong(hwnd, GWL_STYLE);
     LONG exStyles = GetWindowLong(hwnd, GWL_EXSTYLE);
-    BOOL isRootWindow = is_root_window(hwnd, styles, exStyles);
+    BOOL isRootWindow = list_windows_is_root_window(hwnd, styles, exStyles);
     if(!isRootWindow)
     {
         return TRUE;
