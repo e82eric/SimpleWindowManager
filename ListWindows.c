@@ -3,6 +3,7 @@
 #include <windows.h>
 #include <shlwapi.h>
 #include <strsafe.h>
+#include <dwmapi.h>
 
 typedef struct ListWindowsClient ListWindowsClient;
 typedef struct ListWindowsWorkspace ListWindowsWorkspace;
@@ -47,6 +48,29 @@ BOOL list_windows_is_alt_tab_window(HWND hwnd)
     return hwndWalk == hwnd;
 }
 
+BOOL list_windows_is_window_cloaked(HWND hwnd)
+{
+    BOOL isCloaked = FALSE;
+    return (SUCCEEDED(DwmGetWindowAttribute(hwnd, DWMWA_CLOAKED,
+                    &isCloaked, sizeof(isCloaked))) && isCloaked);
+}
+
+BOOL CALLBACK list_windows_prop_enum_callback(HWND hwndSubclass, LPTSTR lpszString, HANDLE hData, ULONG_PTR dwData)
+{
+    UNREFERENCED_PARAMETER(hwndSubclass);
+    if(((DWORD_PTR)lpszString & 0xffff0000) != 0)
+    {
+        if (wcscmp(lpszString, L"ApplicationViewCloakType") == 0)
+        {
+            BOOL *hasAppropriateApplicationViewCloakTypePtr = (BOOL *)dwData;
+            //0 seems to be when it is running on the current desktop
+            *hasAppropriateApplicationViewCloakTypePtr = hData == 0;
+            return FALSE;
+        }
+    }
+    return TRUE;
+}
+
 BOOL is_root_window(HWND hwnd, LONG styles, LONG exStyles)
 {
     BOOL isWindowVisible = IsWindowVisible(hwnd);
@@ -60,6 +84,27 @@ BOOL is_root_window(HWND hwnd, LONG styles, LONG exStyles)
     if(isWindowVisible == FALSE)
     {
         return FALSE;
+    }
+
+    if(list_windows_is_window_cloaked(hwnd))
+    {
+        return FALSE;
+    }
+
+    TCHAR className[256] = {0};
+    GetClassName(hwnd, className, sizeof(className)/sizeof(TCHAR));
+    if(wcsstr(className, L"ApplicationFrameWindow"))
+    {
+        BOOL hasCorrectCloakedProperty = FALSE;
+        EnumPropsEx(hwnd, list_windows_prop_enum_callback, (ULONG_PTR)&hasCorrectCloakedProperty);
+        if(hasCorrectCloakedProperty)
+        {
+            return TRUE;
+        }
+        else
+        {
+            return FALSE;
+        }
     }
 
     if(exStyles & WS_EX_NOACTIVATE)

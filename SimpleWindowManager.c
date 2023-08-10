@@ -895,14 +895,14 @@ BOOL is_alt_tab_window(HWND hwnd)
     return hwndWalk == hwnd;
 }
 
-BOOL IsWindowCloaked(HWND hwnd)
+BOOL is_window_cloaked(HWND hwnd)
 {
     BOOL isCloaked = FALSE;
     return (SUCCEEDED(DwmGetWindowAttribute(hwnd, DWMWA_CLOAKED,
                     &isCloaked, sizeof(isCloaked))) && isCloaked);
 }
 
-BOOL CALLBACK PropEnumProcEx(HWND hwndSubclass, LPTSTR lpszString, HANDLE hData, ULONG_PTR dwData)
+BOOL CALLBACK prop_enum_callback(HWND hwndSubclass, LPTSTR lpszString, HANDLE hData, ULONG_PTR dwData)
 {
     UNREFERENCED_PARAMETER(hwndSubclass);
     if(((DWORD_PTR)lpszString & 0xffff0000) != 0)
@@ -911,7 +911,7 @@ BOOL CALLBACK PropEnumProcEx(HWND hwndSubclass, LPTSTR lpszString, HANDLE hData,
         {
             BOOL *hasAppropriateApplicationViewCloakTypePtr = (BOOL *)dwData;
             //0 seems to be when it is running on the current desktop
-            *hasAppropriateApplicationViewCloakTypePtr = (int)hData == 0;
+            *hasAppropriateApplicationViewCloakTypePtr = hData == 0;
             return FALSE;
         }
     }
@@ -923,7 +923,7 @@ BOOL is_root_window(HWND hwnd, LONG styles, LONG exStyles)
     BOOL isWindowVisible = IsWindowVisible(hwnd);
     HWND desktopWindow = GetDesktopWindow();
 
-    if(IsWindowCloaked(hwnd))
+    if(is_window_cloaked(hwnd))
     {
         return FALSE;
     }
@@ -943,7 +943,7 @@ BOOL is_root_window(HWND hwnd, LONG styles, LONG exStyles)
     if(wcsstr(className, UWP_WRAPPER_CLASS) && !configuration->floatUwpWindows)
     {
         BOOL hasCorrectCloakedProperty = FALSE;
-        EnumPropsEx(hwnd, PropEnumProcEx, (ULONG_PTR)&hasCorrectCloakedProperty);
+        EnumPropsEx(hwnd, prop_enum_callback, (ULONG_PTR)&hasCorrectCloakedProperty);
         if(hasCorrectCloakedProperty)
         {
             return TRUE;
