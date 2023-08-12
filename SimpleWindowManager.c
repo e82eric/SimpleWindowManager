@@ -507,6 +507,19 @@ void move_focused_window_to_master(void)
     }
 }
 
+void move_secondary_monitor_focused_window_to_master(void)
+{
+    if(secondaryMonitor->workspace)
+    {
+        Client *client = secondaryMonitor->workspace->selected;
+        if(client)
+        {
+            client->workspace->layout->move_client_to_master(client);
+            workspace_arrange_windows(client->workspace);
+        }
+    }
+}
+
 void toggle_create_window_in_current_workspace(void)
 {
     if(currentWindowRoutingMode != FilteredCurrentWorkspace)
@@ -2462,7 +2475,6 @@ void deckLayout_client_to_master(Client *client)
         client->workspace->clients->data = client->workspace->clients->next->data;
         client->workspace->clients->next->data = temp;
         workspace_arrange_windows(client->workspace);
-        workspace_focus_selected_window(client->workspace);
     }
 }
 
@@ -4482,6 +4494,8 @@ void register_secondary_monitor_default_bindings_with_modifiers(int modifiers, M
     keybinding_create_with_workspace_arg("move_workspace_to_secondary_monitor_without_focus[7]", modifiers, VK_F7, move_workspace_to_secondary_monitor_without_focus, spaces[6]);
     keybinding_create_with_workspace_arg("move_workspace_to_secondary_monitor_without_focus[8]", modifiers, VK_F8, move_workspace_to_secondary_monitor_without_focus, spaces[7]);
     keybinding_create_with_workspace_arg("move_workspace_to_secondary_monitor_without_focus[9]", modifiers, VK_F9, move_workspace_to_secondary_monitor_without_focus, spaces[8]);
+
+    keybinding_create_with_no_arg("move_secondary_monitor_focused_window_to_master", modifiers | LShift, VK_RETURN, move_secondary_monitor_focused_window_to_master);
 }
 
 void start_process(CHAR *processExe, CHAR *cmdArgs, DWORD creationFlags)

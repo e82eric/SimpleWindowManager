@@ -322,6 +322,7 @@ void arrange_clients_in_selected_workspace(void);
 void workspace_increase_master_width_selected_monitor(void);
 void workspace_decrease_master_width_selected_monitor(void);
 void move_focused_window_to_master(void);
+void move_secondary_monitor_focused_window_to_master(void);
 void move_focused_window_left(void);
 void move_focused_window_right(void);
 void move_focused_window_up(void);
