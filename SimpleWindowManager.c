@@ -117,6 +117,7 @@ static void free_client(Client *client);
 static void scratch_window_remove(ScratchWindow *scratchWindow);
 static void scratch_window_add(ScratchWindow *scratchWindow);
 static void scratch_window_focus(ScratchWindow *scratchWindow);
+static void menu_hide(void);
 static void button_set_selected(Button *button, BOOL value);
 static void button_set_has_clients(Button *button, BOOL value);
 static void button_press_handle(Button *button);
@@ -812,15 +813,22 @@ BOOL is_float_window(Client *client, LONG_PTR styles, LONG_PTR exStyles)
 {
     if(configuration->isFloatWindowFunc)
     {
-        if(configuration->isFloatWindowFunc(client, styles, exStyles))
+        if(!configuration->isFloatWindowFunc(client, styles, exStyles))
         {
-            return TRUE;
+            return FALSE;
         }
     }
 
-    if(wcsstr(client->data->className, UWP_WRAPPER_CLASS) && !configuration->floatUwpWindows)
+    if(wcsstr(client->data->className, UWP_WRAPPER_CLASS))
     {
-        return FALSE;
+        if(configuration->floatUwpWindows)
+        {
+            return TRUE;
+        }
+        else
+        {
+            return FALSE;
+        }
     }
 
     RECT rect;
@@ -1115,7 +1123,6 @@ void CALLBACK handle_windows_event(
         LONG exStyles = GetWindowLong(hwnd, GWL_EXSTYLE);
 
         BOOL isRootWindow = is_root_window(hwnd, styles, exStyles);
-        BOOL isToolWindow = exStyles & WS_EX_TOOLWINDOW;
 
         if(!isRootWindow)
         {
@@ -1172,20 +1179,6 @@ void CALLBACK handle_windows_event(
 
             if(is_float_window(client, styles, exStyles))
             {
-                if(!isToolWindow)
-                {
-                    if(configuration->shouldFloatBeFocusedFunc)
-                    {
-                        if(configuration->shouldFloatBeFocusedFunc(client))
-                        {
-                            SetForegroundWindow(hwnd);
-                        }
-                    }
-                    else
-                    {
-                        SetForegroundWindow(hwnd);
-                    }
-                }
                 free_client(client);
                 return;
             }
@@ -1199,10 +1192,6 @@ void CALLBACK handle_windows_event(
             }
             else
             {
-                if(!isToolWindow)
-                {
-                    SetForegroundWindow(hwnd);
-                }
                 free_client(client);
             }
         }
@@ -1527,6 +1516,11 @@ void windowManager_move_workspace_to_monitor(Monitor *monitor, Workspace *worksp
     if(monitor->scratchWindow)
     {
         scratch_window_hide(monitor->scratchWindow);
+    }
+
+    if(menuVisible)
+    {
+        menu_hide();
     }
 
     if(currentMonitor == monitor)
@@ -3092,6 +3086,11 @@ void menu_on_escape(void)
 
 void menu_run(MenuDefinition *definition)
 {
+    if(selectedMonitor->scratchWindow)
+    {
+        scratch_window_hide(selectedMonitor->scratchWindow);
+    }
+
     menuVisible = TRUE;
     definition->onEscape = menu_on_escape;
     menu_run_definition(mView, definition);
@@ -3129,6 +3128,11 @@ ScratchWindow *register_scratch_terminal_with_unique_string(CHAR *name, char *cm
 
 void scratch_window_show(ScratchWindow *self)
 {
+    if(menuVisible)
+    {
+        menu_hide();
+    }
+
     self->client->data->isMinimized = FALSE;
     selectedMonitor->scratchWindow = self;
     scratch_window_focus(self);
@@ -3533,6 +3537,7 @@ void bar_add_segments_from_configuration(Bar *self, HDC hdc, Configuration *conf
         segmentRightEdge = segment->headerRect->left;
 
         self->selectedWindowDescRect->right = self->segments[i]->headerRect->left;
+        self->timesRect->left = self->segments[i]->headerRect->left;
     }
 }
 
