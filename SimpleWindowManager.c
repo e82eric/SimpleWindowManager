@@ -872,6 +872,21 @@ static BOOL CALLBACK enum_windows_callback(HWND hwnd, LPARAM lparam)
     }
 
     Client *client = clientFactory_create_from_hwnd(hwnd);
+
+    BOOL isWindowVisible = IsWindowVisible(hwnd);
+    if(!isWindowVisible)
+    {
+        if(configuration->clientShouldUseMinimizeToHide)
+        {
+            BOOL clientShouldUseMinimizeToHide = configuration->clientShouldUseMinimizeToHide(client);
+            if(!clientShouldUseMinimizeToHide)
+            {
+                free_client(client);
+                return TRUE;
+            }
+        }
+    }
+
     ScratchWindow *scratchWindow = scratch_windows_find_from_client(client);
     if(scratchWindow)
     {
@@ -1158,6 +1173,20 @@ void CALLBACK handle_windows_event(
 
             Client *client = clientFactory_create_from_hwnd(hwnd);
 
+            BOOL isWindowVisible = IsWindowVisible(hwnd);
+            if(!isWindowVisible)
+            {
+                if(configuration->clientShouldUseMinimizeToHide)
+                {
+                    BOOL clientShouldUseMinimizeToHide = configuration->clientShouldUseMinimizeToHide(client);
+                    if(!clientShouldUseMinimizeToHide)
+                    {
+                        free_client(client);
+                        return;
+                    }
+                }
+            }
+
             if(!client->data->isScratchWindowBoundToWorkspace)
             {
                 ScratchWindow *sWindow = scratch_windows_find_from_client(client);
@@ -1200,7 +1229,10 @@ void CALLBACK handle_windows_event(
             Client* client = windowManager_find_client_in_workspaces_by_hwnd(hwnd);
             if(client)
             {
-                client_move_from_unminimized_to_minimized(client);
+                if(!client->data->useMinimizeToHide)
+                {
+                    client_move_from_unminimized_to_minimized(client);
+                }
             }
         }
         else if(event == EVENT_OBJECT_LOCATIONCHANGE)
@@ -1235,14 +1267,20 @@ void CALLBACK handle_windows_event(
                 {
                     if(!isMinimized)
                     {
-                        client_move_from_minimized_to_unminimized(client);
+                        if(!client->data->useMinimizeToHide)
+                        {
+                            client_move_from_minimized_to_unminimized(client);
+                        }
                     }
                 }
                 else
                 {
                     if(isMinimized)
                     {
-                        client_move_from_unminimized_to_minimized(client);
+                        if(!client->data->useMinimizeToHide)
+                        {
+                            client_move_from_unminimized_to_minimized(client);
+                        }
                     }
                     else
                     {
@@ -1645,6 +1683,16 @@ Client* clientFactory_create_from_hwnd(HWND hwnd)
     c = calloc(1, sizeof(Client));
     c->data = clientData;
 
+    if(configuration->clientShouldUseMinimizeToHide)
+    {
+        BOOL clientShouldUseMinimizeToHide = configuration->clientShouldUseMinimizeToHide(c);
+        clientData->useMinimizeToHide = clientShouldUseMinimizeToHide;
+        if(clientShouldUseMinimizeToHide)
+        {
+            clientData->isMinimized = FALSE;
+        }
+    }
+
     return c;
 }
 
@@ -1721,6 +1769,14 @@ void client_move_to_location_on_screen(Client *client, HDWP hdwp, BOOL setZOrder
     else
     {
         UINT flags = SWP_SHOWWINDOW;
+        if(client->data->useMinimizeToHide)
+        {
+            if(client->workspace->monitor->isHidden || !client->isVisible)
+            {
+                ShowWindow(client->data->hwnd, SW_MINIMIZE);
+                return;
+            }
+        }
         if(!configuration->alwaysRedraw)
         {
             flags = SWP_NOREDRAW;
@@ -1738,6 +1794,14 @@ void client_move_to_location_on_screen(Client *client, HDWP hdwp, BOOL setZOrder
             targetWidth,
             targetHeight,
             flags);
+        if(client->data->useMinimizeToHide)
+        {
+            if(!client->workspace->monitor->isHidden)
+            {
+                ShowWindow(client->data->hwnd, SW_NORMAL);
+                return;
+            }
+        }
     }
 }
 

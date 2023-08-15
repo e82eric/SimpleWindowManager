@@ -87,6 +87,7 @@ struct Configuration
     BOOL (*shouldAlwaysExcludeFunc) (Client* client);
     BOOL (*shouldFloatBeFocusedFunc) (Client *client);
     BOOL (*useOldMoveLogicFunc) (Client *client);
+    BOOL (*clientShouldUseMinimizeToHide) (Client *client);
     HFONT (*initalizeFontFunc) (void);
     long barHeight;
     long gapWidth;
@@ -182,6 +183,7 @@ struct ClientData
     BOOL isMinimized;
     BOOL isScratchWindow;
     BOOL isScratchWindowBoundToWorkspace;
+    BOOL useMinimizeToHide;
 };
 
 struct Monitor
