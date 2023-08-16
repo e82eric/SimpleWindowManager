@@ -83,7 +83,7 @@ struct BarSegmentConfiguration
 
 struct Configuration
 {
-    BOOL (*isFloatWindowFunc) (Client *client, LONG_PTR styles, LONG_PTR exStyles);
+    BOOL (*windowsThatShouldNotFloatFunc) (Client *client, LONG_PTR styles, LONG_PTR exStyles);
     BOOL (*shouldAlwaysExcludeFunc) (Client* client);
     BOOL (*shouldFloatBeFocusedFunc) (Client *client);
     BOOL (*useOldMoveLogicFunc) (Client *client);

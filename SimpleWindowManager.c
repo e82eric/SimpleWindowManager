@@ -811,9 +811,9 @@ void quit(void)
 
 BOOL is_float_window(Client *client, LONG_PTR styles, LONG_PTR exStyles)
 {
-    if(configuration->isFloatWindowFunc)
+    if(configuration->windowsThatShouldNotFloatFunc)
     {
-        if(!configuration->isFloatWindowFunc(client, styles, exStyles))
+        if(!configuration->windowsThatShouldNotFloatFunc(client, styles, exStyles))
         {
             return FALSE;
         }
