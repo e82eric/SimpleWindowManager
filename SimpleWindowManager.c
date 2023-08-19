@@ -34,6 +34,8 @@
 #define MAX_COMMANDS 256
 
 static const TCHAR UWP_WRAPPER_CLASS[] = L"ApplicationFrameWindow";
+static const TCHAR TASKBAR_CLASS[] = L"Shell_TrayWnd";
+static const TCHAR TASKBAR2_CLASS[] = L"Shell_SecondaryTrayWnd";
 
 DEFINE_GUID(IID_IMMDeviceEnumerator, 0xa95664d2, 0x9614, 0x4f35, 0xa7, 0x46, 0xde, 0x8d, 0xb6, 0x36, 0x17, 0xe6);
 DEFINE_GUID(CLSID_MMDeviceEnumerator, 0xbcde0395, 0xe52f, 0x467c, 0x8e, 0x3d, 0xc4, 0x57, 0x92, 0x91, 0x69, 0x2e);
@@ -781,27 +783,58 @@ void arrange_clients_in_selected_workspace(void)
     workspace_focus_selected_window(selectedMonitor->workspace);
 }
 
-void taskbar_toggle(void)
+int taskbar_get_height(HWND taskbarHwnd)
 {
-    HWND taskBarHandle = FindWindow(
-      L"Shell_TrayWnd",
-      NULL
-    );
-    HWND taskBar2Handle = FindWindow(
-      L"Shell_SecondaryTrayWnd",
-      NULL
-    );
-    long taskBarStyles = GetWindowLong(taskBarHandle, GWL_STYLE);
+    long taskBarStyles = GetWindowLong(taskbarHwnd, GWL_STYLE);
+
+    int result = 0;
     if(taskBarStyles & WS_VISIBLE)
     {
-        ShowWindow(taskBarHandle, SW_HIDE);
-        ShowWindow(taskBar2Handle, SW_HIDE);
+        RECT taskBarRect;
+        GetWindowRect(taskbarHwnd, &taskBarRect);
+        result = taskBarRect.bottom - taskBarRect.top;
     }
-    else
+
+    return result;
+}
+
+void monitor_calculate_height(Monitor *self, HWND taskbarHwnd)
+{
+    int screenHeight = GetSystemMetrics(SM_CYSCREEN);
+    int taskBarHeight = taskbar_get_height(taskbarHwnd);
+    self->h = screenHeight - taskBarHeight;
+}
+
+void monitors_resize_for_taskbar(HWND taskbarHwnd)
+{
+    for(int i = 0; i < numberOfMonitors; i++)
     {
-        ShowWindow(taskBarHandle, SW_SHOW);
-        ShowWindow(taskBar2Handle, SW_SHOW);
+        monitor_calculate_height(monitors[i], taskbarHwnd);
+        if(monitors[i]->workspace)
+        {
+            workspace_arrange_windows(monitors[i]->workspace);
+            if(monitors[i] == selectedMonitor)
+            {
+                workspace_focus_selected_window(monitors[i]->workspace);
+            }
+        }
     }
+}
+
+void taskbar_toggle(void)
+{
+    HWND taskBarHandle = FindWindow(TASKBAR_CLASS, NULL);
+    HWND taskBar2Handle = FindWindow(TASKBAR2_CLASS, NULL);
+    long taskBarStyles = GetWindowLong(taskBarHandle, GWL_STYLE);
+
+    UINT showHideFlag = SW_SHOW;
+    if(taskBarStyles & WS_VISIBLE)
+    {
+        showHideFlag = SW_HIDE;
+    }
+
+    ShowWindow(taskBarHandle, showHideFlag);
+    ShowWindow(taskBar2Handle, showHideFlag);
 }
 
 void quit(void)
@@ -1119,6 +1152,19 @@ BOOL hit_test_hwnd(HWND hwnd)
     return result;
 }
 
+BOOL is_hwnd_taskbar(HWND hwnd)
+{
+    TCHAR className[256] = {0};
+    GetClassName(hwnd, className, sizeof(className)/sizeof(TCHAR));
+
+    BOOL result = FALSE;
+    if (wcscmp(className, TASKBAR_CLASS) == 0 || wcscmp(className, TASKBAR2_CLASS) == 0)
+    {
+        result = TRUE;
+    }
+    return result;
+}
+
 void CALLBACK handle_windows_event(
         HWINEVENTHOOK hook,
         DWORD event,
@@ -1156,8 +1202,24 @@ void CALLBACK handle_windows_event(
             return;
         }
 
-        if (event == EVENT_OBJECT_SHOW || event == EVENT_OBJECT_UNCLOAKED)
+        if (event == EVENT_OBJECT_HIDE)
         {
+            BOOL isTaskBar = is_hwnd_taskbar(hwnd);
+            if (isTaskBar)
+            {
+                monitors_resize_for_taskbar(hwnd);
+                return;
+            }
+        }
+        else if (event == EVENT_OBJECT_SHOW || event == EVENT_OBJECT_UNCLOAKED)
+        {
+            BOOL isTaskBar = is_hwnd_taskbar(hwnd);
+            if (isTaskBar)
+            {
+                monitors_resize_for_taskbar(hwnd);
+                return;
+            }
+
             if(!isRootWindow)
             {
                 return;
@@ -3328,6 +3390,8 @@ void monitor_calulate_coordinates(Monitor *monitor, int monitorNumber)
     else
     {
         monitor->isHidden = FALSE;
+        HWND taskbarHwnd = FindWindow(TASKBAR_CLASS, NULL);
+        monitor_calculate_height(monitor, taskbarHwnd);
     }
 }
 
