@@ -25,16 +25,6 @@ void search_drive(char* stdOut)
     menu_run(searchDriveMenuDefinition);
 }
 
-BOOL should_float_be_focused(Client *client)
-{
-    if(wcsstr(L"Microsoft Teams Notification", client->data->title))
-    {
-        return FALSE;
-    }
-
-    return TRUE;
-}
-
 BOOL is_float_window_from_config(Client *client, LONG_PTR styles, LONG_PTR exStyles)
 {
     UNREFERENCED_PARAMETER(styles);
@@ -53,6 +43,20 @@ BOOL is_float_window_from_config(Client *client, LONG_PTR styles, LONG_PTR exSty
         return TRUE;
     }
 
+    return TRUE;
+}
+
+BOOL should_client_use_hide(Client *client)
+{
+    //I think ConEmu has internal logic that detects that it has been moved out of visibile monitor space or hidden and moves it self back to visible space.  Minimize seems to work decent in these scenerios.  SSMS seems the same
+    if(wcsstr(client->data->processImageName, L"ConEmu64.exe"))
+    {
+        return TRUE;
+    }
+    if(wcsstr(client->data->processImageName, L"ConEmu.exe"))
+    {
+        return TRUE;
+    }
     return FALSE;
 }
 
@@ -68,14 +72,15 @@ BOOL should_use_old_move_logic(Client* client)
 
 void configure(Configuration *configuration)
 {
-    int modifiers = LAlt;
+    int modifiers = LAlt | LWin | LCtl;
     keybindings_register_defaults_with_modifiers(modifiers);
 
-    configuration->isFloatWindowFunc = is_float_window_from_config;
-    configuration->shouldFloatBeFocusedFunc = should_float_be_focused;
+    configuration->windowsThatShouldNotFloatFunc = is_float_window_from_config;
     configuration->useOldMoveLogicFunc = should_use_old_move_logic;
-    /* configuration->windowRoutingMode = FilteredRoutedNonFilteredCurrentWorkspace; */
+    configuration->windowRoutingMode = FilteredRoutedNonFilteredCurrentWorkspace;
+    configuration->clientShouldUseMinimizeToHide = should_client_use_hide;
     configuration->alwaysRedraw = TRUE;
+    configuration->floatUwpWindows = FALSE;
 
     WCHAR chromeTag = { 0xfa9e };
     WCHAR terminalTag = { 0xf120 };
@@ -98,23 +103,12 @@ void configure(Configuration *configuration)
     Workspace *teamsWorkspace = workspace_register(L"Teams", &teamsTag, &deckLayout);
     workspace_register_processimagename_contains_filter(teamsWorkspace, L"Teams.exe");
 
-    workspace_register(L"5", L"4", &tileLayout);
+    workspace_register(L"5", L"5", &tileLayout);
     workspace_register(L"6", L"6", &tileLayout);
     workspace_register(L"7", L"7", &tileLayout);
     workspace_register(L"8", L"8", &tileLayout);
     workspace_register(L"9", L"9", &tileLayout);
-
     workspace_register(L"Desktop", L"0", &deckLayout);
-
-    ScratchWindow *vifmScratch = register_scratch_terminal_with_unique_string(
-            "VIFM",
-            "cmd /c vifm",
-            L"4d237b71-4df7-4d2e-a60f-f9d7f69e80a7");
-
-    ScratchWindow *powershellScratch = register_scratch_terminal_with_unique_string(
-            "Powershell",
-            "cmd /c powershell -nologo",
-            L"ea3f98ca-973f-4154-9a7b-dc7a9377b768");
 
     ScratchWindow *nPowershellScratch = register_scratch_terminal_with_unique_string(
             "Nvim Powershell",
