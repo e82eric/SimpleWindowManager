@@ -1233,6 +1233,8 @@ void CALLBACK handle_windows_event(
             Client *existingClient = windowManager_find_client_in_workspaces_by_hwnd(hwnd);
             if(existingClient)
             {
+                workspace_arrange_windows(existingClient->workspace);
+                workspace_focus_selected_window(existingClient->workspace);
                 return;
             }
 
@@ -2313,7 +2315,6 @@ Workspace* workspace_register_with_window_filter(TCHAR *name, WindowFilter windo
 
 void workspace_focus_selected_window(Workspace *workspace)
 {
-    keybd_event(0, 0, 0, 0);
 
     if(workspace->monitor->scratchWindow)
     {
@@ -2331,6 +2332,7 @@ void workspace_focus_selected_window(Workspace *workspace)
         HWND focusedHwnd = GetForegroundWindow();
         if(workspace->selected->data->hwnd != focusedHwnd)
         {
+            keybd_event(0, 0, 0, 0);
             SetForegroundWindow(workspace->selected->data->hwnd);
         }
         isForegroundWindowSameAsSelectMonitorSelected = TRUE;
