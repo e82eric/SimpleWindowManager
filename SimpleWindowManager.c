@@ -1034,8 +1034,13 @@ BOOL is_root_window(HWND hwnd, LONG styles, LONG exStyles)
     }
 
     HWND parentHwnd = GetParent(hwnd);
-
     if(parentHwnd)
+    {
+        return FALSE;
+    }
+
+    HWND ownerHwnd = GetWindow(hwnd, GW_OWNER);
+    if(ownerHwnd)
     {
         return FALSE;
     }
@@ -1228,8 +1233,6 @@ void CALLBACK handle_windows_event(
             Client *existingClient = windowManager_find_client_in_workspaces_by_hwnd(hwnd);
             if(existingClient)
             {
-                workspace_arrange_windows(existingClient->workspace);
-                workspace_focus_selected_window(existingClient->workspace);
                 return;
             }
 
