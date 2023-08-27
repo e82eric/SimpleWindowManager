@@ -1066,31 +1066,31 @@ LRESULT CALLBACK handle_key_press(int code, WPARAM w, LPARAM l)
             if(p->vkCode == keyBinding->key)
             {
                 int modifiersPressed = 0;
-                if(GetKeyState(VK_LSHIFT) & 0x8000)
+                if(GetAsyncKeyState(VK_LSHIFT) & 0x8000)
                 {
                     modifiersPressed |= LShift;
                 }
-                if(GetKeyState(VK_RSHIFT) & 0x8000)
+                if(GetAsyncKeyState(VK_RSHIFT) & 0x8000)
                 {
                     modifiersPressed |= RShift;
                 }
-                if(GetKeyState(VK_LMENU) & 0x8000)
+                if(GetAsyncKeyState(VK_LMENU) & 0x8000)
                 {
                     modifiersPressed |= LAlt;
                 }
-                if(GetKeyState(VK_RMENU) & 0x8000)
+                if(GetAsyncKeyState(VK_RMENU) & 0x8000)
                 {
                     modifiersPressed |= RAlt;
                 }
-                if(GetKeyState(VK_CONTROL) & 0x8000)
+                if(GetAsyncKeyState(VK_CONTROL) & 0x8000)
                 {
                     modifiersPressed |= LCtl;
                 }
-                if(GetKeyState(VK_LWIN) & 0x8000)
+                if(GetAsyncKeyState(VK_LWIN) & 0x8000)
                 {
                     modifiersPressed |= LWin;
                 }
-                if(GetKeyState(VK_RWIN) & 0x8000)
+                if(GetAsyncKeyState(VK_RWIN) & 0x8000)
                 {
                     modifiersPressed |= RWin;
                 }
@@ -2315,7 +2315,6 @@ Workspace* workspace_register_with_window_filter(TCHAR *name, WindowFilter windo
 
 void workspace_focus_selected_window(Workspace *workspace)
 {
-
     if(workspace->monitor->scratchWindow)
     {
         return;
