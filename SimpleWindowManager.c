@@ -989,7 +989,6 @@ BOOL CALLBACK prop_enum_callback(HWND hwndSubclass, LPTSTR lpszString, HANDLE hD
 
 BOOL is_root_window(HWND hwnd, LONG styles, LONG exStyles)
 {
-    BOOL isWindowVisible = IsWindowVisible(hwnd);
     HWND desktopWindow = GetDesktopWindow();
 
     if(is_window_cloaked(hwnd))
@@ -998,11 +997,6 @@ BOOL is_root_window(HWND hwnd, LONG styles, LONG exStyles)
     }
 
     if(hwnd == desktopWindow)
-    {
-        return FALSE;
-    }
-
-    if(isWindowVisible == FALSE)
     {
         return FALSE;
     }
@@ -1361,7 +1355,7 @@ void CALLBACK handle_windows_event(
                         }
 
                         HDWP hdwp = BeginDeferWindowPos(1);
-                        client_move_to_location_on_screen(client, hdwp, FALSE);
+                        workspace_arrange_windows(client->workspace);
                         EndDeferWindowPos(hdwp);
                     }
                 }
@@ -1805,6 +1799,14 @@ void client_move_to_location_on_screen(Client *client, HDWP hdwp, BOOL setZOrder
     long targetHeight = client->data->h + topBorderWidth + bottomBorderWidth;
     long targetLeft = client->data->x - leftBorderWidth;
     long targetWidth = client->data->w + leftBorderWidth + rightBorderWidth;
+
+    if( targetTop == wrect.top &&
+            targetLeft == wrect.left &&
+            targetTop + targetHeight == wrect.bottom &&
+            targetLeft + targetWidth == wrect.right)
+    {
+        return;
+    }
 
     if(!client->isVisible)
     {
@@ -2990,7 +2992,6 @@ void monacleLayout_calculate_and_apply_client_sizes(Workspace *workspace)
         if(numberOfClients == 0)
         {
             c->isVisible = TRUE;
-            /* workspace->selected = c; */
         }
         else
         {
@@ -4850,9 +4851,6 @@ void process_with_stdin_start(TCHAR *cmdArgs, CHAR **lines, int numberOfLines, v
     }
     else
     {
-        /* CloseHandle(piProcInfo.hProcess); */
-        /* CloseHandle(piProcInfo.hThread); */
-
         DWORD dwWritten; 
         for(int i = 0; i < numberOfLines; i++)
         {
@@ -4886,15 +4884,12 @@ void process_with_stdin_start(TCHAR *cmdArgs, CHAR **lines, int numberOfLines, v
             }
         }
 
-        /* CloseHandle(childStdOutRead); */
         CloseHandle(childStdOutWrite);
         CloseHandle(childStdInRead);
         CloseHandle(childStdInWrite);
 
         CloseHandle(piProcInfo.hProcess);
         CloseHandle(piProcInfo.hThread);
-
-        /* CloseHandle(hChildStd_OUT_Wr); */
     }
 }
 
