@@ -1209,6 +1209,14 @@ void CALLBACK handle_windows_event(
                 monitors_resize_for_taskbar(hwnd);
                 return;
             }
+            Client* client = windowManager_find_client_in_workspaces_by_hwnd(hwnd);
+            if(client)
+            {
+                workspace_remove_client_and_arrange(client->workspace, client);
+                workspace_focus_selected_window(client->workspace);
+                free_client(client);
+                return;
+            }
         }
         else if (event == EVENT_OBJECT_SHOW || event == EVENT_OBJECT_UNCLOAKED)
         {
@@ -1800,17 +1808,17 @@ void client_move_to_location_on_screen(Client *client, HDWP hdwp, BOOL setZOrder
     long targetLeft = client->data->x - leftBorderWidth;
     long targetWidth = client->data->w + leftBorderWidth + rightBorderWidth;
 
+    if(!client->isVisible)
+    {
+        targetLeft = hiddenWindowMonitor->xOffset;
+    }
+
     if( targetTop == wrect.top &&
             targetLeft == wrect.left &&
             targetTop + targetHeight == wrect.bottom &&
             targetLeft + targetWidth == wrect.right)
     {
         return;
-    }
-
-    if(!client->isVisible)
-    {
-        targetLeft = hiddenWindowMonitor->xOffset;
     }
 
     BOOL useOldMoveLogic = FALSE;
