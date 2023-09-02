@@ -22,6 +22,7 @@
 #include <wbemidl.h>
 #include <Assert.h>
 #include <oleauto.h>
+#include <uxtheme.h>
 
 #include "fzf\\fzf.h"
 #include "SMenu.h"
@@ -3709,6 +3710,7 @@ LRESULT CALLBACK bar_message_loop(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPa
     {
         case WM_CREATE:
         {
+            BufferedPaintInit();
             CREATESTRUCT* createStruct = (CREATESTRUCT*)lParam;
             msgBar = (Bar*)createStruct->lpCreateParams;
             SetWindowLongPtr(hwnd, GWLP_USERDATA, (LONG_PTR)msgBar);
@@ -3747,29 +3749,32 @@ LRESULT CALLBACK bar_message_loop(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPa
             hdc = BeginPaint(hwnd, &ps);
             if(msgBar)
             {
+                HDC hNewDC;
+                HPAINTBUFFER hBufferedPaint = BeginBufferedPaint(hdc, &ps.rcPaint, BPBF_COMPATIBLEBITMAP, NULL, &hNewDC);
                 HBRUSH brush = bar_get_background_brush(msgBar);
 
-                SelectObject(hdc, font);
-                SetTextColor(hdc, barTextColor);
-                SetBkMode(hdc, TRANSPARENT);
+                SelectObject(hNewDC, font);
+                SetTextColor(hNewDC, barTextColor);
+                SetBkMode(hNewDC, TRANSPARENT);
 
-                FillRect(hdc, &ps.rcPaint, brush);
+                FillRect(hNewDC, &ps.rcPaint, brush);
                 if(ps.rcPaint.left == msgBar->selectedWindowDescRect->left)
                 {
-                    bar_render_selected_window_description(msgBar, hdc);
+                    bar_render_selected_window_description(msgBar, hNewDC);
                 }
                 else if(ps.rcPaint.left == msgBar->timesRect->left)
                 {
-                    bar_render_headers(msgBar, hdc);
-                    bar_render_times(msgBar, hdc);
+                    bar_render_headers(msgBar, hNewDC);
+                    bar_render_times(msgBar, hNewDC);
                 }
                 else
                 {
-                    bar_render_headers(msgBar, hdc);
-                    bar_render_times(msgBar, hdc);
-                    FillRect(hdc, msgBar->selectedWindowDescRect, brush);
-                    bar_render_selected_window_description(msgBar, hdc);
+                    bar_render_headers(msgBar, hNewDC);
+                    bar_render_times(msgBar, hNewDC);
+                    FillRect(hNewDC, msgBar->selectedWindowDescRect, brush);
+                    bar_render_selected_window_description(msgBar, hNewDC);
                 }
+                EndBufferedPaint(hBufferedPaint, TRUE);
             }
             EndPaint(hwnd, &ps); 
             return 0;
