@@ -38,6 +38,8 @@ COLORREF searchTextColor = RGB(168, 153, 132);
 
 HBRUSH backgrounBrush;
 HBRUSH highlightedBackgroundBrush;
+SRWLOCK itemsRwLock;
+UINT currentSearchNumber = 0;
 
 int listBoxItemHeight = 25;
 
@@ -58,18 +60,23 @@ DWORD WINAPI SearchView_Worker(LPVOID lpParam)
 {
     SearchView *self = (SearchView*)lpParam;
 
-    SYSTEMTIME st;
-    GetSystemTime(&st);
-
-    EnterCriticalSection(&self->cancelSearchCriticalSection); 
+    UINT jobCurrentSearchNumber;
+    AcquireSRWLockExclusive(&itemsRwLock);
+    currentSearchNumber++;
+    jobCurrentSearchNumber = currentSearchNumber;
+    if(self->cancelSearch)
+    {
+        ReleaseSRWLockExclusive(&itemsRwLock);
+        return TRUE;
+    }
     self->cancelSearch = TRUE;
-    WaitForSingleObject(self->searchEvent, 50000);
-    self->isSearching = TRUE;
-    ResetEvent(self->searchEvent);
-    self->cancelSearch = FALSE;
-    LeaveCriticalSection(&self->cancelSearchCriticalSection);
+    ReleaseSRWLockExclusive(&itemsRwLock);
 
-    self->itemsView->isSearching = TRUE;
+    WaitForSingleObject(self->searchEvent, 50000);
+    ResetEvent(self->searchEvent);
+
+    self->cancelSearch = FALSE;
+    self->isSearching = TRUE;
 
     ProcessChunkJob *jobs[250];
     int numberOfJobs = 0;
@@ -90,6 +97,7 @@ DWORD WINAPI SearchView_Worker(LPVOID lpParam)
         jobs[numberOfJobs]->displayItemList->items = calloc(self->itemsView->maxDisplayItems, sizeof(ItemMatchResult*));
         jobs[numberOfJobs]->displayItemList->maxItems = self->itemsView->maxDisplayItems;
         jobs[numberOfJobs]->searchView = self;
+        jobs[numberOfJobs]->currentSearchNumber = jobCurrentSearchNumber;
 
         completeWorkHandles[numberOfJobs] = CreateThreadpoolWork(ItemsView_ProcessChunkWorker, jobs[numberOfJobs], NULL);
         SubmitThreadpoolWork(completeWorkHandles[numberOfJobs]);
@@ -115,14 +123,12 @@ DWORD WINAPI SearchView_Worker(LPVOID lpParam)
     }
     self->itemsView->numberOfItemsMatched = totalMatches;
 
-    EnterCriticalSection(&self->searchCriticalSection);
     self->itemsView->numberOfDisplayItems = 0;
     for(int i = 0; i < mergedDisplayItemList->count; i++)
     {
         self->itemsView->displayItems[i] = mergedDisplayItemList->items[i]->item;
         self->itemsView->numberOfDisplayItems++;
     }
-    LeaveCriticalSection(&self->searchCriticalSection);
 
     free(mergedDisplayItemList->items);
     free(mergedDisplayItemList);
@@ -156,12 +162,10 @@ void ItemsView_HandleDisplayItemsUpdate(ItemsView *self)
 {
     SendMessageA(self->hwnd, WM_SETREDRAW, FALSE, 0);
     SendMessageA(self->hwnd, LB_RESETCONTENT, 0, 0);
-    EnterCriticalSection(&self->searchView->searchCriticalSection);
     for(int i = 0; i < self->numberOfDisplayItems; i++)
     {
         SendMessageA(self->hwnd, LB_INSERTSTRING, i, (LPARAM)self->displayItems[i]->text);
     }
-    LeaveCriticalSection(&self->searchView->searchCriticalSection);
 
     LRESULT lResult = SendMessageA(self->hwnd, LB_FINDSTRING, 0, (LPARAM)self->selectedString);
     if(lResult == LB_ERR || !self->itemSelected)
@@ -181,13 +185,23 @@ void ItemsView_HandleDisplayItemsUpdate(ItemsView *self)
 void TriggerSearch(SearchView *self)
 {
     DWORD dwThreadIdArray[1];
+
+    EnterCriticalSection(&self->itemsView->loadCriticalSection);
+    if(self->itemsView->cancelLoad)
+    {
+        LeaveCriticalSection(&self->itemsView->loadCriticalSection);
+        return;
+    }
     CHAR searchString[BUF_LEN];
-    GetWindowTextA(self->hwnd, searchString, BUF_LEN);
-    if(self->searchString)
+    SendMessageA(self->hwnd, WM_GETTEXT, BUF_LEN, (LPARAM)searchString);
+    LeaveCriticalSection(&self->itemsView->loadCriticalSection);
+    if (self->searchString != NULL)
     {
         free(self->searchString);
+        self->searchString = NULL;
     }
     self->searchString = _strdup(searchString); 
+
     HANDLE threadHandle = CreateThread( 
             NULL,
             0,
@@ -475,26 +489,24 @@ void ItemsView_StartLoadItems(ItemsView *self)
 
 void ItemsView_Clear(ItemsView *self)
 {
-    EnterCriticalSection(&self->loadCriticalSection); 
-    if(self->isLoading)
-    {
-        self->cancelLoad = TRUE;
-    }
-    LeaveCriticalSection(&self->loadCriticalSection); 
+    AcquireSRWLockExclusive(&itemsRwLock);
+    self->searchView->cancelSearch = TRUE;
+    ReleaseSRWLockExclusive(&itemsRwLock);
+    WaitForSingleObject(self->searchView->searchEvent, 50000);
+
+    EnterCriticalSection(&self->loadCriticalSection);
+    self->cancelLoad = TRUE;
+    LeaveCriticalSection(&self->loadCriticalSection);
     WaitForSingleObject(self->loadEvent, 50000);
 
-    EnterCriticalSection(&self->searchView->searchCriticalSection); 
-    if(self->searchView->isSearching)
-    {
-        self->searchView->cancelSearch = TRUE;
-    }
-    LeaveCriticalSection(&self->searchView->searchCriticalSection); 
-    WaitForSingleObject(self->searchView->searchEvent, 50000);
+    self->numberOfItems = 0;
+    self->numberOfDisplayItems = 0;
 
     SendMessageA(self->hwnd, LB_SETCURSEL, 0, -1);
     SendMessage(self->hwnd, LB_RESETCONTENT, 0, 0);;
     self->itemSelected = FALSE;
 
+    AcquireSRWLockExclusive(&itemsRwLock);
     Chunk *currentChunk = self->chunks;
     while(currentChunk)
     {
@@ -509,13 +521,19 @@ void ItemsView_Clear(ItemsView *self)
         currentChunk = currentChunk->next;
         free(temp);
     }
+    ReleaseSRWLockExclusive(&itemsRwLock);
 
     self->chunks = NULL;
     self->numberOfItems = 0;
     self->headerSet = FALSE;
 
-    self->cancelLoad = FALSE;
+    AcquireSRWLockExclusive(&itemsRwLock);
     self->searchView->cancelSearch = FALSE;
+    ReleaseSRWLockExclusive(&itemsRwLock);
+
+    EnterCriticalSection(&self->loadCriticalSection);
+    self->cancelLoad = FALSE;
+    LeaveCriticalSection(&self->loadCriticalSection);
 }
 
 void ItemsView_ReloadFromCommand(ItemsView *self, NamedCommand *command)
@@ -957,11 +975,13 @@ VOID CALLBACK ItemsView_ProcessChunkWorker(PTP_CALLBACK_INSTANCE Instance, PVOID
 
     for(int i = 0; i < chunk->count; i++)
     {
-        Item *item = chunk->items[i];
-        if(job->searchView->cancelSearch)
+        AcquireSRWLockShared(&itemsRwLock);
+        if(job->searchView->cancelSearch && job->currentSearchNumber != currentSearchNumber)
         {
+            ReleaseSRWLockShared(&itemsRwLock);
             return;
         }
+        Item *item = chunk->items[i];
 
         int score = fzf_get_score(item->text, job->fzfPattern, job->fzfSlab);
 
@@ -974,6 +994,7 @@ VOID CALLBACK ItemsView_ProcessChunkWorker(PTP_CALLBACK_INSTANCE Instance, PVOID
             job->allItemsWithScores[job->numberOfMatches - 1] = matchResult;
             DisplayItemList_TryAdd(job->displayItemList, matchResult);
         }
+        ReleaseSRWLockShared(&itemsRwLock);
     }
 
     return;
@@ -1125,6 +1146,11 @@ BOOL ProcessCmdOutJob_ProcessStream(ProcessCmdOutputJob *self)
                 searchTriggerCtr++;
                 if(searchTriggerCtr > 50000)
                 {
+                    if(self->itemsView->cancelLoad)
+                    {
+                        ItemsView_CompleteLoad(self->itemsView);
+                        return FALSE;
+                    }
                     TriggerSearch(self->itemsView->searchView);
                     searchTriggerCtr = 0;
                 }
@@ -1906,6 +1932,7 @@ MenuView *menu_create_with_size(int left, int top, int width, int height, TCHAR 
     SearchView *searchView = calloc(1, sizeof(SearchView));
     searchView->itemsView = itemsView;
     searchView->isSearching = FALSE;
+    searchView->searchString = _strdup("");
 
     itemsView->searchView = searchView;
 
@@ -1913,8 +1940,6 @@ MenuView *menu_create_with_size(int left, int top, int width, int height, TCHAR 
     menuView->searchView = searchView;
     menuView->searchView->itemsView = itemsView;
 
-    InitializeCriticalSectionAndSpinCount(&searchView->searchCriticalSection, 0x00000400);
-    InitializeCriticalSectionAndSpinCount(&searchView->cancelSearchCriticalSection, 0x00000400);
     searchView->searchEvent = CreateEvent(
             NULL,
             TRUE,
@@ -1923,6 +1948,7 @@ MenuView *menu_create_with_size(int left, int top, int width, int height, TCHAR 
     SetEvent(searchView->searchEvent);
 
     InitializeCriticalSectionAndSpinCount(&itemsView->loadCriticalSection, 0x00000400);
+    InitializeSRWLock(&itemsRwLock);
     itemsView->loadEvent = CreateEvent(
             NULL,
             TRUE,

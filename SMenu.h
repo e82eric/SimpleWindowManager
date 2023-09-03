@@ -111,8 +111,6 @@ typedef struct SearchView
     BOOL isSearching;
     BOOL cancelSearch;
     HANDLE searchEvent;
-    CRITICAL_SECTION searchCriticalSection; 
-    CRITICAL_SECTION cancelSearchCriticalSection; 
 } SearchView;
 
 typedef struct ProcessChunkJob
@@ -126,6 +124,7 @@ typedef struct ProcessChunkJob
     int jobNumber;
     char* searchString;
     SearchView *searchView;
+    UINT currentSearchNumber;
 } ProcessChunkJob;
 
 struct ItemsView
@@ -160,7 +159,7 @@ struct ItemsView
     BOOL isLoading;
     BOOL cancelLoad;
     HANDLE loadEvent;
-    CRITICAL_SECTION loadCriticalSection; 
+    CRITICAL_SECTION loadCriticalSection;
     Item *displayItems[1024];
     int numberOfDisplayItems;
 };
