@@ -3205,23 +3205,19 @@ MenuDefinition* menu_create_and_register(void)
 void menu_hide(void)
 {
     menuVisible = FALSE;
+    border_window_update();
     ShowWindow(mView->hwnd, SW_HIDE);
-    HWND foregroundHwnd = GetForegroundWindow();
-    if((foregroundHwnd == mView->hwnd || foregroundHwnd == borderWindowHwnd) && selectedMonitor->workspace)
-    {
-        workspace_focus_selected_window(selectedMonitor->workspace);
-    }
-    else
-    {
-        border_window_update();
-    }
-
     bar_trigger_selected_window_paint(selectedMonitor->bar);
 }
 
 void menu_on_escape(void)
 {
     menu_hide();
+    HWND foregroundHwnd = GetForegroundWindow();
+    if((foregroundHwnd == mView->hwnd || foregroundHwnd == borderWindowHwnd) && selectedMonitor->workspace)
+    {
+        workspace_focus_selected_window(selectedMonitor->workspace);
+    }
 }
 
 void menu_run(MenuDefinition *definition)
@@ -5010,32 +5006,29 @@ void open_process_list_scratch_callback(char *stdOut)
 
 void open_windows_scratch_exit_callback(char *stdOut)
 {
+    menu_hide();
     char* lastCharRead;
     HWND hwnd = (HWND)strtoll(stdOut, &lastCharRead, 16);
 
     Client *client = windowManager_find_client_in_workspaces_by_hwnd(hwnd);
     if(client && !client->data->isMinimized)
     {
-        if(selectedMonitor->workspace != client->workspace)
-        {
-            client->workspace->selected = client;
-            windowManager_move_workspace_to_monitor(selectedMonitor, client->workspace);
-            workspace_focus_selected_window(client->workspace);
-        }
-        else
-        {
-            client->workspace->selected = client;
-            workspace_arrange_windows(client->workspace);
-            workspace_focus_selected_window(client->workspace);
-        }
+        client->workspace->selected = client;
         if(client->data->isMinimized)
         {
             ShowWindow(hwnd, SW_RESTORE);
             client_move_from_minimized_to_unminimized(client);
         }
+        else if(selectedMonitor->workspace != client->workspace)
+        {
+            windowManager_move_workspace_to_monitor(selectedMonitor, client->workspace);
+            workspace_arrange_windows(client->workspace);
+            workspace_focus_selected_window(client->workspace);
+        }
         else
         {
-            client->workspace->selected = client;
+            workspace_arrange_windows(client->workspace);
+            workspace_focus_selected_window(client->workspace);
         }
     }
     else
@@ -5058,8 +5051,6 @@ void open_windows_scratch_exit_callback(char *stdOut)
                     TRUE);
         }
     }
-
-    menu_hide();
 }
 
 HFONT default_initalize_font()

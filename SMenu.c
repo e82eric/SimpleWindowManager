@@ -287,7 +287,6 @@ void ItemsView_HandleSelection(ItemsView *self)
     }
 
     ItemsView_Clear(self->searchView->itemsView);
-    self->searchView->onEscape();
     if(self->onSelection)
     {
         self->onSelection(result);
