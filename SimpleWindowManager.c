@@ -3205,7 +3205,6 @@ MenuDefinition* menu_create_and_register(void)
 void menu_hide(void)
 {
     menuVisible = FALSE;
-    border_window_update();
     ShowWindow(mView->hwnd, SW_HIDE);
     bar_trigger_selected_window_paint(selectedMonitor->bar);
 }
@@ -4985,6 +4984,8 @@ void process_with_stdout_start(CHAR *cmdArgs, void (*onSuccess) (CHAR *))
 
 void open_program_scratch_callback(char *stdOut)
 {
+    menu_hide();
+    ShowWindow(borderWindowHwnd, SW_HIDE);
     char str[1024];
 
     sprintf_s(str, 1024, "/c start \"\" \"%s\"", stdOut);
@@ -4993,6 +4994,8 @@ void open_program_scratch_callback(char *stdOut)
 
 void open_program_scratch_callback_not_elevated(char *stdOut)
 {
+    menu_hide();
+    ShowWindow(borderWindowHwnd, SW_HIDE);
     char str[1024];
 
     sprintf_s(str, 1024, "/c start \"\" \"%s\"", stdOut);
@@ -5021,14 +5024,14 @@ void open_windows_scratch_exit_callback(char *stdOut)
         }
         else if(selectedMonitor->workspace != client->workspace)
         {
+            workspace_focus_selected_window(client->workspace);
             windowManager_move_workspace_to_monitor(selectedMonitor, client->workspace);
             workspace_arrange_windows(client->workspace);
-            workspace_focus_selected_window(client->workspace);
         }
         else
         {
-            workspace_arrange_windows(client->workspace);
             workspace_focus_selected_window(client->workspace);
+            workspace_arrange_windows(client->workspace);
         }
     }
     else
