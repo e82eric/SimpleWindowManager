@@ -58,6 +58,8 @@ struct LauncherProcess
 };
 
 HHOOK g_kb_hook = 0;
+HHOOK g_mouse_hook = 0;
+BOOL g_dragInProgress;
 
 HWINEVENTHOOK g_win_hook;
 
@@ -1050,10 +1052,30 @@ BOOL is_root_window(HWND hwnd, LONG styles, LONG exStyles)
     return TRUE;
 }
 
+LRESULT CALLBACK handle_mouse(int code, WPARAM w, LPARAM l)
+{
+    if (code >= 0) 
+    {
+        if (g_dragInProgress && w == WM_LBUTTONUP)
+        {
+            workspace_arrange_windows(selectedMonitor->workspace);
+            workspace_focus_selected_window(selectedMonitor->workspace);
+            g_dragInProgress = FALSE;
+        }
+    }
+    return CallNextHookEx(g_mouse_hook, code, w, l);
+}
+
 LRESULT CALLBACK handle_key_press(int code, WPARAM w, LPARAM l)
 {
     PKBDLLHOOKSTRUCT p = (PKBDLLHOOKSTRUCT)l;
-    if (code ==0 && (w == WM_KEYDOWN || w == WM_SYSKEYDOWN))
+    if (g_dragInProgress && w == WM_KEYUP && (p->vkCode == VK_LMENU))
+    {
+        workspace_arrange_windows(selectedMonitor->workspace);
+        workspace_focus_selected_window(selectedMonitor->workspace);
+        g_dragInProgress = FALSE;
+    }
+    else if (code == 0 && (w == WM_KEYDOWN || w == WM_SYSKEYDOWN))
     {
         KeyBinding *keyBinding = headKeyBinding;
         while(keyBinding)
@@ -1286,6 +1308,12 @@ void CALLBACK handle_windows_event(
             if(workspace)
             {
                 worksapce_add_client(workspace, client);
+
+                if(GetAsyncKeyState(VK_LBUTTON) & 0x8000)
+                {
+                    g_dragInProgress = TRUE;
+                    return;
+                }
                 workspace_arrange_windows(workspace);
                 workspace_focus_selected_window(workspace);
             }
@@ -1360,6 +1388,12 @@ void CALLBACK handle_windows_event(
                         }
                         else if(isMaximized(hwnd))
                         {
+                            return;
+                        }
+
+                        if(GetAsyncKeyState(VK_LBUTTON) & 0x8000)
+                        {
+                            g_dragInProgress = TRUE;
                             return;
                         }
 
@@ -5385,7 +5419,8 @@ int run (void)
 
     border_window_run(borderWindowClass);
 
-    g_kb_hook = SetWindowsHookEx(WH_KEYBOARD_LL, &handle_key_press, moduleHandle, 0);
+    g_mouse_hook = SetWindowsHookEx(WH_KEYBOARD_LL, &handle_key_press, moduleHandle, 0);
+    g_kb_hook = SetWindowsHookEx(WH_MOUSE_LL, &handle_mouse, moduleHandle, 0);
     if (g_kb_hook == NULL)
     {
         fprintf (stderr, "SetWindowsHookEx WH_KEYBOARD_LL [%p] failed with error %d\n", moduleHandle, GetLastError ());
