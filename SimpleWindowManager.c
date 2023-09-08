@@ -3055,35 +3055,38 @@ void menu_focus(MenuView *self)
 
     SendInput(ARRAYSIZE(inputs), inputs, sizeof(INPUT));
 
-    menuVisible = TRUE;
     int x = selectedMonitor->xOffset + scratchWindowsScreenPadding;
     int y = scratchWindowsScreenPadding;
     int w = selectedMonitor->w - (scratchWindowsScreenPadding * 2);
     int h = selectedMonitor->h - (scratchWindowsScreenPadding * 2);
 
-    ShowWindow(borderWindowHwnd, SW_HIDE);
-    ShowWindow(self->hwnd, SW_SHOW);
-    SetForegroundWindow(self->hwnd);
-    HDWP hdwp = BeginDeferWindowPos(2);
-    DeferWindowPos(
-            hdwp,
-            borderWindowHwnd,
-            self->hwnd,
-            x - 4,
-            y - 4,
-            w + 8,
-            h + 8,
-            SWP_SHOWWINDOW);
-    DeferWindowPos(
-            hdwp,
-            self->hwnd,
-            NULL,
-            x,
-            y,
-            w,
-            h,
-            SWP_SHOWWINDOW);
-    EndDeferWindowPos(hdwp);
+    if(!menuVisible)
+    {
+        menuVisible = TRUE;
+        ShowWindow(borderWindowHwnd, SW_HIDE);
+        ShowWindow(self->hwnd, SW_SHOW);
+        SetForegroundWindow(self->hwnd);
+        HDWP hdwp = BeginDeferWindowPos(2);
+        DeferWindowPos(
+                hdwp,
+                borderWindowHwnd,
+                self->hwnd,
+                x - 4,
+                y - 4,
+                w + 8,
+                h + 8,
+                SWP_SHOWWINDOW);
+        DeferWindowPos(
+                hdwp,
+                self->hwnd,
+                NULL,
+                x,
+                y,
+                w,
+                h,
+                SWP_SHOWWINDOW);
+        EndDeferWindowPos(hdwp);
+    }
 }
 
 void scratch_window_focus(ScratchWindow *self)
@@ -3260,7 +3263,6 @@ void menu_run(MenuDefinition *definition)
         scratch_window_hide(selectedMonitor->scratchWindow);
     }
 
-    menuVisible = TRUE;
     definition->onEscape = menu_on_escape;
     menu_run_definition(mView, definition);
     menu_focus(mView);

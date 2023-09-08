@@ -7,6 +7,7 @@
 #include <assert.h>
 #include <synchapi.h>
 #include <commctrl.h>
+#include <uxtheme.h>
 
 #define IDI_ICON 101
 #define IDC_LISTBOX_TEXT 1000
@@ -154,7 +155,10 @@ DWORD WINAPI SearchView_Worker(LPVOID lpParam)
 
     self->itemsView->isSearching = FALSE;
     SetEvent(self->searchEvent);
-    PostMessage(self->hwnd, WM_REDRAW_DISPLAY_LIST, (WPARAM)NULL, (LPARAM)NULL);
+    if(!self->cancelSearch)
+    {
+        PostMessage(self->hwnd, WM_REDRAW_DISPLAY_LIST, (WPARAM)NULL, (LPARAM)NULL);
+    }
     return TRUE;
 }
 
@@ -1150,7 +1154,9 @@ BOOL ProcessCmdOutJob_ProcessStream(ProcessCmdOutputJob *self)
                         ItemsView_CompleteLoad(self->itemsView);
                         return FALSE;
                     }
+
                     TriggerSearch(self->itemsView->searchView);
+
                     searchTriggerCtr = 0;
                 }
 
@@ -1275,7 +1281,7 @@ int ItemsView_Move(ItemsView *self, int left, int top, int width, int height)
 
     MoveWindow(self->hwnd, left, listTop, width, listHeight, TRUE);
     self->height = listHeight;
-    self->maxDisplayItems = (listHeight - 3) / listBoxItemHeight;
+    self->maxDisplayItems = ((listHeight - 3) / listBoxItemHeight) - 1;
 
     return listTop + listHeight;
 }
@@ -1585,22 +1591,27 @@ LRESULT CALLBACK Menu_MessageProcessor(
                 case ODA_DRAWENTIRE:
                     COLORREF colorText;
                     COLORREF colorBack;
+
+                    HDC hNewDC;
+                    HPAINTBUFFER hBufferedPaint = BeginBufferedPaint(pdis->hDC, &pdis->rcItem, BPBF_COMPATIBLEBITMAP, NULL, &hNewDC);
+                    SelectObject(hNewDC, font);
+
                     if(pdis->itemState & ODS_SELECTED) 
                     {
-                        FillRect(pdis->hDC, &pdis->rcItem, highlightedBackgroundBrush);
+                        FillRect(hNewDC, &pdis->rcItem, highlightedBackgroundBrush);
                         colorText = selectionBackgroundTextColor;
-                        colorBack = SetBkColor(pdis->hDC, highlightBackgroundColor);
+                        colorBack = SetBkColor(hNewDC, highlightBackgroundColor);
                     }
                     else
                     {
-                        FillRect(pdis->hDC, &pdis->rcItem, backgrounBrush);
+                        FillRect(hNewDC, &pdis->rcItem, backgrounBrush);
                         colorText = textColor;
-                        colorBack = SetBkColor(pdis->hDC, backgroundColor);
+                        colorBack = SetBkColor(hNewDC, backgroundColor);
                     }
 
                     SendMessageA(pdis->hwndItem, LB_GETTEXT, pdis->itemID, (LPARAM)achBuffer); 
 
-                    GetTextMetrics(pdis->hDC, &tm); 
+                    GetTextMetrics(hNewDC, &tm); 
 
                     hr = StringCchLengthA(achBuffer, BUF_LEN, &cch);
                     if (FAILED(hr))
@@ -1608,8 +1619,8 @@ LRESULT CALLBACK Menu_MessageProcessor(
                         // TODO: Handle error.
                     }
 
-                    SetTextColor(pdis->hDC, textColor);
-                    TextOutA(pdis->hDC, 0, pdis->rcItem.top + 2, achBuffer, (int)cch);
+                    SetTextColor(hNewDC, textColor);
+                    TextOutA(hNewDC, 0, pdis->rcItem.top + 2, achBuffer, (int)cch);
 
                     CHAR searchStringBuff[BUF_LEN];
                     GetWindowTextA(self->searchView->hwnd, searchStringBuff, BUF_LEN);
@@ -1623,11 +1634,11 @@ LRESULT CALLBACK Menu_MessageProcessor(
 
                         if(pos && pos->size > 0)
                         {
-                            SetTextColor(pdis->hDC, fuzzmatchCharTextColor);
+                            SetTextColor(hNewDC, fuzzmatchCharTextColor);
                             for(int i = 0; i < pos->size; i++)
                             {
-                                GetTextExtentPoint32A(pdis->hDC, achBuffer, pos->data[i], &sz); 
-                                TextOutA(pdis->hDC, sz.cx, pdis->rcItem.top + 2, achBuffer + pos->data[i], 1);
+                                GetTextExtentPoint32A(hNewDC, achBuffer, pos->data[i], &sz); 
+                                TextOutA(hNewDC, sz.cx, pdis->rcItem.top + 2, achBuffer + pos->data[i], 1);
                             }
                         }
 
@@ -1637,10 +1648,11 @@ LRESULT CALLBACK Menu_MessageProcessor(
 
                     if (pdis->itemState & ODS_SELECTED) 
                     {
-                        DrawFocusRect(pdis->hDC, &pdis->rcItem);
-                        SetTextColor(pdis->hDC, colorText);
-                        SetBkColor(pdis->hDC, colorBack);
+                        DrawFocusRect(hNewDC, &pdis->rcItem);
+                        SetTextColor(hNewDC, colorText);
+                        SetBkColor(hNewDC, colorBack);
                     }
+                    EndBufferedPaint(hBufferedPaint, TRUE);
                     break; 
  
                 case ODA_FOCUS: 
