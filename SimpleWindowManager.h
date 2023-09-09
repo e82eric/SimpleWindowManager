@@ -204,6 +204,7 @@ struct Layout
     TCHAR *tag;
     void (*select_next_window) (Workspace *workspace);
     void (*select_previous_window) (Workspace *workspace);
+    void (*swap_clients) (Client *client1, Client *client2);
     void (*move_client_to_master) (Client *client);
     void (*move_client_next) (Client *client);
     void (*move_client_previous) (Client *client);

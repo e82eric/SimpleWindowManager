@@ -60,6 +60,8 @@ struct LauncherProcess
 HHOOK g_kb_hook = 0;
 HHOOK g_mouse_hook = 0;
 BOOL g_dragInProgress;
+HWND g_dragHwnd;
+Workspace *g_dragWorkspace;
 
 HWINEVENTHOOK g_win_hook;
 
@@ -67,6 +69,7 @@ static BOOL CALLBACK enum_windows_callback(HWND hWnd, LPARAM lparam);
 
 void tileLayout_select_next_window(Workspace *workspace);
 void tileLayout_select_previous_window(Workspace *workspace);
+void tileLayout_swap_clients(Client *client1, Client *client2);
 void tileLayout_move_client_to_master(Client *client);
 void tilelayout_move_client_next(Client *client);
 void tilelayout_move_client_previous(Client *client);
@@ -83,6 +86,7 @@ void monacleLayout_move_client_next(Client *client);
 void monacleLayout_move_client_previous(Client *client);
 void monacleLayout_calculate_and_apply_client_sizes(Workspace *workspace);
 
+void noop_swap_clients(Client *client1, Client *client2);
 void noop_move_client_to_master(Client *client);
 
 void process_with_stdin_start(TCHAR *cmdArgs, CHAR **lines, int numberOfLines, void (*onSuccess) (CHAR *));
@@ -141,6 +145,8 @@ static BOOL is_root_window(HWND hwnd, LONG styles, LONG exStyles);
 static int get_cpu_usage(void);
 static int get_memory_percent(void);
 static int run (void);
+static BOOL hit_test_hwnd(HWND hwnd);
+static BOOL hit_test_client(Client *client);
 
 static IAudioEndpointVolume *audioEndpointVolume;
 static INetworkListManager *networkListManager;
@@ -184,6 +190,7 @@ Layout deckLayout = {
     //using the same function for next and previous since there will only be 2 windows to swicth between.
     //It will always be moving between the 2
     .select_previous_window = deckLayout_select_next_window,
+    .swap_clients = tileLayout_swap_clients,
     .move_client_to_master = deckLayout_client_to_master,
     .move_client_next = deckLayout_move_client_next,
     .move_client_previous = deckLayout_move_client_previous,
@@ -197,6 +204,7 @@ Layout horizontaldeckLayout = {
     //using the same function for next and previous since there will only be 2 windows to swicth between.
     //It will always be moving between the 2
     .select_previous_window = deckLayout_select_next_window,
+    .swap_clients = tileLayout_swap_clients,
     .move_client_to_master = deckLayout_client_to_master,
     .move_client_next = deckLayout_move_client_next,
     .move_client_previous = deckLayout_move_client_previous,
@@ -208,6 +216,7 @@ Layout horizontaldeckLayout = {
 Layout monacleLayout = {
     .select_next_window = monacleLayout_select_next_client,
     .select_previous_window = monacleLayout_select_previous_client,
+    .swap_clients = noop_swap_clients,
     .move_client_to_master = noop_move_client_to_master,
     .move_client_next = monacleLayout_move_client_next,
     .move_client_previous = monacleLayout_move_client_previous,
@@ -219,6 +228,7 @@ Layout monacleLayout = {
 Layout tileLayout = {
     .select_next_window = tileLayout_select_next_window,
     .select_previous_window = tileLayout_select_previous_window,
+    .swap_clients = tileLayout_swap_clients,
     .move_client_to_master = tileLayout_move_client_to_master,
     .move_client_next = tilelayout_move_client_next,
     .move_client_previous = tilelayout_move_client_previous,
@@ -1056,26 +1066,71 @@ LRESULT CALLBACK handle_mouse(int code, WPARAM w, LPARAM l)
 {
     if (code >= 0) 
     {
-        if (g_dragInProgress && w == WM_LBUTTONUP)
+        if (g_dragInProgress && g_dragHwnd && g_dragWorkspace && w == WM_LBUTTONUP)
         {
+            LONG styles = GetWindowLong(g_dragHwnd, GWL_STYLE);
+            LONG exStyles = GetWindowLong(g_dragHwnd, GWL_EXSTYLE);
+            BOOL isRootWindow = is_root_window(g_dragHwnd, styles, exStyles);
+
+            Client *client = windowManager_find_client_in_workspaces_by_hwnd(g_dragHwnd);
+            if(client)
+            {
+                if(!isRootWindow)
+                {
+                    workspace_remove_client(client->workspace, client);
+                    free_client(client);
+                    return CallNextHookEx(g_mouse_hook, code, w, l);
+                }
+            }
+            else
+            {
+                if(!isRootWindow)
+                {
+                    return CallNextHookEx(g_mouse_hook, code, w, l);
+                }
+
+                client = clientFactory_create_from_hwnd(g_dragHwnd);
+                if(client->data->processId)
+                {
+                    worksapce_add_client(g_dragWorkspace, client);
+                }
+                else
+                {
+                    free_client(client);
+                    return CallNextHookEx(g_mouse_hook, code, w, l);
+                }
+            }
+
+            Client *current = client->workspace->clients;
+            while(current)
+            {
+                if(current != client)
+                {
+                    if(hit_test_hwnd(current->data->hwnd))
+                    {
+                        client->workspace->layout->swap_clients(client, current);
+                        break;
+                    }
+                }
+
+                current = current->next;
+            }
+
             workspace_arrange_windows(selectedMonitor->workspace);
             workspace_focus_selected_window(selectedMonitor->workspace);
+
             g_dragInProgress = FALSE;
+            g_dragWorkspace = NULL;
         }
     }
+
     return CallNextHookEx(g_mouse_hook, code, w, l);
 }
 
 LRESULT CALLBACK handle_key_press(int code, WPARAM w, LPARAM l)
 {
     PKBDLLHOOKSTRUCT p = (PKBDLLHOOKSTRUCT)l;
-    if (g_dragInProgress && w == WM_KEYUP && (p->vkCode == VK_LMENU))
-    {
-        workspace_arrange_windows(selectedMonitor->workspace);
-        workspace_focus_selected_window(selectedMonitor->workspace);
-        g_dragInProgress = FALSE;
-    }
-    else if (code == 0 && (w == WM_KEYDOWN || w == WM_SYSKEYDOWN))
+    if (code == 0 && (w == WM_KEYDOWN || w == WM_SYSKEYDOWN))
     {
         KeyBinding *keyBinding = headKeyBinding;
         while(keyBinding)
@@ -1307,13 +1362,17 @@ void CALLBACK handle_windows_event(
             Workspace *workspace = windowManager_find_client_workspace_using_filters(client);
             if(workspace)
             {
-                worksapce_add_client(workspace, client);
-
                 if(GetAsyncKeyState(VK_LBUTTON) & 0x8000)
                 {
-                    g_dragInProgress = TRUE;
+                    if(!g_dragInProgress)
+                    {
+                        g_dragHwnd = hwnd;
+                        g_dragWorkspace = workspace;
+                        g_dragInProgress = TRUE;
+                    }
                     return;
                 }
+                worksapce_add_client(workspace, client);
                 workspace_arrange_windows(workspace);
                 workspace_focus_selected_window(workspace);
             }
@@ -1393,7 +1452,12 @@ void CALLBACK handle_windows_event(
 
                         if(GetAsyncKeyState(VK_LBUTTON) & 0x8000)
                         {
-                            g_dragInProgress = TRUE;
+                            if(!g_dragInProgress)
+                            {
+                                g_dragHwnd = hwnd;
+                                g_dragWorkspace = client->workspace;
+                                g_dragInProgress = TRUE;
+                            }
                             return;
                         }
 
@@ -2392,6 +2456,20 @@ void workspace_focus_selected_window(Workspace *workspace)
 void noop_move_client_to_master(Client *client)
 {
     UNREFERENCED_PARAMETER(client);
+}
+
+void noop_swap_clients(Client *client1, Client *client2)
+{
+    UNREFERENCED_PARAMETER(client1);
+    UNREFERENCED_PARAMETER(client2);
+}
+
+void tileLayout_swap_clients(Client *client1, Client *client2)
+{
+    assert(client1->workspace == client2->workspace);
+    ClientData *tmp = client1->data;
+    client1->data = client2->data;
+    client2->data = tmp;
 }
 
 void tileLayout_move_client_to_master(Client *client)
