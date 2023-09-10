@@ -93,11 +93,13 @@ void process_with_stdin_start(TCHAR *cmdArgs, CHAR **lines, int numberOfLines, v
 void start_process(CHAR *processExe, CHAR *cmdArgs, DWORD creationFlags);
 void process_with_stdout_start(CHAR *cmdArgs, void (*onSuccess) (CHAR *));
 
+static void clients_add_before(Client *clientToAdd, Client *clientToAddBefore);
+
 static void windowMnaager_remove_client_if_found_by_hwnd(HWND hwnd);
 static void windowManager_move_window_to_workspace_and_arrange(HWND hwnd, Workspace *workspace);
 static Workspace* windowManager_find_client_workspace_using_filters(Client *client);
 static Client* windowManager_find_client_in_workspaces_by_hwnd(HWND hwnd);
-static void worksapce_add_client(Workspace *workspace, Client *client);
+static void workspace_add_client(Workspace *workspace, Client *client);
 static BOOL workspace_remove_client(Workspace *workspace, Client *client);
 static void workspace_arrange_windows(Workspace *workspace);
 static void workspace_arrange_windows_with_defer_handle(Workspace *workspace, HDWP hdwp);
@@ -172,7 +174,9 @@ HPEN borderForegroundPen;
 HPEN borderNotForegroundPen;
 HBRUSH barSelectedBackgroundBrush;
 HBRUSH backgroundBrush;
+HBRUSH dropTargetBrush;
 HWND borderWindowHwnd;
+HWND dropTargetHwnd;
 
 //defualts maybe there is a better way to do this
 long barHeight = 29;
@@ -184,6 +188,7 @@ COLORREF buttonSelectedTextColor = RGB(204, 36, 29);
 COLORREF buttonWithWindowsTextColor = RGB(255, 255, 247);
 COLORREF buttonWithoutWindowsTextColor = 0x504945;
 COLORREF barTextColor = RGB(235, 219, 178);
+COLORREF dropTargetColor = RGB(0, 90, 90);
 
 Layout deckLayout = {
     .select_next_window = deckLayout_select_next_window,
@@ -953,7 +958,7 @@ static BOOL CALLBACK enum_windows_callback(HWND hwnd, LPARAM lparam)
     Workspace *workspace = windowManager_find_client_workspace_using_filters(client);
     if(workspace)
     {
-        worksapce_add_client(workspace, client);
+        workspace_add_client(workspace, client);
     }
     else
     {
@@ -1068,6 +1073,16 @@ LRESULT CALLBACK handle_mouse(int code, WPARAM w, LPARAM l)
     {
         if (g_dragInProgress && g_dragHwnd && g_dragWorkspace && w == WM_LBUTTONUP)
         {
+            SetWindowPos(
+                    dropTargetHwnd,
+                    HWND_TOP,
+                    0,
+                    0,
+                    0,
+                    0,
+                    SWP_HIDEWINDOW);
+
+            g_dragInProgress = FALSE;
             LONG styles = GetWindowLong(g_dragHwnd, GWL_STYLE);
             LONG exStyles = GetWindowLong(g_dragHwnd, GWL_EXSTYLE);
             BOOL isRootWindow = is_root_window(g_dragHwnd, styles, exStyles);
@@ -1079,47 +1094,71 @@ LRESULT CALLBACK handle_mouse(int code, WPARAM w, LPARAM l)
                 {
                     workspace_remove_client(client->workspace, client);
                     free_client(client);
+                    g_dragWorkspace = NULL;
                     return CallNextHookEx(g_mouse_hook, code, w, l);
+                }
+
+                Client *current = client->workspace->clients;
+                while(current)
+                {
+                    if(current != client)
+                    {
+                        if(hit_test_hwnd(current->data->hwnd))
+                        {
+                            client->workspace->layout->swap_clients(client, current);
+                            client->workspace->selected = current;
+                            break;
+                        }
+                    }
+
+                    current = current->next;
                 }
             }
             else
             {
                 if(!isRootWindow)
                 {
+                    g_dragWorkspace = NULL;
                     return CallNextHookEx(g_mouse_hook, code, w, l);
                 }
 
                 client = clientFactory_create_from_hwnd(g_dragHwnd);
                 if(client->data->processId)
                 {
-                    worksapce_add_client(g_dragWorkspace, client);
+                    Client *current = g_dragWorkspace->clients;
+                    BOOL clientAdded = FALSE;
+                    while(current)
+                    {
+                        if(current != client)
+                        {
+                            if(hit_test_hwnd(current->data->hwnd))
+                            {
+                                clients_add_before(client, current);
+                                client->workspace = current->workspace;
+                                workspace_update_client_counts(client->workspace);
+                                clientAdded = TRUE;
+                                break;
+                            }
+                        }
+
+                        current = current->next;
+                    }
+                    if(!clientAdded)
+                    {
+                        workspace_add_client(g_dragWorkspace, client);
+                    }
                 }
                 else
                 {
                     free_client(client);
+                    g_dragWorkspace = NULL;
                     return CallNextHookEx(g_mouse_hook, code, w, l);
                 }
-            }
-
-            Client *current = client->workspace->clients;
-            while(current)
-            {
-                if(current != client)
-                {
-                    if(hit_test_hwnd(current->data->hwnd))
-                    {
-                        client->workspace->layout->swap_clients(client, current);
-                        break;
-                    }
-                }
-
-                current = current->next;
             }
 
             workspace_arrange_windows(selectedMonitor->workspace);
             workspace_focus_selected_window(selectedMonitor->workspace);
 
-            g_dragInProgress = FALSE;
             g_dragWorkspace = NULL;
         }
     }
@@ -1372,7 +1411,7 @@ void CALLBACK handle_windows_event(
                     }
                     return;
                 }
-                worksapce_add_client(workspace, client);
+                workspace_add_client(workspace, client);
                 workspace_arrange_windows(workspace);
                 workspace_focus_selected_window(workspace);
             }
@@ -1457,6 +1496,50 @@ void CALLBACK handle_windows_event(
                                 g_dragHwnd = hwnd;
                                 g_dragWorkspace = client->workspace;
                                 g_dragInProgress = TRUE;
+                            }
+                            BOOL hit = FALSE;
+                            Client *current = client->workspace->clients;
+                            while(current)
+                            {
+                                if(current != client)
+                                {
+                                    if(hit_test_hwnd(current->data->hwnd))
+                                    {
+                                        hit = TRUE;
+                                        break;
+                                    }
+                                }
+
+                                current = current->next;
+                            }
+
+                            if(hit)
+                            {
+                                SetWindowPos(
+                                        dropTargetHwnd,
+                                        HWND_TOP,
+                                        current->data->x,
+                                        current->data->y,
+                                        current->data->w,
+                                        current->data->h,
+                                        SWP_SHOWWINDOW);
+
+                                SetWindowLong(dropTargetHwnd, GWL_EXSTYLE, exStyles | WS_EX_LAYERED);
+                                SetLayeredWindowAttributes(dropTargetHwnd, RGB(0, 0, 0), (255 * 50) / 100, LWA_ALPHA);
+                                client->workspace->selected = current;
+                            }
+                            else
+                            {
+                                SetWindowLong(dropTargetHwnd, GWL_EXSTYLE, exStyles | WS_EX_LAYERED);
+                                SetLayeredWindowAttributes(dropTargetHwnd, RGB(0, 0, 0), (255 * 50) / 100, LWA_ALPHA);
+                                SetWindowPos(
+                                        dropTargetHwnd,
+                                        HWND_TOP,
+                                        client->data->x,
+                                        client->data->y,
+                                        client->data->w,
+                                        client->data->h,
+                                        SWP_SHOWWINDOW);
                             }
                             return;
                         }
@@ -1584,7 +1667,7 @@ void windowManager_move_window_to_workspace_and_arrange(HWND hwnd, Workspace *wo
 
     if(client)
     {
-        worksapce_add_client(workspace, client);
+        workspace_add_client(workspace, client);
         workspace_arrange_windows(workspace);
     }
 }
@@ -2055,6 +2138,20 @@ void clients_add_as_first_node(Client *client)
     client->next = NULL;
 }
 
+void clients_add_before(Client *clientToAdd, Client *clientToAddBefore)
+{
+    Client *tmp = clientToAddBefore->previous;
+
+    clientToAddBefore->previous = clientToAdd;
+    clientToAdd->next = clientToAddBefore;
+    clientToAdd->previous = tmp;
+
+    if(tmp)
+    {
+        tmp->next = clientToAdd;
+    }
+}
+
 void clients_add_as_root_node(Client *currentRootNode, Client *client)
 {
     client->previous = NULL;
@@ -2111,7 +2208,7 @@ void workspace_add_unminimized_client(Workspace *workspace, Client *client)
     workspace->selected = client;
 }
 
-void worksapce_add_client(Workspace *workspace, Client *client)
+void workspace_add_client(Workspace *workspace, Client *client)
 {
     client->workspace = workspace;
     if(client->data->isMinimized)
@@ -4300,17 +4397,39 @@ void border_window_paint(HWND hWnd)
         HPEN hpenOld;
         HBRUSH hbrushOld = (HBRUSH)(SelectObject(hDC, GetStockObject(NULL_BRUSH)));
         SetDCPenColor(hDC, RGB(100, 0, 0));
-        if(isForegroundWindowSameAsSelectMonitorSelected || menuVisible) {
+        if(isForegroundWindowSameAsSelectMonitorSelected || menuVisible)
+        {
             hpenOld = SelectObject(hDC, borderForegroundPen);
-        } else {
+        }
+        else {
             hpenOld = SelectObject(hDC, borderNotForegroundPen);
         }
 
         RECT rcWindow;
         GetClientRect(hWnd, &rcWindow);
+
+        FillRect(hDC, &rcWindow, GetStockObject(NULL_BRUSH));
         Rectangle(hDC, rcWindow.left, rcWindow.top, rcWindow.right, rcWindow.bottom);
+
         SelectObject(hDC, hpenOld);
         SelectObject(hDC, hbrushOld);
+        EndPaint(hWnd, &ps);
+    }
+}
+
+void drop_target_window_paint(HWND hWnd)
+{
+    if(selectedMonitor->workspace->selected || selectedMonitor->scratchWindow || menuVisible)
+    {
+        PAINTSTRUCT ps;
+        HDC hDC = BeginPaint(hWnd, &ps);
+
+        RECT rcWindow;
+        GetClientRect(hWnd, &rcWindow);
+        /* Rectangle(hDC, rcWindow.left, rcWindow.top, rcWindow.right, rcWindow.bottom); */
+
+        FillRect(hDC, &rcWindow, dropTargetBrush);
+
         EndPaint(hWnd, &ps);
     }
 }
@@ -4356,6 +4475,22 @@ static LRESULT border_window_message_loop(HWND h, UINT msg, WPARAM wp, LPARAM lp
     return 0;
 }
 
+static LRESULT drop_target_window_message_loop(HWND h, UINT msg, WPARAM wp, LPARAM lp)
+{
+    switch(msg)
+    {
+        case WM_PAINT:
+        {
+            drop_target_window_paint(h);
+        } break;
+
+        default:
+            return DefWindowProc(h, msg, wp, lp);
+    }
+
+    return 0;
+}
+
 WNDCLASSEX* border_window_register_class(void)
 {
     WNDCLASSEX *wc    = malloc(sizeof(WNDCLASSEX));
@@ -4370,6 +4505,32 @@ WNDCLASSEX* border_window_register_class(void)
     wc->hbrBackground = (HBRUSH)GetStockObject(BLACK_BRUSH);
     wc->lpszMenuName  = NULL;
     wc->lpszClassName = L"SimpleWindowBorderWindowClass";
+    wc->hIconSm       = LoadIcon(NULL, IDI_APPLICATION);
+
+    if(!RegisterClassEx(wc))
+    {
+        MessageBox(NULL, L"Window Registration Failed!", L"Error!",
+            MB_ICONEXCLAMATION | MB_OK);
+        return NULL;
+    }
+
+    return wc;
+}
+
+WNDCLASSEX* drop_target_window_register_class(void)
+{
+    WNDCLASSEX *wc    = malloc(sizeof(WNDCLASSEX));
+    wc->cbSize        = sizeof(WNDCLASSEX);
+    wc->style         = CS_DBLCLKS | CS_OWNDC | CS_HREDRAW | CS_VREDRAW;
+    wc->lpfnWndProc   = drop_target_window_message_loop;
+    wc->cbClsExtra    = 0;
+    wc->cbWndExtra    = 0;
+    wc->hIcon         = LoadIcon(NULL, IDI_APPLICATION);
+    wc->hInstance     = GetModuleHandle(0);
+    wc->hCursor       = LoadCursor(NULL, IDC_ARROW);
+    wc->hbrBackground = (HBRUSH)GetStockObject(BLACK_BRUSH);
+    wc->lpszMenuName  = NULL;
+    wc->lpszClassName = L"SimpleWindowDropTargetWindowClass";
     wc->hIconSm       = LoadIcon(NULL, IDI_APPLICATION);
 
     if(!RegisterClassEx(wc))
@@ -4399,6 +4560,31 @@ void border_window_run(WNDCLASSEX *windowClass)
         NULL);
 
     borderWindowHwnd = hwnd;
+
+    if(hwnd == NULL)
+    {
+        MessageBox(NULL, L"Window Creation Failed!", L"Error!",
+            MB_ICONEXCLAMATION | MB_OK);
+    }
+}
+
+void drop_target_window_run(WNDCLASSEX *windowClass)
+{
+    HWND hwnd = CreateWindowEx(
+        WS_EX_PALETTEWINDOW | WS_EX_NOACTIVATE,
+        windowClass->lpszClassName,
+        L"SimpleWM Drop Target",
+        WS_POPUP,
+        6,
+        37,
+        1275,
+        1393,
+        NULL,
+        NULL,
+        GetModuleHandle(0),
+        NULL);
+
+    dropTargetHwnd = hwnd;
 
     if(hwnd == NULL)
     {
@@ -5304,6 +5490,7 @@ int run (void)
     HINSTANCE moduleHandle = GetModuleHandle(NULL);
     barSelectedBackgroundBrush = CreateSolidBrush(barSelectedBackgroundColor);
     backgroundBrush = CreateSolidBrush(barBackgroundColor);
+    dropTargetBrush = CreateSolidBrush(dropTargetColor);
 
     if(configuration->initalizeFontFunc)
     {
@@ -5486,6 +5673,7 @@ int run (void)
     }
 
     WNDCLASSEX* borderWindowClass = border_window_register_class();
+    WNDCLASSEX* dropTargetWindowClass = drop_target_window_register_class();
 
     EnumWindows(enum_windows_callback, 0);
 
@@ -5498,6 +5686,7 @@ int run (void)
     }
 
     border_window_run(borderWindowClass);
+    drop_target_window_run(dropTargetWindowClass);
 
     g_mouse_hook = SetWindowsHookEx(WH_KEYBOARD_LL, &handle_key_press, moduleHandle, 0);
     g_kb_hook = SetWindowsHookEx(WH_MOUSE_LL, &handle_mouse, moduleHandle, 0);
