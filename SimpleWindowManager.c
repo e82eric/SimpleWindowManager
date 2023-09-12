@@ -61,7 +61,6 @@ HHOOK g_kb_hook = 0;
 HHOOK g_mouse_hook = 0;
 BOOL g_dragInProgress;
 HWND g_dragHwnd;
-Workspace *g_dragWorkspace;
 
 HWINEVENTHOOK g_win_hook;
 
@@ -148,6 +147,7 @@ static int get_cpu_usage(void);
 static int get_memory_percent(void);
 static int run (void);
 static BOOL hit_test_hwnd(HWND hwnd);
+static BOOL hit_test_monitor(Monitor *monitor);
 static BOOL hit_test_client(Client *client);
 
 static IAudioEndpointVolume *audioEndpointVolume;
@@ -1067,94 +1067,173 @@ BOOL is_root_window(HWND hwnd, LONG styles, LONG exStyles)
     return TRUE;
 }
 
+Workspace* drop_target_find_workspace_from_mouse_location(void)
+{
+    Workspace *dropTargetWorkspace = NULL;
+    for(int i = 0; i < numberOfDisplayMonitors; i++)
+    {
+        Monitor *monitor = monitors[i];
+        if(hit_test_monitor(monitor))
+        {
+            dropTargetWorkspace = monitor->workspace;
+            break;
+        }
+    }
+    return dropTargetWorkspace;
+}
+
+Client* drop_target_find_client_in_workspace_from_mouse_location(Workspace *workspace)
+{
+    Client *dropTargetClient = NULL;
+    Client *current = workspace->clients;
+    while(current)
+    {
+        if(current->data->hwnd != g_dragHwnd)
+        {
+            if(hit_test_hwnd(current->data->hwnd))
+            {
+                dropTargetClient = current;
+                break;
+            }
+        }
+
+        current = current->next;
+    }
+    if(!dropTargetClient && workspace->selected)
+    {
+        if(hit_test_client(workspace->selected))
+        {
+            dropTargetClient = workspace->selected;
+        }
+    }
+    return dropTargetClient;
+}
+
+Client* drop_target_find_client_from_mouse_location(void)
+{
+    Client *result = NULL;
+    Workspace *workspace = drop_target_find_workspace_from_mouse_location();
+    if(workspace)
+    {
+        result = drop_target_find_client_in_workspace_from_mouse_location(workspace);
+    }
+    return result;
+}
+
+BOOL drag_drop_start(HWND hwnd)
+{
+    if(!hit_test_hwnd(hwnd))
+    {
+        return FALSE;
+    }
+
+    Client *dropTargetClient = drop_target_find_client_from_mouse_location();
+    if(dropTargetClient)
+    {
+        g_dragHwnd = hwnd;
+        g_dragInProgress = TRUE;
+
+        SetWindowPos(
+                dropTargetHwnd,
+                HWND_TOP,
+                dropTargetClient->data->x,
+                dropTargetClient->data->y,
+                dropTargetClient->data->w,
+                dropTargetClient->data->h,
+                SWP_SHOWWINDOW);
+        return TRUE;
+    }
+
+    return FALSE;
+}
+
+void drag_drop_cancel(void)
+{
+    g_dragInProgress = FALSE;
+    g_dragHwnd = NULL;
+
+    SetWindowPos(
+            dropTargetHwnd,
+            HWND_BOTTOM,
+            0,
+            0,
+            0,
+            0,
+            SWP_HIDEWINDOW);
+}
+
 LRESULT CALLBACK handle_mouse(int code, WPARAM w, LPARAM l)
 {
     if (code >= 0) 
     {
         if(w == WM_LBUTTONUP)
         {
-            if (g_dragInProgress && g_dragHwnd && g_dragWorkspace)
+            if (g_dragInProgress && g_dragHwnd)
             {
-                g_dragInProgress = FALSE;
-                SetWindowPos(
-                        dropTargetHwnd,
-                        HWND_TOP,
-                        0,
-                        0,
-                        0,
-                        0,
-                        SWP_HIDEWINDOW);
+                HWND dragHwnd = g_dragHwnd;
+                Client *dropTargetClient = drop_target_find_client_from_mouse_location();
+                drag_drop_cancel();
 
-                LONG styles = GetWindowLong(g_dragHwnd, GWL_STYLE);
-                LONG exStyles = GetWindowLong(g_dragHwnd, GWL_EXSTYLE);
-                BOOL isRootWindow = is_root_window(g_dragHwnd, styles, exStyles);
+                LONG styles = GetWindowLong(dragHwnd, GWL_STYLE);
+                LONG exStyles = GetWindowLong(dragHwnd, GWL_EXSTYLE);
+                BOOL isRootWindow = is_root_window(dragHwnd, styles, exStyles);
 
-                Client *client = windowManager_find_client_in_workspaces_by_hwnd(g_dragHwnd);
-                if(client)
+                if(dropTargetClient)
                 {
-                    if(!isRootWindow)
+                    Workspace *dropTargetWorkspace = dropTargetClient->workspace;
+                    Client *client = windowManager_find_client_in_workspaces_by_hwnd(dragHwnd);
+                    if(client)
                     {
-                        workspace_remove_client(client->workspace, client);
-                        free_client(client);
-                        g_dragWorkspace = NULL;
-                        return CallNextHookEx(g_mouse_hook, code, w, l);
-                    }
-
-                    Client *current = client->workspace->clients;
-                    while(current)
-                    {
-                        if(current != client)
+                        if(!isRootWindow)
                         {
-                            if(hit_test_hwnd(current->data->hwnd))
-                            {
-                                client->workspace->layout->swap_clients(client, current);
-                                client->workspace->selected = current;
-                                break;
-                            }
+                            workspace_remove_client(client->workspace, client);
+                            free_client(client);
+                            return CallNextHookEx(g_mouse_hook, code, w, l);
                         }
 
-                        current = current->next;
-                    }
-                }
-                else
-                {
-                    if(!isRootWindow)
-                    {
-                        g_dragWorkspace = NULL;
-                        g_dragHwnd = NULL;
-                        return CallNextHookEx(g_mouse_hook, code, w, l);
-                    }
-
-                    client = clientFactory_create_from_hwnd(g_dragHwnd);
-                    if(client->data->processId)
-                    {
-                        Client *current = g_dragWorkspace->clients;
-                        BOOL clientAdded = FALSE;
-                        while(current)
+                        if(client->workspace == dropTargetWorkspace)
                         {
-                            if(hit_test_hwnd(current->data->hwnd))
-                            {
-                                client->workspace = current->workspace;
-                                clients_add_before(client, current);
-                                workspace_update_client_counts(client->workspace);
-                                clientAdded = TRUE;
-                                workspace_focus_selected_window(client->workspace);
-                                break;
-                            }
+                            client->workspace->layout->swap_clients(client, dropTargetClient);
+                            client->workspace->selected = dropTargetClient;
+                        }
+                        else
+                        {
+                            workspace_remove_client(client->workspace, client);
+                            workspace_arrange_windows(client->workspace);
 
-                            current = current->next;
+                            client->workspace = dropTargetWorkspace;
+                            clients_add_before(client, dropTargetClient);
+                            dropTargetWorkspace->selected = client;
+                            workspace_update_client_counts(dropTargetWorkspace);
+                            monitor_select(dropTargetWorkspace->monitor);
                         }
                     }
                     else
                     {
-                        free_client(client);
-                        g_dragWorkspace = NULL;
-                        return CallNextHookEx(g_mouse_hook, code, w, l);
-                    }
-                }
+                        if(!isRootWindow)
+                        {
+                            return CallNextHookEx(g_mouse_hook, code, w, l);
+                        }
 
-                workspace_arrange_windows(selectedMonitor->workspace);
-                workspace_focus_selected_window(selectedMonitor->workspace);
+                        client = clientFactory_create_from_hwnd(dragHwnd);
+                        if(client->data->processId)
+                        {
+                            client->workspace = dropTargetWorkspace;
+                            clients_add_before(client, dropTargetClient);
+                            dropTargetWorkspace->selected = client;
+                            workspace_update_client_counts(dropTargetWorkspace);
+                            monitor_select(dropTargetWorkspace->monitor);
+                        }
+                        else
+                        {
+                            free_client(client);
+                            return CallNextHookEx(g_mouse_hook, code, w, l);
+                        }
+                    }
+
+                    workspace_arrange_windows(dropTargetWorkspace);
+                    workspace_focus_selected_window(dropTargetWorkspace);
+                }
             }
         }
     }
@@ -1167,6 +1246,11 @@ LRESULT CALLBACK handle_key_press(int code, WPARAM w, LPARAM l)
     PKBDLLHOOKSTRUCT p = (PKBDLLHOOKSTRUCT)l;
     if (code == 0 && (w == WM_KEYDOWN || w == WM_SYSKEYDOWN))
     {
+        if(g_dragInProgress && GetAsyncKeyState(LShift) & 0x8000)
+        {
+            drag_drop_cancel();
+        }
+
         KeyBinding *keyBinding = headKeyBinding;
         while(keyBinding)
         {
@@ -1240,6 +1324,41 @@ BOOL isFullscreen(HWND windowHandle)
         && windowRect.right == monitorInfo.rcMonitor.right
         && windowRect.top == monitorInfo.rcMonitor.top
         && windowRect.bottom == monitorInfo.rcMonitor.bottom;
+}
+
+BOOL hit_test_client(Client *client)
+{
+    POINT cursorPoint;
+    GetCursorPos(&cursorPoint);
+
+    ClientData *clientData = client->data;
+    BOOL result = FALSE;
+    if( cursorPoint.x > clientData->x &&
+            cursorPoint.x < clientData->x + clientData->w &&
+            cursorPoint.y > clientData->y &&
+            cursorPoint.y < clientData->y + clientData->h)
+    {
+        result = TRUE;
+    }
+
+    return result;
+}
+
+BOOL hit_test_monitor(Monitor *monitor)
+{
+    POINT cursorPoint;
+    GetCursorPos(&cursorPoint);
+
+    BOOL result = FALSE;
+    if( cursorPoint.x > monitor->xOffset &&
+            cursorPoint.x < monitor->xOffset + monitor->w &&
+            cursorPoint.y > 0 &&
+            cursorPoint.y < monitor->h)
+    {
+        result = TRUE;
+    }
+
+    return result;
 }
 
 BOOL hit_test_hwnd(HWND hwnd)
@@ -1479,41 +1598,9 @@ void CALLBACK handle_windows_event(
                             return;
                         }
 
-                        if(GetAsyncKeyState(VK_LBUTTON) & 0x8000)
+                        if(GetAsyncKeyState(VK_LBUTTON) & 0x8000 && !(GetAsyncKeyState(VK_LSHIFT) & 0x8000))
                         {
-                            g_dragHwnd = hwnd;
-                            g_dragWorkspace = client->workspace;
-                            g_dragInProgress = TRUE;
-
-                            Client *current = client->workspace->clients;
-                            while(current)
-                            {
-                                if(current != client)
-                                {
-                                    if(hit_test_hwnd(current->data->hwnd))
-                                    {
-                                        break;
-                                    }
-                                }
-
-                                current = current->next;
-                            }
-
-                            if(!current)
-                            {
-                                current = client;
-                            }
-
-                            SetWindowPos(
-                                    dropTargetHwnd,
-                                    HWND_TOP,
-                                    current->data->x,
-                                    current->data->y,
-                                    current->data->w,
-                                    current->data->h,
-                                    SWP_SHOWWINDOW);
-
-                            client->workspace->selected = current;
+                            drag_drop_start(hwnd);
                             return;
                         }
 
@@ -1525,36 +1612,12 @@ void CALLBACK handle_windows_event(
             }
             else
             {
-                if(GetAsyncKeyState(VK_LBUTTON) & 0x8000)
+                if(GetAsyncKeyState(VK_LBUTTON) & 0x8000 && !(GetAsyncKeyState(VK_LSHIFT) & 0x8000))
                 {
-                    g_dragInProgress = TRUE;
-                    g_dragHwnd = hwnd;
-                    g_dragWorkspace = selectedMonitor->workspace;
-                    Client *current = selectedMonitor->workspace->clients;
-                    while(current)
+                    if(drag_drop_start(hwnd))
                     {
-                        if(hit_test_hwnd(current->data->hwnd))
-                        {
-                            break;
-                        }
-
-                        current = current->next;
+                        return;
                     }
-
-                    if(current)
-                    {
-                        SetWindowPos(
-                                dropTargetHwnd,
-                                HWND_TOP,
-                                current->data->x,
-                                current->data->y,
-                                current->data->w,
-                                current->data->h,
-                                SWP_SHOWWINDOW);
-
-                        selectedMonitor->workspace->selected = current;
-                    }
-                    return;
                 }
                 if(selectedMonitor->scratchWindow)
                 {
@@ -4434,7 +4497,6 @@ void drop_target_window_paint(HWND hWnd)
 
         RECT rcWindow;
         GetClientRect(hWnd, &rcWindow);
-        /* Rectangle(hDC, rcWindow.left, rcWindow.top, rcWindow.right, rcWindow.bottom); */
 
         FillRect(hDC, &rcWindow, dropTargetBrush);
 
@@ -4515,12 +4577,7 @@ WNDCLASSEX* border_window_register_class(void)
     wc->lpszClassName = L"SimpleWindowBorderWindowClass";
     wc->hIconSm       = LoadIcon(NULL, IDI_APPLICATION);
 
-    if(!RegisterClassEx(wc))
-    {
-        MessageBox(NULL, L"Window Registration Failed!", L"Error!",
-            MB_ICONEXCLAMATION | MB_OK);
-        return NULL;
-    }
+    RegisterClassEx(wc);
 
     return wc;
 }
@@ -4541,12 +4598,7 @@ WNDCLASSEX* drop_target_window_register_class(void)
     wc->lpszClassName = L"SimpleWindowDropTargetWindowClass";
     wc->hIconSm       = LoadIcon(NULL, IDI_APPLICATION);
 
-    if(!RegisterClassEx(wc))
-    {
-        MessageBox(NULL, L"Window Registration Failed!", L"Error!",
-            MB_ICONEXCLAMATION | MB_OK);
-        return NULL;
-    }
+    RegisterClassEx(wc);
 
     return wc;
 }
@@ -4558,22 +4610,16 @@ void border_window_run(WNDCLASSEX *windowClass)
         windowClass->lpszClassName,
         L"SimpleWM Border",
         WS_POPUP,
-        6,
-        37,
-        1275,
-        1393,
+        0,
+        0,
+        0,
+        0,
         NULL,
         NULL,
         GetModuleHandle(0),
         NULL);
 
     borderWindowHwnd = hwnd;
-
-    if(hwnd == NULL)
-    {
-        MessageBox(NULL, L"Window Creation Failed!", L"Error!",
-            MB_ICONEXCLAMATION | MB_OK);
-    }
 }
 
 void drop_target_window_run(WNDCLASSEX *windowClass)
@@ -4583,25 +4629,18 @@ void drop_target_window_run(WNDCLASSEX *windowClass)
         windowClass->lpszClassName,
         L"SimpleWM Drop Target",
         WS_POPUP,
-        6,
-        37,
-        1275,
-        1393,
+        0,
+        0,
+        0,
+        0,
         NULL,
         NULL,
         GetModuleHandle(0),
         NULL);
 
-    /* SetWindowLong(hwnd, GWL_EXSTYLE, exStyles | WS_EX_LAYERED); */
     SetLayeredWindowAttributes(hwnd, RGB(0, 0, 0), (255 * 50) / 100, LWA_ALPHA);
 
     dropTargetHwnd = hwnd;
-
-    if(hwnd == NULL)
-    {
-        MessageBox(NULL, L"Window Creation Failed!", L"Error!",
-            MB_ICONEXCLAMATION | MB_OK);
-    }
 }
 
 void command_execute_no_arg(Command *self)
