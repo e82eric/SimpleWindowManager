@@ -1067,28 +1067,31 @@ BOOL is_root_window(HWND hwnd, LONG styles, LONG exStyles)
     return TRUE;
 }
 
-Workspace* drop_target_find_workspace_from_mouse_location(void)
+Monitor* drop_target_find_monitor_from_mouse_location(void)
 {
-    Workspace *dropTargetWorkspace = NULL;
+    Monitor *result = NULL;
     for(int i = 0; i < numberOfDisplayMonitors; i++)
     {
         Monitor *monitor = monitors[i];
         if(hit_test_monitor(monitor))
         {
-            dropTargetWorkspace = monitor->workspace;
+            result = monitor;
             break;
         }
     }
-    return dropTargetWorkspace;
+    return result;
 }
 
-Client* drop_target_find_client_in_workspace_from_mouse_location(Workspace *workspace)
+Client* drop_target_find_client_from_mouse_location(Monitor *monitor, HWND focusedHwnd)
 {
+    assert(monitor->workspace);
+    Workspace *workspace = monitor->workspace;
+
     Client *dropTargetClient = NULL;
     Client *current = workspace->clients;
     while(current)
     {
-        if(current->data->hwnd != g_dragHwnd)
+        if(current->data->hwnd != focusedHwnd)
         {
             if(hit_test_hwnd(current->data->hwnd))
             {
@@ -1109,17 +1112,6 @@ Client* drop_target_find_client_in_workspace_from_mouse_location(Workspace *work
     return dropTargetClient;
 }
 
-Client* drop_target_find_client_from_mouse_location(void)
-{
-    Client *result = NULL;
-    Workspace *workspace = drop_target_find_workspace_from_mouse_location();
-    if(workspace)
-    {
-        result = drop_target_find_client_in_workspace_from_mouse_location(workspace);
-    }
-    return result;
-}
-
 BOOL drag_drop_start(HWND hwnd)
 {
     if(!hit_test_hwnd(hwnd))
@@ -1127,21 +1119,40 @@ BOOL drag_drop_start(HWND hwnd)
         return FALSE;
     }
 
-    Client *dropTargetClient = drop_target_find_client_from_mouse_location();
-    if(dropTargetClient)
+    Monitor *dropTargetMonitor = drop_target_find_monitor_from_mouse_location();
+    if(dropTargetMonitor)
     {
-        g_dragHwnd = hwnd;
-        g_dragInProgress = TRUE;
+        Client *dropTargetClient = drop_target_find_client_from_mouse_location(dropTargetMonitor, hwnd);
+        if(dropTargetClient)
+        {
+            g_dragHwnd = hwnd;
+            g_dragInProgress = TRUE;
 
-        SetWindowPos(
-                dropTargetHwnd,
-                HWND_TOP,
-                dropTargetClient->data->x,
-                dropTargetClient->data->y,
-                dropTargetClient->data->w,
-                dropTargetClient->data->h,
-                SWP_SHOWWINDOW);
-        return TRUE;
+            SetWindowPos(
+                    dropTargetHwnd,
+                    HWND_TOPMOST,
+                    dropTargetClient->data->x,
+                    dropTargetClient->data->y,
+                    dropTargetClient->data->w,
+                    dropTargetClient->data->h,
+                    SWP_SHOWWINDOW);
+            return TRUE;
+        }
+        else
+        {
+            if(!dropTargetMonitor->workspace->clients)
+            {
+                SetWindowPos(
+                        dropTargetHwnd,
+                        HWND_TOP,
+                        dropTargetMonitor->xOffset + gapWidth,
+                        barHeight + gapWidth,
+                        dropTargetMonitor->w - (gapWidth * 2),
+                        dropTargetMonitor->h - barHeight - (gapWidth * 2),
+                        SWP_SHOWWINDOW);
+                return TRUE;
+            }
+        }
     }
 
     return FALSE;
@@ -1171,68 +1182,89 @@ LRESULT CALLBACK handle_mouse(int code, WPARAM w, LPARAM l)
             if (g_dragInProgress && g_dragHwnd)
             {
                 HWND dragHwnd = g_dragHwnd;
-                Client *dropTargetClient = drop_target_find_client_from_mouse_location();
                 drag_drop_cancel();
 
-                LONG styles = GetWindowLong(dragHwnd, GWL_STYLE);
-                LONG exStyles = GetWindowLong(dragHwnd, GWL_EXSTYLE);
-                BOOL isRootWindow = is_root_window(dragHwnd, styles, exStyles);
+                Monitor *dropTargetMonitor = drop_target_find_monitor_from_mouse_location();
 
-                if(dropTargetClient)
+                if(dropTargetMonitor)
                 {
-                    Workspace *dropTargetWorkspace = dropTargetClient->workspace;
-                    Client *client = windowManager_find_client_in_workspaces_by_hwnd(dragHwnd);
-                    if(client)
-                    {
-                        if(!isRootWindow)
-                        {
-                            workspace_remove_client(client->workspace, client);
-                            free_client(client);
-                            return CallNextHookEx(g_mouse_hook, code, w, l);
-                        }
+                    Client *dropTargetClient = drop_target_find_client_from_mouse_location(dropTargetMonitor, dragHwnd);
 
-                        if(client->workspace == dropTargetWorkspace)
+                    LONG styles = GetWindowLong(dragHwnd, GWL_STYLE);
+                    LONG exStyles = GetWindowLong(dragHwnd, GWL_EXSTYLE);
+                    BOOL isRootWindow = is_root_window(dragHwnd, styles, exStyles);
+
+                    if(dropTargetClient)
+                    {
+                        Workspace *dropTargetWorkspace = dropTargetClient->workspace;
+                        Client *client = windowManager_find_client_in_workspaces_by_hwnd(dragHwnd);
+                        if(client)
                         {
-                            client->workspace->layout->swap_clients(client, dropTargetClient);
-                            client->workspace->selected = dropTargetClient;
+                            if(!isRootWindow)
+                            {
+                                workspace_remove_client(client->workspace, client);
+                                free_client(client);
+                                return CallNextHookEx(g_mouse_hook, code, w, l);
+                            }
+
+                            if(client->workspace == dropTargetWorkspace)
+                            {
+                                client->workspace->layout->swap_clients(client, dropTargetClient);
+                                client->workspace->selected = dropTargetClient;
+                            }
+                            else
+                            {
+                                workspace_remove_client(client->workspace, client);
+                                workspace_arrange_windows(client->workspace);
+
+                                client->workspace = dropTargetWorkspace;
+                                clients_add_before(client, dropTargetClient);
+                                dropTargetWorkspace->selected = client;
+                                workspace_update_client_counts(dropTargetWorkspace);
+                                monitor_select(dropTargetWorkspace->monitor);
+                            }
                         }
                         else
                         {
-                            workspace_remove_client(client->workspace, client);
-                            workspace_arrange_windows(client->workspace);
+                            if(!isRootWindow)
+                            {
+                                return CallNextHookEx(g_mouse_hook, code, w, l);
+                            }
 
-                            client->workspace = dropTargetWorkspace;
-                            clients_add_before(client, dropTargetClient);
-                            dropTargetWorkspace->selected = client;
-                            workspace_update_client_counts(dropTargetWorkspace);
-                            monitor_select(dropTargetWorkspace->monitor);
+                            client = clientFactory_create_from_hwnd(dragHwnd);
+                            if(client->data->processId)
+                            {
+                                client->workspace = dropTargetWorkspace;
+                                clients_add_before(client, dropTargetClient);
+                                dropTargetWorkspace->selected = client;
+                                workspace_update_client_counts(dropTargetWorkspace);
+                                monitor_select(dropTargetWorkspace->monitor);
+                            }
+                            else
+                            {
+                                free_client(client);
+                                return CallNextHookEx(g_mouse_hook, code, w, l);
+                            }
                         }
+
+                        workspace_arrange_windows(dropTargetWorkspace);
+                        workspace_focus_selected_window(dropTargetWorkspace);
                     }
                     else
                     {
-                        if(!isRootWindow)
+                        if(!dropTargetMonitor->workspace->clients)
                         {
-                            return CallNextHookEx(g_mouse_hook, code, w, l);
-                        }
+                            Client *client = windowManager_find_client_in_workspaces_by_hwnd(dragHwnd);
+                            workspace_remove_client(client->workspace, client);
+                            workspace_arrange_windows(client->workspace);
 
-                        client = clientFactory_create_from_hwnd(dragHwnd);
-                        if(client->data->processId)
-                        {
-                            client->workspace = dropTargetWorkspace;
-                            clients_add_before(client, dropTargetClient);
-                            dropTargetWorkspace->selected = client;
-                            workspace_update_client_counts(dropTargetWorkspace);
-                            monitor_select(dropTargetWorkspace->monitor);
-                        }
-                        else
-                        {
-                            free_client(client);
-                            return CallNextHookEx(g_mouse_hook, code, w, l);
+                            workspace_add_client(dropTargetMonitor->workspace, client);
+                            workspace_update_client_counts(dropTargetMonitor->workspace);
+                            workspace_arrange_windows(dropTargetMonitor->workspace);
+                            workspace_focus_selected_window(dropTargetMonitor->workspace);
+                            monitor_select(dropTargetMonitor);
                         }
                     }
-
-                    workspace_arrange_windows(dropTargetWorkspace);
-                    workspace_focus_selected_window(dropTargetWorkspace);
                 }
             }
         }
@@ -1604,9 +1636,7 @@ void CALLBACK handle_windows_event(
                             return;
                         }
 
-                        HDWP hdwp = BeginDeferWindowPos(1);
                         workspace_arrange_windows(client->workspace);
-                        EndDeferWindowPos(hdwp);
                     }
                 }
             }
@@ -5779,23 +5809,7 @@ int run (void)
         WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
 
     g_win_hook = SetWinEventHook(
-        EVENT_SYSTEM_MOVESIZEEND, EVENT_SYSTEM_MOVESIZEEND,
-        NULL,
-        handle_windows_event,
-        0,
-        0,
-        WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
-
-    g_win_hook = SetWinEventHook(
         EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_FOREGROUND,
-        NULL,
-        handle_windows_event,
-        0,
-        0,
-        WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
-
-    g_win_hook = SetWinEventHook(
-        EVENT_OBJECT_NAMECHANGE, EVENT_OBJECT_NAMECHANGE,
         NULL,
         handle_windows_event,
         0,
