@@ -60,6 +60,9 @@ struct LauncherProcess
 HHOOK g_kb_hook = 0;
 HHOOK g_mouse_hook = 0;
 BOOL g_dragInProgress;
+BOOL g_resizeInProgress;
+Workspace *g_resizeWorkspace;
+HWND g_resizeHwnd;
 HWND g_dragHwnd;
 
 HWINEVENTHOOK g_win_hook;
@@ -1114,6 +1117,10 @@ Client* drop_target_find_client_from_mouse_location(Monitor *monitor, HWND focus
 
 BOOL drag_drop_start(HWND hwnd)
 {
+    g_resizeInProgress = FALSE;
+    g_resizeWorkspace = NULL;
+    g_resizeHwnd = NULL;
+
     if(!hit_test_hwnd(hwnd))
     {
         return FALSE;
@@ -1125,6 +1132,29 @@ BOOL drag_drop_start(HWND hwnd)
         Client *dropTargetClient = drop_target_find_client_from_mouse_location(dropTargetMonitor, hwnd);
         if(dropTargetClient)
         {
+            Client *client = windowManager_find_client_in_workspaces_by_hwnd(hwnd);
+            if(client)
+            {
+                RECT windowRect;
+                RECT clientRect;
+                RECT xrect;
+                GetWindowRect(hwnd, &windowRect);
+                GetClientRect(hwnd, &clientRect);
+                DwmGetWindowAttribute(hwnd, 9, &xrect, sizeof(RECT));
+
+                BOOL leftIsChanged = windowRect.left > client->data->x + 10 || windowRect.left < client->data->x - 10;
+                BOOL topIsChanged = windowRect.top > client->data->y + 10 || windowRect.top < client->data->y - 10;
+                BOOL rightIsChanged = windowRect.right > (client->data->x + client->data->w + 10) || windowRect.left < (client->data->x + client->data->w - 10);
+                BOOL isMoving = leftIsChanged && topIsChanged && rightIsChanged;
+                if(!isMoving)
+                {
+                    g_resizeInProgress = TRUE;
+                    g_resizeWorkspace = client->workspace;
+                    g_resizeHwnd = hwnd;
+                    return FALSE;
+                }
+            }
+
             g_dragHwnd = hwnd;
             g_dragInProgress = TRUE;
 
@@ -1179,7 +1209,28 @@ LRESULT CALLBACK handle_mouse(int code, WPARAM w, LPARAM l)
     {
         if(w == WM_LBUTTONUP)
         {
-            if (g_dragInProgress && g_dragHwnd)
+            if (g_resizeInProgress && g_resizeWorkspace)
+            {
+                g_resizeInProgress = FALSE;
+                if(g_resizeWorkspace)
+                {
+                    if(g_resizeHwnd == g_resizeWorkspace->clients->data->hwnd)
+                    {
+                        RECT windowRect;
+                        GetWindowRect(g_resizeHwnd, &windowRect);
+                        ClientData *clientData = g_resizeWorkspace->clients->data;
+                        int currentRight = (clientData->x + clientData->w) - g_resizeWorkspace->masterOffset;
+                        g_resizeWorkspace->masterOffset = windowRect.right - (currentRight);
+                        
+                        g_resizeWorkspace->layout->apply_to_workspace(g_resizeWorkspace);
+                        workspace_arrange_windows(g_resizeWorkspace);
+                        workspace_focus_selected_window(g_resizeWorkspace);
+                    }
+                }
+                g_resizeWorkspace = NULL;
+                g_resizeHwnd = NULL;
+            }
+            else if (g_dragInProgress && g_dragHwnd)
             {
                 HWND dragHwnd = g_dragHwnd;
                 drag_drop_cancel();
