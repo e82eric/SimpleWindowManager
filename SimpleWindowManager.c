@@ -1220,11 +1220,28 @@ LRESULT CALLBACK handle_mouse(int code, WPARAM w, LPARAM l)
                         GetWindowRect(g_resizeHwnd, &windowRect);
                         ClientData *clientData = g_resizeWorkspace->clients->data;
                         int currentRight = (clientData->x + clientData->w) - g_resizeWorkspace->masterOffset;
-                        g_resizeWorkspace->masterOffset = windowRect.right - (currentRight);
+                        g_resizeWorkspace->masterOffset = windowRect.right - currentRight;
                         
                         g_resizeWorkspace->layout->apply_to_workspace(g_resizeWorkspace);
                         workspace_arrange_windows(g_resizeWorkspace);
                         workspace_focus_selected_window(g_resizeWorkspace);
+                    }
+                    else
+                    {
+                        Client *client = windowManager_find_client_in_workspaces_by_hwnd(g_resizeHwnd);
+                        if(client)
+                        {
+                            RECT windowRect;
+                            GetWindowRect(g_resizeHwnd, &windowRect);
+                            ClientData *clientData = client->data;
+                            int currentWidth = windowRect.right - windowRect.left;
+                            int noOffsetWidth = clientData->w + g_resizeWorkspace->masterOffset;
+                            g_resizeWorkspace->masterOffset = (currentWidth - noOffsetWidth) * -1;
+
+                            g_resizeWorkspace->layout->apply_to_workspace(g_resizeWorkspace);
+                            workspace_arrange_windows(g_resizeWorkspace);
+                            workspace_focus_selected_window(g_resizeWorkspace);
+                        }
                     }
                 }
                 g_resizeWorkspace = NULL;
