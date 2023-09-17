@@ -63,6 +63,9 @@ BOOL g_dragInProgress;
 BOOL g_resizeInProgress;
 HWND g_resizeHwnd;
 HWND g_dragHwnd;
+BOOL g_easyResizeInProgress;
+POINT g_easyResizeStartPoint;
+int g_easyResizeStartOffset;
 
 HWINEVENTHOOK g_win_hook;
 
@@ -1173,11 +1176,7 @@ BOOL handle_location_change_with_mouse_down(HWND hwnd)
             if(client)
             {
                 RECT windowRect;
-                RECT clientRect;
-                RECT xrect;
                 GetWindowRect(hwnd, &windowRect);
-                GetClientRect(hwnd, &clientRect);
-                DwmGetWindowAttribute(hwnd, 9, &xrect, sizeof(RECT));
 
                 BOOL leftIsChanged = windowRect.left > client->data->x + 10 || windowRect.left < client->data->x - 10;
                 BOOL topIsChanged = windowRect.top > client->data->y + 10 || windowRect.top < client->data->y - 10;
@@ -1323,41 +1322,84 @@ void resize_complete(void)
     if(client)
     {
         Workspace *workspace = client->workspace;
-        if(g_resizeHwnd == workspace->clients->data->hwnd)
-        {
-            RECT windowRect;
-            GetWindowRect(g_resizeHwnd, &windowRect);
-            ClientData *clientData = workspace->clients->data;
-            int currentRight = (clientData->x + clientData->w) - workspace->masterOffset;
-            workspace->masterOffset = windowRect.right - currentRight;
-
-            workspace->layout->apply_to_workspace(workspace);
-            workspace_arrange_windows(workspace);
-            workspace_focus_selected_window(workspace);
-        }
-        else
-        {
-            RECT windowRect;
-            GetWindowRect(g_resizeHwnd, &windowRect);
-            ClientData *clientData = client->data;
-            int currentWidth = windowRect.right - windowRect.left;
-            int noOffsetWidth = clientData->w + workspace->masterOffset;
-            workspace->masterOffset = (currentWidth - noOffsetWidth) * -1;
-
-            workspace->layout->apply_to_workspace(workspace);
-            workspace_arrange_windows(workspace);
-            workspace_focus_selected_window(workspace);
-        }
+        workspace_arrange_windows(workspace);
     }
     g_resizeHwnd = NULL;
+}
+
+int get_modifiers_pressed()
+{
+    int modifiersPressed = 0;
+    if(GetAsyncKeyState(VK_LSHIFT) & 0x8000)
+    {
+        modifiersPressed |= LShift;
+    }
+    if(GetAsyncKeyState(VK_RSHIFT) & 0x8000)
+    {
+        modifiersPressed |= RShift;
+    }
+    if(GetAsyncKeyState(VK_LMENU) & 0x8000)
+    {
+        modifiersPressed |= LAlt;
+    }
+    if(GetAsyncKeyState(VK_RMENU) & 0x8000)
+    {
+        modifiersPressed |= RAlt;
+    }
+    if(GetAsyncKeyState(VK_CONTROL) & 0x8000)
+    {
+        modifiersPressed |= LCtl;
+    }
+    if(GetAsyncKeyState(VK_LWIN) & 0x8000)
+    {
+        modifiersPressed |= LWin;
+    }
+    if(GetAsyncKeyState(VK_RWIN) & 0x8000)
+    {
+        modifiersPressed |= RWin;
+    }
+
+    return modifiersPressed;
 }
 
 LRESULT CALLBACK handle_mouse(int code, WPARAM w, LPARAM l)
 {
     if (code >= 0) 
     {
-        if(w == WM_LBUTTONUP)
+        if(w == WM_MOUSEMOVE && GetAsyncKeyState(VK_LBUTTON))
         {
+            int modifiers = get_modifiers_pressed();
+            if(modifiers == configuration->easyResizeModifiers)
+            {
+                MSLLHOOKSTRUCT *p = (MSLLHOOKSTRUCT*)l;
+                Monitor *monitor = drop_target_find_monitor_from_mouse_location();
+                if(monitor)
+                {
+                    Workspace *workspace = monitor->workspace;
+
+                    if(!g_easyResizeInProgress)
+                    {
+                        g_easyResizeInProgress = TRUE;
+                        g_easyResizeStartPoint = p->pt;
+                        g_easyResizeStartOffset = workspace->masterOffset; 
+                    }
+
+                    int diff = p->pt.x - g_easyResizeStartPoint.x;
+                    workspace->masterOffset = g_easyResizeStartOffset + diff;
+
+                    workspace_arrange_windows(workspace);
+                    border_window_update();
+                }
+                return CallNextHookEx(g_mouse_hook, code, w, l);
+            }
+        }
+        else if(w == WM_LBUTTONUP)
+        {
+            if(g_easyResizeInProgress)
+            {
+                g_easyResizeInProgress = FALSE;
+                border_window_update();
+            }
             if (g_resizeInProgress)
             {
                 resize_complete();
@@ -1387,36 +1429,7 @@ LRESULT CALLBACK handle_key_press(int code, WPARAM w, LPARAM l)
         {
             if(p->vkCode == keyBinding->key)
             {
-                int modifiersPressed = 0;
-                if(GetAsyncKeyState(VK_LSHIFT) & 0x8000)
-                {
-                    modifiersPressed |= LShift;
-                }
-                if(GetAsyncKeyState(VK_RSHIFT) & 0x8000)
-                {
-                    modifiersPressed |= RShift;
-                }
-                if(GetAsyncKeyState(VK_LMENU) & 0x8000)
-                {
-                    modifiersPressed |= LAlt;
-                }
-                if(GetAsyncKeyState(VK_RMENU) & 0x8000)
-                {
-                    modifiersPressed |= RAlt;
-                }
-                if(GetAsyncKeyState(VK_CONTROL) & 0x8000)
-                {
-                    modifiersPressed |= LCtl;
-                }
-                if(GetAsyncKeyState(VK_LWIN) & 0x8000)
-                {
-                    modifiersPressed |= LWin;
-                }
-                if(GetAsyncKeyState(VK_RWIN) & 0x8000)
-                {
-                    modifiersPressed |= RWin;
-                }
-
+                int modifiersPressed = get_modifiers_pressed();
                 if(keyBinding->modifiers == modifiersPressed)
                 {
                     if(keyBinding->command)
@@ -1729,7 +1742,7 @@ void CALLBACK handle_windows_event(
                             return;
                         }
 
-                        if(GetAsyncKeyState(VK_LBUTTON) & 0x8000 && !(GetAsyncKeyState(VK_LSHIFT) & 0x8000))
+                        if(GetAsyncKeyState(VK_LBUTTON) & 0x8000 && !(GetAsyncKeyState(VK_LSHIFT) & 0x8000) && !g_easyResizeInProgress)
                         {
                             handle_location_change_with_mouse_down(hwnd);
                             return;
@@ -1741,7 +1754,7 @@ void CALLBACK handle_windows_event(
             }
             else
             {
-                if(GetAsyncKeyState(VK_LBUTTON) & 0x8000 && !(GetAsyncKeyState(VK_LSHIFT) & 0x8000))
+                if(GetAsyncKeyState(VK_LBUTTON) & 0x8000 && !(GetAsyncKeyState(VK_LSHIFT) & 0x8000) && !g_easyResizeInProgress)
                 {
                     if(handle_location_change_with_mouse_down(hwnd))
                     {
@@ -4553,7 +4566,11 @@ void border_window_update(void)
             int targetBottom = selectedClientData->h + 8;
 
             DWORD positionFlags;
-            if(targetLeft != currentPosition.left || targetTop != currentPosition.top ||
+            if(g_easyResizeInProgress)
+            {
+                positionFlags = SWP_HIDEWINDOW;
+            }
+            else if(targetLeft != currentPosition.left || targetTop != currentPosition.top ||
                 targetRight != currentPosition.right || targetBottom != currentPosition.bottom)
             {
                 positionFlags = SWP_SHOWWINDOW;

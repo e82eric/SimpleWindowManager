@@ -107,6 +107,7 @@ struct Configuration
     BOOL alwaysRedraw;
     int nonFloatWindowHeightMinimum;
     BOOL floatUwpWindows;
+    int easyResizeModifiers;
 };
 
 struct WorkspaceFilterData
