@@ -167,6 +167,8 @@ struct ItemsView
 typedef struct ProcessCmdOutputJob
 {
     HANDLE readHandle;
+    HANDLE processHandle;
+    DWORD pid;
     ItemsView *itemsView;
 } ProcessCmdOutputJob;
 

@@ -154,6 +154,7 @@ static int run (void);
 static BOOL hit_test_hwnd(HWND hwnd);
 static BOOL hit_test_monitor(Monitor *monitor);
 static BOOL hit_test_client(Client *client);
+static void drag_drop_cancel(void);
 
 static IAudioEndpointVolume *audioEndpointVolume;
 static INetworkListManager *networkListManager;
@@ -804,6 +805,7 @@ void arrange_clients_in_selected_workspace(void)
     selectedMonitor->workspace->masterOffset = 0;
     workspace_arrange_windows(selectedMonitor->workspace);
     workspace_focus_selected_window(selectedMonitor->workspace);
+    drag_drop_cancel();
 }
 
 int taskbar_get_height(HWND taskbarHwnd)
@@ -1117,10 +1119,24 @@ Client* drop_target_find_client_from_mouse_location(Monitor *monitor, HWND focus
     return dropTargetClient;
 }
 
+void drag_drop_cancel(void)
+{
+    g_dragInProgress = FALSE;
+    g_dragHwnd = NULL;
+
+    SetWindowPos(
+            dropTargetHwnd,
+            HWND_BOTTOM,
+            0,
+            0,
+            0,
+            0,
+            SWP_HIDEWINDOW);
+}
+
 void resize_start(HWND hwnd)
 {
-    g_dragHwnd = NULL;
-    g_dragInProgress = FALSE;
+    drag_drop_cancel();
 
     g_resizeInProgress = TRUE;
     g_resizeHwnd = hwnd;
@@ -1203,21 +1219,6 @@ BOOL handle_location_change_with_mouse_down(HWND hwnd)
     }
 
     return FALSE;
-}
-
-void drag_drop_cancel(void)
-{
-    g_dragInProgress = FALSE;
-    g_dragHwnd = NULL;
-
-    SetWindowPos(
-            dropTargetHwnd,
-            HWND_BOTTOM,
-            0,
-            0,
-            0,
-            0,
-            SWP_HIDEWINDOW);
 }
 
 void drag_drop_complete(void)

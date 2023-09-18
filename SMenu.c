@@ -1180,8 +1180,14 @@ DWORD WINAPI ProcessCmdOutputJobWorker(LPVOID lpParam)
 {
     ProcessCmdOutputJob *processCmdOutputJob = (ProcessCmdOutputJob*)lpParam;
 
-    ProcessCmdOutJob_ProcessStream(processCmdOutputJob);
+    if(!ProcessCmdOutJob_ProcessStream(processCmdOutputJob))
+    {
+        //if there is still data to read the process will get orphaned
+        //there has to be a better way to do this  I think I need to send a SIGINT
+        TerminateProcess(processCmdOutputJob->processHandle, 0);
+    }
 
+    CloseHandle(processCmdOutputJob->processHandle);
     CloseHandle(processCmdOutputJob->readHandle);
     free(processCmdOutputJob);
     return 0;
@@ -1191,6 +1197,7 @@ void ProcessWithItemStreamOutput_Start(char *cmdArgs, ProcessCmdOutputJob *job)
 {
     PROCESS_INFORMATION pi = { 0 };
     HANDLE stdOutWriteHandle;
+    HANDLE stdInReadHandle;
 
     SECURITY_ATTRIBUTES sattr;
     sattr.nLength = sizeof(SECURITY_ATTRIBUTES);
@@ -1211,6 +1218,7 @@ void ProcessWithItemStreamOutput_Start(char *cmdArgs, ProcessCmdOutputJob *job)
     si.dwFlags = STARTF_USESTDHANDLES;
     si.hStdOutput = stdOutWriteHandle;
     si.hStdError = stdOutWriteHandle;
+    si.hStdInput = stdInReadHandle;
 
     if(!CreateProcessA(
         NULL,
@@ -1230,12 +1238,15 @@ void ProcessWithItemStreamOutput_Start(char *cmdArgs, ProcessCmdOutputJob *job)
         return;
     }
 
-    CloseHandle(stdOutWriteHandle);
     CloseHandle(pi.hThread);
-    CloseHandle(pi.hProcess);
 
-    DWORD   dwThreadIdArray[1];
-    HANDLE  hThreadArray[1]; 
+    CloseHandle(stdInReadHandle);
+    CloseHandle(stdOutWriteHandle);
+
+    job->processHandle = pi.hProcess;
+    job->pid = pi.dwProcessId;
+    DWORD dwThreadIdArray[1];
+    HANDLE hThreadArray[1]; 
     hThreadArray[0] = CreateThread( 
             NULL,
             0,
