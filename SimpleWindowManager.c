@@ -867,6 +867,26 @@ void quit(void)
     ExitProcess(0);
 }
 
+BOOL has_float_styles(LONG_PTR styles, LONG_PTR exStyles)
+{
+    if(exStyles & WS_EX_APPWINDOW)
+    {
+        return FALSE;
+    }
+
+    if(exStyles & WS_EX_TOOLWINDOW)
+    {
+        return TRUE;
+    }
+
+    if(!(styles & WS_SIZEBOX))
+    {
+        return TRUE;
+    }
+
+    return FALSE;
+}
+
 BOOL is_float_window(Client *client, LONG_PTR styles, LONG_PTR exStyles)
 {
     if(configuration->windowsThatShouldNotFloatFunc)
@@ -899,17 +919,7 @@ BOOL is_float_window(Client *client, LONG_PTR styles, LONG_PTR exStyles)
         }
     }
 
-    if(exStyles & WS_EX_APPWINDOW)
-    {
-        return FALSE;
-    }
-
-    if(exStyles & WS_EX_TOOLWINDOW)
-    {
-        return TRUE;
-    }
-
-    if(!(styles & WS_SIZEBOX))
+    if(has_float_styles(styles, exStyles))
     {
         return TRUE;
     }
@@ -1175,7 +1185,7 @@ void drag_drop_start_empty_workspace(Monitor *dropTargetMonitor, HWND hwnd)
             SWP_SHOWWINDOW);
 }
 
-BOOL handle_location_change_with_mouse_down(HWND hwnd)
+BOOL handle_location_change_with_mouse_down(HWND hwnd, LONG_PTR styles, LONG_PTR exStyles)
 {
     if(!hit_test_hwnd(hwnd))
     {
@@ -1203,6 +1213,10 @@ BOOL handle_location_change_with_mouse_down(HWND hwnd)
                     resize_start(hwnd);
                     return FALSE;
                 }
+            }
+            else if(has_float_styles(styles, exStyles))
+            {
+                return FALSE;
             }
 
             drag_drop_start(hwnd, dropTargetClient);
@@ -1745,7 +1759,7 @@ void CALLBACK handle_windows_event(
 
                         if(GetAsyncKeyState(VK_LBUTTON) & 0x8000 && !(GetAsyncKeyState(VK_LSHIFT) & 0x8000) && !g_easyResizeInProgress)
                         {
-                            handle_location_change_with_mouse_down(hwnd);
+                            handle_location_change_with_mouse_down(hwnd, styles, exStyles);
                             return;
                         }
 
@@ -1757,7 +1771,7 @@ void CALLBACK handle_windows_event(
             {
                 if(GetAsyncKeyState(VK_LBUTTON) & 0x8000 && !(GetAsyncKeyState(VK_LSHIFT) & 0x8000) && !g_easyResizeInProgress)
                 {
-                    if(handle_location_change_with_mouse_down(hwnd))
+                    if(handle_location_change_with_mouse_down(hwnd, styles, exStyles))
                     {
                         return;
                     }
