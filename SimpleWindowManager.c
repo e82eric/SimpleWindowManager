@@ -3673,7 +3673,7 @@ void menu_run(MenuDefinition *definition)
 
 BOOL terminal_with_uniqueStr_filter(ScratchWindow *self, Client *client)
 {
-    if(wcsstr(client->data->processImageName, L"WindowsTerminal.exe"))
+    if(wcsstr(client->data->processImageName, self->processImageName))
     {
         TCHAR *cmdLine = client_get_command_line(client);
         if(wcsstr(cmdLine, self->uniqueStr))
@@ -3684,16 +3684,23 @@ BOOL terminal_with_uniqueStr_filter(ScratchWindow *self, Client *client)
     return FALSE;
 }
 
-ScratchWindow *register_scratch_terminal_with_unique_string(CHAR *name, char *cmd, TCHAR *uniqueStr)
+ScratchWindow *register_windows_terminal_scratch_with_unique_string(CHAR *name, char *cmd, TCHAR *uniqueStr)
 {
     CHAR buff[4096];
     sprintf_s(buff, 4096, "wt.exe --title \"Scratch Window %ls\" %s", uniqueStr, cmd);
 
+    ScratchWindow *result = register_scratch_with_unique_string(L"WindowsTerminal.exe", name, buff, uniqueStr);
+    return result;
+}
+
+ScratchWindow *register_scratch_with_unique_string(TCHAR *processImageName, CHAR *name, char *cmd, TCHAR *uniqueStr)
+{
     ScratchWindow *sWindow = calloc(1, sizeof(ScratchWindow));
     sWindow->name = _strdup(name);
-    sWindow->cmd = _strdup(buff);
+    sWindow->cmd = _strdup(cmd);
     sWindow->uniqueStr = _wcsdup(uniqueStr);
     sWindow->scratchFilter = terminal_with_uniqueStr_filter;
+    sWindow->processImageName = _wcsdup(processImageName);
     sWindow->next = NULL;
 
     scratch_windows_add_to_end(sWindow);
