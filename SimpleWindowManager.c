@@ -1317,14 +1317,17 @@ void drag_drop_complete(void)
             if(!dropTargetMonitor->workspace->clients)
             {
                 Client *client = windowManager_find_client_in_workspaces_by_hwnd(dragHwnd);
-                workspace_remove_client(client->workspace, client);
-                workspace_arrange_windows(client->workspace);
+                if(!client)
+                {
+                    workspace_remove_client(client->workspace, client);
+                    workspace_arrange_windows(client->workspace);
 
-                workspace_add_client(dropTargetMonitor->workspace, client);
-                workspace_update_client_counts(dropTargetMonitor->workspace);
-                workspace_arrange_windows(dropTargetMonitor->workspace);
-                workspace_focus_selected_window(dropTargetMonitor->workspace);
-                monitor_select(dropTargetMonitor);
+                    workspace_add_client(dropTargetMonitor->workspace, client);
+                    workspace_update_client_counts(dropTargetMonitor->workspace);
+                    workspace_arrange_windows(dropTargetMonitor->workspace);
+                    workspace_focus_selected_window(dropTargetMonitor->workspace);
+                    monitor_select(dropTargetMonitor);
+                }
             }
         }
     }
@@ -3974,29 +3977,17 @@ void bar_render_selected_window_description(Bar *bar, HDC hdc)
 
     TCHAR displayStr[MAX_PATH];
     int displayStrLen;
-    if(bar->monitor->workspace->selected && bar->monitor == selectedMonitor)
-    {
         int numberOfWorkspaceClients = workspace_get_number_of_clients(bar->monitor->workspace);
         LPCWSTR processShortFileName = PathFindFileName(clientToRender->data->processImageName);
 
-        displayStrLen = swprintf(displayStr, MAX_PATH, L"[%ls:%d] : %ls (%ls) (%d) (IsAdmin: %d) (Mode: %ls)",
-            bar->monitor->workspace->layout->tag,
-            numberOfWorkspaceClients,
-            processShortFileName,
-            isManagedIndicator,
-            clientToRender->data->processId,
-            clientToRender->data->isElevated,
-            windowRoutingMode);
-    }
-    else
-    {
-        int numberOfWorkspaceClients = workspace_get_number_of_clients(bar->monitor->workspace);
-
-        displayStrLen = swprintf(displayStr, MAX_PATH, L"[%ls:%d] : (Mode: %ls)",
-            bar->monitor->workspace->layout->tag,
-            numberOfWorkspaceClients,
-            windowRoutingMode);
-    }
+    displayStrLen = swprintf(displayStr, MAX_PATH, L"[%ls:%d] : %ls (%ls) (%d) (IsAdmin: %d) (Mode: %ls)",
+        bar->monitor->workspace->layout->tag,
+        numberOfWorkspaceClients,
+        processShortFileName,
+        isManagedIndicator,
+        clientToRender->data->processId,
+        clientToRender->data->isElevated,
+        windowRoutingMode);
 
     if(!focusedClient)
     {
