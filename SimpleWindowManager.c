@@ -71,6 +71,7 @@ HWINEVENTHOOK g_win_hook;
 
 static BOOL CALLBACK enum_windows_callback(HWND hWnd, LPARAM lparam);
 
+
 void tileLayout_select_next_window(Workspace *workspace);
 void tileLayout_select_previous_window(Workspace *workspace);
 void tileLayout_swap_clients(Client *client1, Client *client2);
@@ -96,6 +97,8 @@ void noop_move_client_to_master(Client *client);
 void process_with_stdin_start(TCHAR *cmdArgs, CHAR **lines, int numberOfLines, void (*onSuccess) (CHAR *));
 void start_process(CHAR *processExe, CHAR *cmdArgs, DWORD creationFlags);
 void process_with_stdout_start(CHAR *cmdArgs, void (*onSuccess) (CHAR *));
+
+static int get_modifiers_pressed();
 
 static void clients_add_before(Client *clientToAdd, Client *clientToAddBefore);
 
@@ -509,6 +512,12 @@ void move_focused_window_to_workspace(Workspace *workspace)
     HWND foregroundHwnd = GetForegroundWindow();
     windowManager_move_window_to_workspace_and_arrange(foregroundHwnd, workspace);
     workspace_focus_selected_window(selectedMonitor->workspace);
+}
+
+void move_focused_window_to_selected_monitor_workspace(void)
+{
+    Workspace *workspace = selectedMonitor->workspace;
+    move_focused_window_to_workspace(workspace);
 }
 
 void move_workspace_to_secondary_monitor_without_focus(Workspace *workspace)
@@ -1213,21 +1222,33 @@ BOOL handle_location_change_with_mouse_down(HWND hwnd, LONG_PTR styles, LONG_PTR
                     resize_start(hwnd);
                     return FALSE;
                 }
+                drag_drop_start(hwnd, dropTargetClient);
+                return TRUE;
             }
             else if(has_float_styles(styles, exStyles))
             {
                 return FALSE;
             }
 
-            drag_drop_start(hwnd, dropTargetClient);
-            return TRUE;
+            int modifiers = get_modifiers_pressed();
+            if(modifiers == configuration->dragDropFloatModifier)
+            {
+                drag_drop_start(hwnd, dropTargetClient);
+                return TRUE;
+            }
+
+            return FALSE;
         }
         else
         {
             if(!dropTargetMonitor->workspace->clients)
             {
-                drag_drop_start_empty_workspace(dropTargetMonitor, hwnd);
-                return TRUE;
+                Client *client = windowManager_find_client_in_workspaces_by_hwnd(hwnd);
+                if(client)
+                {
+                    drag_drop_start_empty_workspace(dropTargetMonitor, hwnd);
+                    return TRUE;
+                }
             }
         }
     }
@@ -1317,7 +1338,7 @@ void drag_drop_complete(void)
             if(!dropTargetMonitor->workspace->clients)
             {
                 Client *client = windowManager_find_client_in_workspaces_by_hwnd(dragHwnd);
-                if(!client)
+                if(client)
                 {
                     workspace_remove_client(client->workspace, client);
                     workspace_arrange_windows(client->workspace);
@@ -1345,7 +1366,7 @@ void resize_complete(void)
     g_resizeHwnd = NULL;
 }
 
-int get_modifiers_pressed()
+int get_modifiers_pressed(void)
 {
     int modifiersPressed = 0;
     if(GetAsyncKeyState(VK_LSHIFT) & 0x8000)
@@ -1437,7 +1458,7 @@ LRESULT CALLBACK handle_key_press(int code, WPARAM w, LPARAM l)
     PKBDLLHOOKSTRUCT p = (PKBDLLHOOKSTRUCT)l;
     if (code == 0 && (w == WM_KEYDOWN || w == WM_SYSKEYDOWN))
     {
-        if(g_dragInProgress && GetAsyncKeyState(LShift) & 0x8000)
+        if(g_dragInProgress && GetAsyncKeyState(VK_LSHIFT) & 0x8000)
         {
             drag_drop_cancel();
         }
@@ -5106,6 +5127,7 @@ void keybindings_register_defaults_with_modifiers(int modifiers)
     keybinding_create_with_workspace_arg("move_focused_window_to_workspace[7]", LShift | modifiers, VK_7, move_focused_window_to_workspace, workspaces[6]);
     keybinding_create_with_workspace_arg("move_focused_window_to_workspace[8]", LShift | modifiers, VK_8, move_focused_window_to_workspace, workspaces[7]);
     keybinding_create_with_workspace_arg("move_focused_window_to_workspace[9]", LShift | modifiers, VK_9, move_focused_window_to_workspace, workspaces[8]);
+    keybinding_create_with_no_arg("move_focused_window_to_selected_monitor_workspace", LShift | modifiers, VK_0, move_focused_window_to_selected_monitor_workspace);
 
     keybinding_create_with_no_arg("close_focused_window", modifiers, VK_C, close_focused_window);
     keybinding_create_with_no_arg("kill_focused_window", LShift | modifiers, VK_C, kill_focused_window);
@@ -5633,7 +5655,7 @@ int run (void)
         }
     }
 
-    TCHAR menuTitle[BUF_LEN] = L"Blah";
+    TCHAR menuTitle[BUF_LEN] = L"nmenu";
     mView = menu_create(menuTitle);
     ShowWindow(mView->hwnd, SW_HIDE);
 
@@ -5645,6 +5667,8 @@ int run (void)
     configuration->scratchWindowsScreenPadding = 0;
     configuration->nonFloatWindowHeightMinimum = 500;
     configuration->floatUwpWindows = TRUE;
+    configuration->easyResizeModifiers = LWin | LCtl | LAlt;
+    configuration->dragDropFloatModifier = LAlt;
     configure(configuration);
     currentWindowRoutingMode = configuration->windowRoutingMode;
 

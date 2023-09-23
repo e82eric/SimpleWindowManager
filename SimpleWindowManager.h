@@ -108,6 +108,7 @@ struct Configuration
     int nonFloatWindowHeightMinimum;
     BOOL floatUwpWindows;
     int easyResizeModifiers;
+    int dragDropFloatModifier;
 };
 
 struct WorkspaceFilterData
@@ -334,6 +335,7 @@ void move_focused_window_up(void);
 void move_focused_window_down(void);
 void swap_selected_monitor_to(Workspace *workspace);
 void move_focused_window_to_workspace(Workspace *workspace);
+void move_focused_window_to_selected_monitor_workspace(void);
 void close_focused_window(void);
 void kill_focused_window(void);
 void float_window_move_right(HWND hwnd);
