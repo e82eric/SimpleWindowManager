@@ -67,6 +67,8 @@ BOOL g_easyResizeInProgress;
 POINT g_easyResizeStartPoint;
 int g_easyResizeStartOffset;
 
+Workspace *g_lastWorkspace;
+
 HWINEVENTHOOK g_win_hook;
 
 static BOOL CALLBACK enum_windows_callback(HWND hWnd, LPARAM lparam);
@@ -617,6 +619,16 @@ void swap_selected_monitor_to(Workspace *workspace)
 {
     windowManager_move_workspace_to_monitor(selectedMonitor, workspace);
     workspace_focus_selected_window(workspace);
+}
+
+void goto_last_workspace(void)
+{
+    Workspace *workspace = g_lastWorkspace;
+    if(workspace)
+    {
+        windowManager_move_workspace_to_monitor(selectedMonitor, workspace);
+        workspace_focus_selected_window(workspace);
+    }
 }
 
 void close_focused_window(void)
@@ -1458,11 +1470,6 @@ LRESULT CALLBACK handle_key_press(int code, WPARAM w, LPARAM l)
     PKBDLLHOOKSTRUCT p = (PKBDLLHOOKSTRUCT)l;
     if (code == 0 && (w == WM_KEYDOWN || w == WM_SYSKEYDOWN))
     {
-        if(g_dragInProgress && GetAsyncKeyState(VK_LSHIFT) & 0x8000)
-        {
-            drag_drop_cancel();
-        }
-
         KeyBinding *keyBinding = headKeyBinding;
         while(keyBinding)
         {
@@ -2049,6 +2056,10 @@ void windowManager_move_workspace_to_monitor(Monitor *monitor, Workspace *worksp
     Monitor *currentMonitor = workspace->monitor;
 
     Workspace *selectedMonitorCurrentWorkspace = monitor->workspace;
+    if(monitor == selectedMonitor)
+    {
+        g_lastWorkspace = selectedMonitorCurrentWorkspace;
+    }
 
     if(monitor->scratchWindow)
     {
@@ -4646,6 +4657,7 @@ void border_window_paint(HWND hWnd)
         PAINTSTRUCT ps;
         HDC hDC = BeginPaint(hWnd, &ps);
         HPEN hpenOld;
+
         HBRUSH hbrushOld = (HBRUSH)(SelectObject(hDC, GetStockObject(NULL_BRUSH)));
         SetDCPenColor(hDC, RGB(100, 0, 0));
         if(isForegroundWindowSameAsSelectMonitorSelected || menuVisible)
@@ -4658,7 +4670,6 @@ void border_window_paint(HWND hWnd)
 
         RECT rcWindow;
         GetClientRect(hWnd, &rcWindow);
-
         FillRect(hDC, &rcWindow, GetStockObject(NULL_BRUSH));
         Rectangle(hDC, rcWindow.left, rcWindow.top, rcWindow.right, rcWindow.bottom);
 
@@ -4817,9 +4828,7 @@ void drop_target_window_run(WNDCLASSEX *windowClass)
         NULL,
         GetModuleHandle(0),
         NULL);
-
     SetLayeredWindowAttributes(hwnd, RGB(0, 0, 0), (255 * 50) / 100, LWA_ALPHA);
-
     dropTargetHwnd = hwnd;
 }
 
@@ -5128,6 +5137,8 @@ void keybindings_register_defaults_with_modifiers(int modifiers)
     keybinding_create_with_workspace_arg("move_focused_window_to_workspace[8]", LShift | modifiers, VK_8, move_focused_window_to_workspace, workspaces[7]);
     keybinding_create_with_workspace_arg("move_focused_window_to_workspace[9]", LShift | modifiers, VK_9, move_focused_window_to_workspace, workspaces[8]);
     keybinding_create_with_no_arg("move_focused_window_to_selected_monitor_workspace", LShift | modifiers, VK_0, move_focused_window_to_selected_monitor_workspace);
+
+    keybinding_create_with_no_arg("goto_last_workspace", modifiers, VK_O, goto_last_workspace);
 
     keybinding_create_with_no_arg("close_focused_window", modifiers, VK_C, close_focused_window);
     keybinding_create_with_no_arg("kill_focused_window", LShift | modifiers, VK_C, kill_focused_window);
