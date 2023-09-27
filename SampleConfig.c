@@ -16,7 +16,7 @@ void search_drive(char* stdOut)
     sprintf_s(
             cmdBuf,
             MAX_PATH,
-            "ld:cmd /c fd . %s\\",
+            "ld:cmd /c dir /s /b %s\\",
             stdOut);
 
     MenuDefinition_AddNamedCommand(searchDriveMenuDefinition, cmdBuf, FALSE, FALSE);
@@ -110,11 +110,11 @@ void configure(Configuration *configuration)
     workspace_register(L"9", L"9", &tileLayout);
     workspace_register(L"Desktop", L"0", &deckLayout);
 
-    ScratchWindow *nPowershellScratch = register_scratch_terminal_with_unique_string(
-            "Nvim Powershell",
-            "cmd /c nvim -c \"terminal powershell -nologo\"",
-            L"643763f5-f5cd-416e-a5c9-bef1f516863c");
-    keybinding_create_with_scratchwindow_arg("NvimPowershellScratchWindow", modifiers, VK_F13, nPowershellScratch);
+    ScratchWindow *powershellScratch = register_windows_terminal_scratch_with_unique_string(
+            "Powershell",
+            "powershell -nologo",
+            L"643763f5-f5cd-416e-a5c9-bef1f516863d");
+    keybinding_create_with_scratchwindow_arg("PowershellScratchWindow", modifiers | LShift, VK_F13, powershellScratch);
 
     register_list_windows_memu(modifiers, VK_SPACE);
     register_list_services_menu(modifiers, VK_F14);
