@@ -1225,10 +1225,12 @@ BOOL handle_location_change_with_mouse_down(HWND hwnd, LONG_PTR styles, LONG_PTR
                 RECT windowRect;
                 GetWindowRect(hwnd, &windowRect);
 
-                BOOL leftIsChanged = windowRect.left > client->data->x + 10 || windowRect.left < client->data->x - 10;
-                BOOL topIsChanged = windowRect.top > client->data->y + 10 || windowRect.top < client->data->y - 10;
-                BOOL rightIsChanged = windowRect.right > (client->data->x + client->data->w + 10) || windowRect.left < (client->data->x + client->data->w - 10);
-                BOOL isMoving = leftIsChanged && topIsChanged && rightIsChanged;
+                int movingPad = 10;
+                BOOL leftIsChanged = windowRect.left > client->data->x + movingPad || windowRect.left < client->data->x - movingPad;
+                BOOL topIsChanged = windowRect.top > client->data->y + movingPad || windowRect.top < client->data->y - movingPad;
+                BOOL bottomIsChanged = windowRect.bottom > client->data->y + client->data->h + movingPad || windowRect.bottom < client->data->y + client->data->h - movingPad;
+                BOOL rightIsChanged = windowRect.right > (client->data->x + client->data->w + movingPad) || windowRect.right < (client->data->x + client->data->w - movingPad);
+                BOOL isMoving = (leftIsChanged && rightIsChanged) || (topIsChanged && bottomIsChanged);
                 if(!isMoving)
                 {
                     resize_start(hwnd);
