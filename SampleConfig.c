@@ -75,6 +75,8 @@ void configure(Configuration *configuration)
     int modifiers = LAlt | LWin | LCtl;
     keybindings_register_defaults_with_modifiers(modifiers);
 
+    configuration->font = initalize_font(TEXT("Mononoki Nerd Font Complete Windows Compatible Bold"));
+
     configuration->windowsThatShouldNotFloatFunc = is_float_window_from_config;
     configuration->useOldMoveLogicFunc = should_use_old_move_logic;
     configuration->windowRoutingMode = FilteredRoutedNonFilteredCurrentWorkspace;

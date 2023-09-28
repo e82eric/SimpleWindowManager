@@ -5600,12 +5600,12 @@ void open_windows_scratch_exit_callback(char *stdOut)
     }
 }
 
-HFONT default_initalize_font()
+HFONT initalize_font(LPCWSTR fontName)
 {
     HDC hdc = GetDC(NULL);
     long lfHeight;
     lfHeight = -MulDiv(14, GetDeviceCaps(hdc, LOGPIXELSY), 72);
-    HFONT result = CreateFontW(lfHeight, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, TEXT("Hack Regular Nerd Font Complete"));
+    HFONT result = CreateFontW(lfHeight, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, fontName);
     DeleteDC(hdc);
     return result;
 }
@@ -5738,13 +5738,13 @@ int run (void)
     backgroundBrush = CreateSolidBrush(barBackgroundColor);
     dropTargetBrush = CreateSolidBrush(dropTargetColor);
 
-    if(configuration->initalizeFontFunc)
+    if(configuration->font)
     {
-        font = configuration->initalizeFontFunc();
+        font = configuration->font;
     }
     else
     {
-        font = default_initalize_font();
+        font = initalize_font(TEXT("Hack Regular Nerd Font Complete"));
     }
 
     hiddenWindowMonitor = calloc(1, sizeof(Monitor));

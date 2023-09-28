@@ -87,7 +87,7 @@ struct Configuration
     BOOL (*shouldAlwaysExcludeFunc) (Client* client);
     BOOL (*useOldMoveLogicFunc) (Client *client);
     BOOL (*clientShouldUseMinimizeToHide) (Client *client);
-    HFONT (*initalizeFontFunc) (void);
+    HFONT font;
     long barHeight;
     long gapWidth;
     int scratchWindowsScreenPadding;
@@ -284,6 +284,7 @@ extern int numberOfBars;
 extern TCHAR *scratchWindowTitle;
 
 void configure(Configuration *configuration);
+HFONT initalize_font(LPCWSTR fontName);
 Workspace* workspace_register(TCHAR *name, WCHAR* tag, Layout *layout);
 Workspace* workspace_register_with_window_filter(TCHAR *name, WindowFilter windowFilter, WCHAR* tag, Layout *layout);
 void workspace_register_processimagename_contains_filter(Workspace *workspace, TCHAR *className);
