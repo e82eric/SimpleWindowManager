@@ -25,6 +25,11 @@ I wrote this application to target my specific workflow where 90% of windows com
     - This is where you can adjust bar color/bar height etc on the configuration structure
     - This is also where you will define workspaces, keybindings, scratch windows and menu commands
 
+## Implementation
+- Moving between workpsaces is implemented by moving the windows that are not assigned to a monitor to screen coordinates that are outside of display monitor.
+  - This seems to provide the cleanest transitions but when the window manager is stopped the window remain positioned outside of the display and can be a pain move back onto the screen.
+  - There are  a couple programs that have logic to guard against this (SSMS, Visual Studio, ConEmu),  these can be configured to fallback to using minimize un-minimize as the hide unhide method.  This works but the transitions are a little awkward. 
+
 There is a SampleConfig.c provided in the repository
 - The makefile currently looks for this in ..\SimpleWindowManagerConfig\config.c but can be updated in the make file
 ## Features
@@ -47,6 +52,7 @@ There is a SampleConfig.c provided in the repository
 ## Key Bindings
 | Key Binding   | Action              |
 | ------------- | -------------       |
+| ALT+?         | Show keybindings    |
 | ALT+J         | Select Next Window  |
 | ALT+K         | Select Previous Window        |
 | ALT+Enter     | Move selected window to master |
@@ -60,7 +66,8 @@ There is a SampleConfig.c provided in the repository
 | ALT+Space     | Toggle next layout |
 | ALT+Shirt+C   | Close selected Window |
 | ALT+,         | Select next monitor |
-| ALT+[1-9] | Select workspace by number|
+| ALT+[1-9]     | Select workspace by number|
+| ALT+O         | Goto previously selected workspace
 | ALT+Shift+[1-9] | Move selected window to workspace by number |
 | ALT+V         | Toggle Windows Taskbar |
 | ALT+A         | Toggle mode where all windows that match a filter are added to the current workspace |
