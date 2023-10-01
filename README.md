@@ -18,20 +18,11 @@ I wrote this application to target my specific workflow where 90% of windows com
   - Run nmake publish
   - Run bin\SimpleWindowManager.exe (to run the application)
 
-## Configuration/Customization
-- Configuration is done in C and is compiled into the binary
-- You will need to a Config.c
-  - You will need to implement a void configure(Configuration *configuration) function
-    - This is where you can adjust bar color/bar height etc on the configuration structure
-    - This is also where you will define workspaces, keybindings, scratch windows and menu commands
-
 ## Implementation
 - Moving between workpsaces is implemented by moving the windows that are not assigned to a monitor to screen coordinates that are outside of display monitor.
   - This seems to provide the cleanest transitions but when the window manager is stopped the window remain positioned outside of the display and can be a pain move back onto the screen.
   - There are  a couple programs that have logic to guard against this (SSMS, Visual Studio, ConEmu),  these can be configured to fallback to using minimize un-minimize as the hide unhide method.  This works but the transitions are a little awkward. 
 
-There is a SampleConfig.c provided in the repository
-- The makefile currently looks for this in ..\SimpleWindowManagerConfig\config.c but can be updated in the make file
 ## Features
 - Workspaces
   - Define up to 9 different workspaces along with rules about which windows will be managed by the workspace.  (Usually defined by the process name, window class, window title or any combination of those).  Windows matching these rules will automatically be layed out by the workspace in its current layout
@@ -109,6 +100,14 @@ https://user-images.githubusercontent.com/811029/196359630-66a98674-c604-4a3a-95
 https://user-images.githubusercontent.com/811029/196359680-c7d45b94-3edc-409f-97f8-715abe833925.mp4
 
 ## Configuration
+- Configuration is done in C and is compiled into the binary
+- You will need to a Config.c
+  - You will need to implement a void configure(Configuration *configuration) function
+    - This is where you can adjust bar color/bar height etc on the configuration structure
+    - This is also where you will define workspaces, keybindings, scratch windows and menu commands
+There is a SampleConfig.c provided in the repository
+- The makefile currently looks for this in ..\SimpleWindowManagerConfig\config.c but can be updated in the make file
+
 ### Defining workspaces:
 * Specifying workspaces: https://github.com/e82eric/SimpleWindowManager/blob/main/SampleConfig.c#L77
 * Can be configured with simple contains matching using the exe name, windows title, or window class.
