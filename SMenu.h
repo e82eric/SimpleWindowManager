@@ -141,7 +141,7 @@ struct ItemsView
     BOOL hasLoadCommand;
     NamedCommand *loadCommand;
     int (*loadAction)(int maxItems, CHAR**);
-    int maxDisplayItems;
+    int viewPortLines;
     int numberOfItemsMatched;
     BOOL isReading;
     BOOL isSearching;
@@ -162,6 +162,7 @@ struct ItemsView
     CRITICAL_SECTION loadCriticalSection;
     Item *displayItems[1024];
     int numberOfDisplayItems;
+    BOOL isScrollable;
 };
 
 typedef struct ProcessCmdOutputJob

@@ -79,6 +79,12 @@ DWORD WINAPI SearchView_Worker(LPVOID lpParam)
     self->cancelSearch = FALSE;
     self->isSearching = TRUE;
 
+    int maxDisplayItems = self->itemsView->viewPortLines;
+    if(self->itemsView->isScrollable)
+    {
+        maxDisplayItems = self->itemsView->numberOfItems;
+    }
+
     ProcessChunkJob *jobs[250];
     int numberOfJobs = 0;
 
@@ -95,8 +101,8 @@ DWORD WINAPI SearchView_Worker(LPVOID lpParam)
         jobs[numberOfJobs]->searchString = self->searchString;
 
         jobs[numberOfJobs]->displayItemList = calloc(1, sizeof(DisplayItemList));
-        jobs[numberOfJobs]->displayItemList->items = calloc(self->itemsView->maxDisplayItems, sizeof(ItemMatchResult*));
-        jobs[numberOfJobs]->displayItemList->maxItems = self->itemsView->maxDisplayItems;
+        jobs[numberOfJobs]->displayItemList->items = calloc(maxDisplayItems, sizeof(ItemMatchResult*));
+        jobs[numberOfJobs]->displayItemList->maxItems = maxDisplayItems;
         jobs[numberOfJobs]->searchView = self;
         jobs[numberOfJobs]->currentSearchNumber = jobCurrentSearchNumber;
 
@@ -113,8 +119,8 @@ DWORD WINAPI SearchView_Worker(LPVOID lpParam)
     }
 
     DisplayItemList *mergedDisplayItemList = calloc(1, sizeof(DisplayItemList));
-    mergedDisplayItemList->items = calloc(self->itemsView->maxDisplayItems, sizeof(ItemMatchResult*));
-    mergedDisplayItemList->maxItems = self->itemsView->maxDisplayItems;
+    mergedDisplayItemList->items = calloc(maxDisplayItems, sizeof(ItemMatchResult*));
+    mergedDisplayItemList->maxItems = maxDisplayItems;
 
     int totalMatches = 0;
     for(int i = 0; i < numberOfJobs; i++)
@@ -1292,7 +1298,7 @@ int ItemsView_Move(ItemsView *self, int left, int top, int width, int height)
 
     MoveWindow(self->hwnd, left, listTop, width, listHeight, TRUE);
     self->height = listHeight;
-    self->maxDisplayItems = ((listHeight - 3) / listBoxItemHeight) - 1;
+    self->viewPortLines = ((listHeight - 3) / listBoxItemHeight) - 1;
 
     return listTop + listHeight;
 }
@@ -1946,7 +1952,6 @@ MenuView *menu_create_with_size(int left, int top, int width, int height, TCHAR 
     MenuView *menuView = calloc(1, sizeof(MenuView));
 
     ItemsView *itemsView = calloc(1, sizeof(ItemsView));
-    itemsView->maxDisplayItems = 50;
     itemsView->hasHeader = FALSE;
     itemsView->fzfSlab = fzf_make_default_slab();
     itemsView->isLoading = FALSE;
@@ -2081,10 +2086,12 @@ void menu_run_definition(MenuView *self, MenuDefinition *menuDefinition)
     if(self->itemsView->hasLoadCommand)
     {
         ItemsView_ReloadFromCommand(self->itemsView, self->itemsView->loadCommand);
+        self->itemsView->isScrollable = FALSE;
     }
     else if(menuDefinition->itemsAction)
     {
         ItemsView_LoadFromAction(self->itemsView, menuDefinition->itemsAction);
+        self->itemsView->isScrollable = TRUE;
     }
 
     MenuView_FitChildControls(self);
