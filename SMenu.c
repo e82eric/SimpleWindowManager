@@ -24,6 +24,8 @@
 #define VK_N 0x4E
 #define VK_K 0x4B
 #define VK_C 0x43
+#define VK_D 0x44
+#define VK_U 0x55
 
 #define CHUNK_SIZE 20000
 
@@ -331,6 +333,28 @@ void ItemsView_SelectPrevious(ItemsView *self)
         SendMessageA(self->hwnd, LB_GETTEXT, dwSel + 1, (LPARAM)achBuffer); 
         memcpy(self->selectedString, achBuffer, BUF_LEN);
         self->itemSelected = TRUE;
+    }
+}
+
+void ItemsView_PageDown(ItemsView *self)
+{
+    if(self->isScrollable)
+    {
+        int currentTopIndex = (int)SendMessage(self->hwnd, LB_GETTOPINDEX, 0, 0);
+        int newTopIndex = currentTopIndex + self->viewPortLines;
+        SendMessage(self->hwnd, LB_SETTOPINDEX, newTopIndex, 0);
+        SendMessage(self->hwnd, LB_SETCURSEL, newTopIndex, 0);
+    }
+}
+
+void ItemsView_PageUp(ItemsView *self)
+{
+    if(self->isScrollable)
+    {
+        int currentTopIndex = (int)SendMessage(self->hwnd, LB_GETTOPINDEX, 0, 0);
+        int newTopIndex = currentTopIndex - self->viewPortLines;
+        SendMessage(self->hwnd, LB_SETTOPINDEX, newTopIndex, 0);
+        SendMessage(self->hwnd, LB_SETCURSEL, newTopIndex, 0);
     }
 }
 
@@ -2042,6 +2066,14 @@ MenuDefinition* menu_definition_create(MenuView *menuView)
     NamedCommand *itemUpCommand = MenuDefinition_AddAction2NamedCommand(result, "select previous item", menuView->itemsView, ItemsView_SelectPrevious, FALSE, FALSE);
     MenuDefinition_AddKeyBindingToNamedCommand(result, itemUpCommand, VK_CONTROL, VK_P, FALSE);
     MenuDefinition_AddKeyBindingToNamedCommand(result, itemUpCommand, 0, VK_UP, FALSE);
+
+    NamedCommand *pageDownCommand = MenuDefinition_AddAction2NamedCommand(result, "page down", menuView->itemsView, ItemsView_PageDown, FALSE, FALSE);
+    MenuDefinition_AddKeyBindingToNamedCommand(result, pageDownCommand, VK_CONTROL, VK_D, FALSE);
+    MenuDefinition_AddKeyBindingToNamedCommand(result, pageDownCommand, 0, VK_NEXT, FALSE);
+
+    NamedCommand *pageUpCommand = MenuDefinition_AddAction2NamedCommand(result, "page up", menuView->itemsView, ItemsView_PageUp, FALSE, FALSE);
+    MenuDefinition_AddKeyBindingToNamedCommand(result, pageUpCommand, VK_CONTROL, VK_U, FALSE);
+    MenuDefinition_AddKeyBindingToNamedCommand(result, pageUpCommand, 0, VK_PRIOR, FALSE);
 
     NamedCommand *selectCommand = MenuDefinition_AddAction2NamedCommand(result, "select", menuView->itemsView, ItemsView_HandleSelection, FALSE, FALSE);
     MenuDefinition_AddKeyBindingToNamedCommand(result, selectCommand, 0, VK_RETURN, FALSE);
