@@ -193,3 +193,8 @@ _Example bar segment definitions_
     configuration_add_bar_segment(configuration, L"Volume", 6, fill_volume_percent);
     configuration_add_bar_segment(configuration, L"Internet", 3, fill_is_connected_to_internet);
 ```
+## Mouse Support
+There is some support for using the mouse.
+- If you drag a managed window into another client space a drop overlay will be show and if dropped the window will be moved to that location.
+- If you drag a unmanaged/float window while holding ALT (default modifier) you will be able to move the window to another client area.
+- If you hold down the ALT (default modifier) and drag your mouse you will be able to resize the x offset of the workspace.
