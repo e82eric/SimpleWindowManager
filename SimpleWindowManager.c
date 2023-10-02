@@ -469,7 +469,7 @@ void register_program_launcher_menu(int modifiers, int virtualKey, CHAR** direct
 
     MenuDefinition *programLauncher = menu_create_and_register();
     MenuDefinition_AddNamedCommand(programLauncher, cmdBuf, FALSE, FALSE);
-    MenuDefinition_ParseAndAddLoadCommand(programLauncher, "ld");
+    MenuDefinition_ParseAndAddLoadCommand(programLauncher, "ld", TRUE);
     if(isElevated)
     {
         programLauncher->onSelection = open_program_scratch_callback;

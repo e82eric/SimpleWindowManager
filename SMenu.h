@@ -1,4 +1,5 @@
 #define BUF_LEN 4096
+#define MAX_DISPLAY_BUF 1024
 
 enum Mode
 {
@@ -43,6 +44,7 @@ struct NamedCommand
     BOOL hasTextRange;
     int textRangeStart;
     int textRangeEnd;
+    BOOL isScrollable;
 };
 
 struct MenuKeyBinding
@@ -160,7 +162,7 @@ struct ItemsView
     BOOL cancelLoad;
     HANDLE loadEvent;
     CRITICAL_SECTION loadCriticalSection;
-    Item *displayItems[1024];
+    Item *displayItems[MAX_DISPLAY_BUF];
     int numberOfDisplayItems;
     BOOL isScrollable;
 };
@@ -190,7 +192,7 @@ NamedCommand* MenuDefinition_AddActionNamedCommand_WithTextRange(MenuDefinition 
 MenuView *menu_create_with_size(int left, int top, int width, int height, TCHAR *title);
 MenuView *menu_create(TCHAR *title);
 void menu_run_definition(MenuView *self, MenuDefinition *menuDefinition);
-void MenuDefinition_ParseAndAddLoadCommand(MenuDefinition *self, char *argText);
+void MenuDefinition_ParseAndAddLoadCommand(MenuDefinition *self, char *argText, BOOL isScrollable);
 void MenuDefinition_ParseAndSetRange(MenuDefinition *self, char *argText);
 void MenuDefinition_AddLoadActionKeyBinding(MenuDefinition *self, unsigned int modifier, unsigned int key, int (*loadAction)(int maxItems, CHAR**), char* loadActionDescription);
 void menu_definition_set_load_action(MenuDefinition *self, int (*loadAction)(int maxItems, CHAR** items));

@@ -8,6 +8,7 @@
 #include <synchapi.h>
 #include <commctrl.h>
 #include <uxtheme.h>
+#include <shlwapi.h>
 
 #define IDI_ICON 101
 #define IDC_LISTBOX_TEXT 1000
@@ -72,6 +73,7 @@ DWORD WINAPI SearchView_Worker(LPVOID lpParam)
         ReleaseSRWLockExclusive(&itemsRwLock);
         return TRUE;
     }
+    self->itemsView->numberOfDisplayItems = 0;
     self->cancelSearch = TRUE;
     ReleaseSRWLockExclusive(&itemsRwLock);
 
@@ -84,7 +86,7 @@ DWORD WINAPI SearchView_Worker(LPVOID lpParam)
     int maxDisplayItems = self->itemsView->viewPortLines;
     if(self->itemsView->isScrollable)
     {
-        maxDisplayItems = self->itemsView->numberOfItems;
+        maxDisplayItems = self->itemsView->numberOfItems > MAX_DISPLAY_BUF ? MAX_DISPLAY_BUF : self->itemsView->numberOfItems;
     }
 
     ProcessChunkJob *jobs[250];
@@ -1397,7 +1399,7 @@ void MenuView_CreateChildControls(MenuView *self)
     self->searchView->hwnd = CreateWindowA(
             "Edit", 
             NULL, 
-            WS_VISIBLE | WS_CHILD | WS_CLIPSIBLINGS,
+            WS_VISIBLE | WS_CHILD | WS_CLIPSIBLINGS | WS_TABSTOP,
             10, 
             10, 
             600, 
@@ -1834,9 +1836,10 @@ void MenuDefinition_ParseAndAddKeyBinding(MenuDefinition *self, char *argText, B
     }
 }
 
-void MenuDefinition_ParseAndAddLoadCommand(MenuDefinition *self, char *argText)
+void MenuDefinition_ParseAndAddLoadCommand(MenuDefinition *self, char *argText, BOOL isScrollable)
 {
     NamedCommand *loadCommand = MenuDefinition_FindNamedCommandByName(self, argText);
+    loadCommand->isScrollable = isScrollable;
     if(loadCommand)
     {
         self->hasLoadCommand = TRUE;
@@ -2118,7 +2121,7 @@ void menu_run_definition(MenuView *self, MenuDefinition *menuDefinition)
     if(self->itemsView->hasLoadCommand)
     {
         ItemsView_ReloadFromCommand(self->itemsView, self->itemsView->loadCommand);
-        self->itemsView->isScrollable = FALSE;
+        self->itemsView->isScrollable = self->itemsView->loadCommand->isScrollable;
     }
     else if(menuDefinition->itemsAction)
     {
