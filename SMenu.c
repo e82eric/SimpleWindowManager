@@ -9,6 +9,8 @@
 #include <commctrl.h>
 #include <uxtheme.h>
 #include <shlwapi.h>
+#include <stdio.h>
+#include <ctype.h>
 
 #define IDI_ICON 101
 #define IDC_LISTBOX_TEXT 1000
@@ -27,6 +29,9 @@
 #define VK_C 0x43
 #define VK_D 0x44
 #define VK_U 0x55
+#define VK_W 0x57
+#define VK_L 0x4C
+#define VK_A 0x41
 
 #define CHUNK_SIZE 20000
 
@@ -870,6 +875,46 @@ void SearchView_HandleEscape(SearchView *self)
     }
 }
 
+void SearchView_DeletePreviousWord(SearchView *self)
+{
+    DWORD startIndex;
+    DWORD endIndex;
+
+    SendMessageA(self->hwnd, EM_GETSEL, (WPARAM)&startIndex, (LPARAM)&endIndex);
+    if(endIndex > startIndex)
+    {
+        SendMessageA(self->hwnd, EM_REPLACESEL, (WPARAM)TRUE, (LPARAM)"");
+    }
+    else if(startIndex > 0)
+    {
+        CHAR textBuff[1024];
+        GetWindowTextA(self->hwnd, textBuff, 1024);
+
+        for(int i = endIndex - 1; i >= 0; i--)
+        {
+            if(!isdigit(textBuff[i]) && !isalpha(textBuff[i]) || i == 0)
+            {
+                DWORD newStartIndex = i;
+                SendMessageA(self->hwnd, EM_SETSEL, (WPARAM)newStartIndex, (LPARAM)endIndex);
+                SendMessageA(self->hwnd, EM_REPLACESEL, (WPARAM)TRUE, (LPARAM)"");
+                break;
+            }
+        }
+    }
+}
+
+void SearchView_Clear(SearchView *self)
+{
+    SendMessageA(self->hwnd, WM_SETTEXT, (WPARAM)NULL, (LPARAM)"");
+}
+
+void SearchView_SelectAll(SearchView *self)
+{
+
+    int textLength = GetWindowTextLength(self->hwnd);
+    SendMessageA(self->hwnd, EM_SETSEL, (WPARAM)0, (LPARAM)textLength);
+}
+
 LRESULT CALLBACK SearchView_MessageProcessor(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam, UINT_PTR uIdSubclass, DWORD_PTR dwRefData)
 {
     UNREFERENCED_PARAMETER(uIdSubclass);
@@ -939,8 +984,8 @@ LRESULT CALLBACK SearchView_MessageProcessor(HWND hWnd, UINT uMsg, WPARAM wParam
 
     if((uMsg == WM_CHAR || uMsg == WM_KEYDOWN))
     {
-        //Prevent BEEP
-        if(GetAsyncKeyState(VK_CONTROL))
+        //Prevent BEEP (Allow arrows for work jump movements)
+        if(GetAsyncKeyState(VK_CONTROL) && wParam != VK_LEFT && wParam != VK_RIGHT)
         {
             return 0;
         }
@@ -1408,6 +1453,8 @@ void MenuView_CreateChildControls(MenuView *self)
             (HMENU)IDC_EDIT_TEXT,
             hinstance,
             NULL);
+    //This only partially works because COM is initialized with a multi threaded apartment.  Ctrl-Backspace doesn't work but Ctrl-arrows does (jumping words).
+    SHAutoComplete(self->searchView->hwnd, SHACF_DEFAULT);
     SetWindowSubclass(self->searchView->hwnd, SearchView_MessageProcessor, 0, (DWORD_PTR)self->searchView);
     SendMessage(self->searchView->hwnd, WM_SETFONT, (WPARAM)font, (LPARAM)TRUE);
 
@@ -2086,6 +2133,16 @@ MenuDefinition* menu_definition_create(MenuView *menuView)
 
     NamedCommand *helpCommand = MenuDefinition_AddAction2NamedCommand(result, "show help", menuView->searchView, SearchView_ShowHelp, FALSE, FALSE);
     MenuDefinition_AddKeyBindingToNamedCommand(result, helpCommand, VK_CONTROL, VK_OEM_2, FALSE);
+
+    NamedCommand *deleteWordCommand = MenuDefinition_AddAction2NamedCommand(result, "delete word from search", menuView->searchView, SearchView_DeletePreviousWord, FALSE, FALSE);
+    MenuDefinition_AddKeyBindingToNamedCommand(result, deleteWordCommand, VK_CONTROL, VK_BACK, FALSE);
+    MenuDefinition_AddKeyBindingToNamedCommand(result, deleteWordCommand, VK_CONTROL, VK_W, FALSE);
+
+    NamedCommand *clearSearchCommand = MenuDefinition_AddAction2NamedCommand(result, "clear search", menuView->searchView, SearchView_Clear, FALSE, FALSE);
+    MenuDefinition_AddKeyBindingToNamedCommand(result, clearSearchCommand, VK_CONTROL, VK_L, FALSE);
+
+    NamedCommand *selectAllSearchTextCommand = MenuDefinition_AddAction2NamedCommand(result, "select all search text", menuView->searchView, SearchView_SelectAll, FALSE, FALSE);
+    MenuDefinition_AddKeyBindingToNamedCommand(result, selectAllSearchTextCommand, VK_CONTROL, VK_A, FALSE);
 
     return result;
 }
