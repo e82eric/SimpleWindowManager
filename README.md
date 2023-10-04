@@ -11,7 +11,9 @@ I wrote this application to target my specific workflow where 90% of windows com
 
 ## Install
 - You will need to compile the application to install it
-  - Make sure that MSVC (C compiler) is installed
+  - Make sure that MSVC (C compiler) is installed.
+    - https://visualstudio.microsoft.com/downloads/
+    - Visual Studio Build Tools is enough if you don't want to install Visual Studio 
   - Run setvccars.bar to add nmake and cl.exe to the path.  (You make need to adjust the paths in the batch depending one where MSVC is installed)
   - Make any configuration/customizations
   - Run nmake
@@ -101,11 +103,12 @@ https://user-images.githubusercontent.com/811029/196359680-c7d45b94-3edc-409f-97
 
 ## Configuration
 - Configuration is done in C and is compiled into the binary
+- There is a SampleConfig.c provided in the repository that the props.mk uses by default.
+  - For customizing, I believe it is easiest to create a new Config.c file and place it in a seperate repository and point the props.mk to that file. ex ..\dotfiles\SimpleWindowManager\Config.c
 - You will need to a Config.c
   - You will need to implement a void configure(Configuration *configuration) function
     - This is where you can adjust bar color/bar height etc on the configuration structure
     - This is also where you will define workspaces, keybindings, scratch windows and menu commands
-There is a SampleConfig.c provided in the repository
 - The makefile currently looks for this in ..\SimpleWindowManagerConfig\config.c but can be updated in the make file
 
 ### Defining workspaces:
