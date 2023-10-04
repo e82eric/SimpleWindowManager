@@ -32,6 +32,8 @@
 #define VK_W 0x57
 #define VK_L 0x4C
 #define VK_A 0x41
+#define VK_V 0x56
+#define VK_X 0x58
 
 #define CHUNK_SIZE 20000
 
@@ -906,6 +908,16 @@ void SearchView_DeletePreviousWord(SearchView *self)
 void SearchView_Clear(SearchView *self)
 {
     SendMessageA(self->hwnd, WM_SETTEXT, (WPARAM)NULL, (LPARAM)"");
+}
+
+void SearchView_Paste(SearchView *self)
+{
+    SendMessageA(self->hwnd, WM_PASTE, (WPARAM)NULL, (LPARAM)NULL);
+}
+
+void SearchView_Cut(SearchView *self)
+{
+    SendMessageA(self->hwnd, WM_CUT, (WPARAM)NULL, (LPARAM)NULL);
 }
 
 void SearchView_SelectAll(SearchView *self)
@@ -2143,6 +2155,12 @@ MenuDefinition* menu_definition_create(MenuView *menuView)
 
     NamedCommand *selectAllSearchTextCommand = MenuDefinition_AddAction2NamedCommand(result, "select all search text", menuView->searchView, SearchView_SelectAll, FALSE, FALSE);
     MenuDefinition_AddKeyBindingToNamedCommand(result, selectAllSearchTextCommand, VK_CONTROL, VK_A, FALSE);
+
+    NamedCommand *pasteCommand = MenuDefinition_AddAction2NamedCommand(result, "paste", menuView->searchView, SearchView_Paste, FALSE, FALSE);
+    MenuDefinition_AddKeyBindingToNamedCommand(result, pasteCommand, VK_CONTROL, VK_V, FALSE);
+
+    NamedCommand *cutCommand = MenuDefinition_AddAction2NamedCommand(result, "cut", menuView->searchView, SearchView_Cut, FALSE, FALSE);
+    MenuDefinition_AddKeyBindingToNamedCommand(result, cutCommand, VK_CONTROL, VK_X, FALSE);
 
     return result;
 }
