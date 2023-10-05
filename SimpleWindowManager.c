@@ -73,7 +73,6 @@ HWINEVENTHOOK g_win_hook;
 
 static BOOL CALLBACK enum_windows_callback(HWND hWnd, LPARAM lparam);
 
-
 void tileLayout_select_next_window(Workspace *workspace);
 void tileLayout_select_previous_window(Workspace *workspace);
 void tileLayout_swap_clients(Client *client1, Client *client2);
@@ -1633,13 +1632,21 @@ void CALLBACK handle_windows_event(
                 monitors_resize_for_taskbar(hwnd);
                 return;
             }
-            Client* client = windowManager_find_client_in_workspaces_by_hwnd(hwnd);
-            if(client)
+            //Double check that the window is really not visible.
+            //Windows that are "Not Responding" seem to have the hide message sent but have the visible style.
+            //Visual Studio seems to have some winodws that hide that do not have the visible style.
+            //We don't want to hide the windows that are temporarily Not Responding
+            //We do want to hide the Visual Studio and Outlook windows that are visible and then set to hidden.
+            if(!(styles & WS_VISIBLE))
             {
-                workspace_remove_client_and_arrange(client->workspace, client);
-                workspace_focus_selected_window(client->workspace);
-                free_client(client);
-                return;
+                Client* client = windowManager_find_client_in_workspaces_by_hwnd(hwnd);
+                if(client)
+                {
+                    workspace_remove_client_and_arrange(client->workspace, client);
+                    workspace_focus_selected_window(client->workspace);
+                    free_client(client);
+                    return;
+                }
             }
         }
         else if (event == EVENT_OBJECT_SHOW || event == EVENT_OBJECT_UNCLOAKED)
