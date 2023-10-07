@@ -20,7 +20,7 @@ void search_drive(char* stdOut)
             stdOut);
 
     MenuDefinition_AddNamedCommand(searchDriveMenuDefinition, cmdBuf, FALSE, FALSE);
-    MenuDefinition_ParseAndAddLoadCommand(searchDriveMenuDefinition, "ld");
+    MenuDefinition_ParseAndAddLoadCommand(searchDriveMenuDefinition, "ld", FALSE);
     searchDriveMenuDefinition->onSelection = open_program_scratch_callback_not_elevated;
     menu_run(searchDriveMenuDefinition);
 }
@@ -72,10 +72,10 @@ BOOL should_use_old_move_logic(Client* client)
 
 void configure(Configuration *configuration)
 {
-    int modifiers = LAlt | LWin | LCtl;
+    int modifiers = LAlt;
     keybindings_register_defaults_with_modifiers(modifiers);
 
-    configuration->font = initalize_font(TEXT("Mononoki Nerd Font Complete Windows Compatible Bold"));
+    /* configuration->font = initalize_font(TEXT("Mononoki Nerd Font Complete Windows Compatible Bold")); */
 
     configuration->windowsThatShouldNotFloatFunc = is_float_window_from_config;
     configuration->useOldMoveLogicFunc = should_use_old_move_logic;
@@ -126,24 +126,22 @@ void configure(Configuration *configuration)
     char* notElevatedDirectories[] = {
         "%USERPROFILE%\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\",
         "C:\\ProgramData\\Microsoft\\Windows\\Start Menu\\",
-        "%USERPROFILE%\\AppData\\Local\\Microsoft\\WindowsApps\\",
-        "%USERPROFILE%\\Utilites\\"
+        "%USERPROFILE%\\AppData\\Local\\Microsoft\\WindowsApps\\"
     };
-    register_program_launcher_menu(modifiers, VK_P, notElevatedDirectories, 4, FALSE);
+    register_program_launcher_menu(modifiers, VK_P, notElevatedDirectories, 3, FALSE);
 
     char* elevatedDirectories[] = {
         "%USERPROFILE%\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\",
         "C:\\ProgramData\\Microsoft\\Windows\\Start Menu\\",
         "%USERPROFILE%\\AppData\\Local\\Microsoft\\WindowsApps\\",
-        "C:\\Program Files\\sysinternals\\",
-        "%USERPROFILE%\\Utilites\\"
+        "C:\\Program Files\\sysinternals\\"
     };
-    register_program_launcher_menu(modifiers | LShift, VK_P, elevatedDirectories, 5, TRUE);
+    register_program_launcher_menu(modifiers | LShift, VK_P, elevatedDirectories, 4, TRUE);
 
     searchDriveMenuDefinition = menu_create_and_register();
     MenuDefinition *searchAllDrivesMenu = menu_create_and_register();
     MenuDefinition_AddNamedCommand(searchAllDrivesMenu, "ld:powershell -c \"(Get-PSDrive -PSProvider FileSystem).Root\"", FALSE, FALSE);
-    MenuDefinition_ParseAndAddLoadCommand(searchAllDrivesMenu, "ld");
+    MenuDefinition_ParseAndAddLoadCommand(searchAllDrivesMenu, "ld", FALSE);
     searchAllDrivesMenu->onSelection = search_drive;
     keybinding_create_with_menu_arg("SearchAllDrivesMenu", modifiers, VK_F16, menu_run, searchAllDrivesMenu);
 
