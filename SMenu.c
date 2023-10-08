@@ -1898,11 +1898,15 @@ void MenuDefinition_ParseAndAddKeyBinding(MenuDefinition *self, char *argText, B
 void MenuDefinition_ParseAndAddLoadCommand(MenuDefinition *self, char *argText, BOOL isScrollable)
 {
     NamedCommand *loadCommand = MenuDefinition_FindNamedCommandByName(self, argText);
-    loadCommand->isScrollable = isScrollable;
     if(loadCommand)
     {
+        loadCommand->isScrollable = isScrollable;
         self->hasLoadCommand = TRUE;
         menu_definition_set_load_command(self, loadCommand);
+    }
+    else
+    {
+        //TODO the user should be alerted that this failed
     }
 }
 
