@@ -4707,11 +4707,11 @@ void border_window_paint(HWND hWnd)
                 if (y < rcClient.top + borderWidth || y > rcClient.bottom - borderWidth ||
                         x < rcClient.left + borderWidth || x > rcClient.right - borderWidth)
                 {
-                    *pixel = (*pixel & 0x00FFFFFF) | 0x80000000; // Set alpha to 128 (semi-transparent)
+                    *pixel |= 0xFF000000; // Set alpha to 255 (fully opaque) for inner part
                 }
                 else
                 {
-                    *pixel |= 0xFF000000; // Set alpha to 255 (fully opaque) for inner part
+                    *pixel = (*pixel & 0x00FFFFFF) | 0x80000000; // Set alpha to 128 (semi-transparent)
                 }
             }
         }
