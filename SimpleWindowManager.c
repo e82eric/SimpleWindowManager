@@ -4668,7 +4668,6 @@ void border_window_paint(HWND hWnd)
         HPEN hpenOld;
 
         HBRUSH hbrushOld = (HBRUSH)(SelectObject(hDC, GetStockObject(NULL_BRUSH)));
-        SetDCPenColor(hDC, RGB(100, 0, 0));
         if(isForegroundWindowSameAsSelectMonitorSelected || menuVisible)
         {
             hpenOld = SelectObject(hDC, borderForegroundPen);
@@ -4679,6 +4678,7 @@ void border_window_paint(HWND hWnd)
 
         RECT rcWindow;
         GetClientRect(hWnd, &rcWindow);
+
         FillRect(hDC, &rcWindow, GetStockObject(NULL_BRUSH));
         Rectangle(hDC, rcWindow.left, rcWindow.top, rcWindow.right, rcWindow.bottom);
 
@@ -4806,7 +4806,7 @@ WNDCLASSEX* drop_target_window_register_class(void)
 void border_window_run(WNDCLASSEX *windowClass)
 {
     HWND hwnd = CreateWindowEx(
-        WS_EX_PALETTEWINDOW | WS_EX_NOACTIVATE,
+        WS_EX_PALETTEWINDOW | WS_EX_NOACTIVATE | WS_EX_LAYERED,
         windowClass->lpszClassName,
         L"SimpleWM Border",
         WS_POPUP,
@@ -4818,6 +4818,7 @@ void border_window_run(WNDCLASSEX *windowClass)
         NULL,
         GetModuleHandle(0),
         NULL);
+    SetLayeredWindowAttributes(hwnd, RGB(0, 0, 0), 150, LWA_ALPHA);
 
     borderWindowHwnd = hwnd;
 }

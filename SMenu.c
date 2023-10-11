@@ -2156,6 +2156,7 @@ MenuDefinition* menu_definition_create(MenuView *menuView)
 
     NamedCommand *clearSearchCommand = MenuDefinition_AddAction2NamedCommand(result, "clear search", menuView->searchView, SearchView_Clear, FALSE, FALSE);
     MenuDefinition_AddKeyBindingToNamedCommand(result, clearSearchCommand, VK_CONTROL, VK_L, FALSE);
+    MenuDefinition_AddKeyBindingToNamedCommand(result, clearSearchCommand, VK_CONTROL, VK_U, FALSE);
 
     NamedCommand *selectAllSearchTextCommand = MenuDefinition_AddAction2NamedCommand(result, "select all search text", menuView->searchView, SearchView_SelectAll, FALSE, FALSE);
     MenuDefinition_AddKeyBindingToNamedCommand(result, selectAllSearchTextCommand, VK_CONTROL, VK_A, FALSE);
