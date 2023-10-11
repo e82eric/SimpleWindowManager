@@ -4667,20 +4667,67 @@ void border_window_paint(HWND hWnd)
         HDC hDC = BeginPaint(hWnd, &ps);
         HPEN hpenOld;
 
-        HBRUSH hbrushOld = (HBRUSH)(SelectObject(hDC, GetStockObject(NULL_BRUSH)));
+        RECT rcClient;
+        GetClientRect(hWnd, &rcClient);
+
+        BITMAPINFO bmi = { 0 };
+        bmi.bmiHeader.biSize = sizeof(bmi.bmiHeader);
+        bmi.bmiHeader.biBitCount = 32;
+        bmi.bmiHeader.biWidth = rcClient.right;
+        bmi.bmiHeader.biHeight = -rcClient.bottom;
+        bmi.bmiHeader.biPlanes = 1;
+
+        LPVOID pBits;
+        HBITMAP hBmp = CreateDIBSection(hDC, &bmi, DIB_RGB_COLORS, &pBits, NULL, 0);
+        HDC hMemDC = CreateCompatibleDC(hDC);
+        HGDIOBJ hOldBmp = SelectObject(hMemDC, hBmp);
+
+        memset(pBits, 0, 4 * rcClient.right * rcClient.bottom);
+
+        HBRUSH hbrushOld = (HBRUSH)(SelectObject(hMemDC, GetStockObject(NULL_BRUSH)));
         if(isForegroundWindowSameAsSelectMonitorSelected || menuVisible)
         {
-            hpenOld = SelectObject(hDC, borderForegroundPen);
+            hpenOld = SelectObject(hMemDC, borderForegroundPen);
         }
         else {
-            hpenOld = SelectObject(hDC, borderNotForegroundPen);
+            hpenOld = SelectObject(hMemDC, borderNotForegroundPen);
+        }
+
+        Rectangle(hMemDC, rcClient.left, rcClient.top, rcClient.right, rcClient.bottom);
+
+        // Adjust the rectangle's border pixels to be semi-transparent
+        DWORD* pixels = (DWORD*)pBits;
+        int borderWidth = 6; // Match with the pen width
+        for (int y = rcClient.top; y < rcClient.bottom; y++)
+        {
+            for (int x = rcClient.left; x < rcClient.right; x++)
+            {
+                DWORD* pixel = &pixels[y * rcClient.right + x];
+                // Check if the pixel is part of the border
+                if (y < rcClient.top + borderWidth || y > rcClient.bottom - borderWidth ||
+                        x < rcClient.left + borderWidth || x > rcClient.right - borderWidth)
+                {
+                    *pixel = (*pixel & 0x00FFFFFF) | 0x80000000; // Set alpha to 128 (semi-transparent)
+                }
+                else
+                {
+                    *pixel |= 0xFF000000; // Set alpha to 255 (fully opaque) for inner part
+                }
+            }
         }
 
         RECT rcWindow;
-        GetClientRect(hWnd, &rcWindow);
+        GetWindowRect(hWnd, &rcWindow);
+        POINT ptSrc = { 0, 0 };
+        POINT ptWinPos = { rcWindow.left, rcWindow.top };
 
-        FillRect(hDC, &rcWindow, GetStockObject(NULL_BRUSH));
-        Rectangle(hDC, rcWindow.left, rcWindow.top, rcWindow.right, rcWindow.bottom);
+        SIZE sizeWin = { rcClient.right - rcClient.left, rcClient.bottom - rcClient.top };
+        BLENDFUNCTION blend = { AC_SRC_OVER, 0, 255, AC_SRC_ALPHA };
+
+        UpdateLayeredWindow(hWnd, hDC, &ptWinPos, &sizeWin, hMemDC, &ptSrc, 0, &blend, ULW_ALPHA);
+
+        DeleteDC(hMemDC);
+        DeleteObject(hBmp);
 
         SelectObject(hDC, hpenOld);
         SelectObject(hDC, hbrushOld);
@@ -4818,7 +4865,6 @@ void border_window_run(WNDCLASSEX *windowClass)
         NULL,
         GetModuleHandle(0),
         NULL);
-    SetLayeredWindowAttributes(hwnd, RGB(0, 0, 0), 150, LWA_ALPHA);
 
     borderWindowHwnd = hwnd;
 }
