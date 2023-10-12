@@ -4616,33 +4616,38 @@ void border_window_update(void)
 
             int targetLeft = selectedClientData->x - 4;
             int targetTop = selectedClientData->y - 4;
-            int targetRight = selectedClientData->w + 8;
-            int targetBottom = selectedClientData->h + 8;
+            int targetWidth = selectedClientData->w + 8;
+            int targetHeight = selectedClientData->h + 8;
+
+            int currentWidth = currentPosition.right - currentPosition.left;
+            int currentHeight = currentPosition.bottom - currentPosition.top;
 
             DWORD positionFlags;
+            positionFlags = SWP_SHOWWINDOW;
             if(g_easyResizeInProgress)
             {
                 positionFlags = SWP_HIDEWINDOW;
             }
-            else if(targetLeft != currentPosition.left || targetTop != currentPosition.top ||
-                targetRight != currentPosition.right || targetBottom != currentPosition.bottom)
-            {
-                positionFlags = SWP_SHOWWINDOW;
-            }
-            else
+            else if(currentHeight == targetHeight && currentWidth == targetWidth)
             {
                 positionFlags = SWP_NOREDRAW;
             }
 
-            SetWindowPos(
-                borderWindowHwnd,
-                HWND_BOTTOM,
-                targetLeft,
-                targetTop,
-                targetRight,
-                targetBottom,
-                positionFlags);
-            InvalidateRect(borderWindowHwnd, NULL, FALSE);
+            if(targetTop != currentPosition.top || targetLeft != currentPosition.left || positionFlags == SWP_SHOWWINDOW)
+            {
+                SetWindowPos(
+                        borderWindowHwnd,
+                        HWND_BOTTOM,
+                        targetLeft,
+                        targetTop,
+                        targetWidth,
+                        targetHeight,
+                        positionFlags);
+                if(positionFlags == SWP_SHOWWINDOW)
+                {
+                    InvalidateRect(borderWindowHwnd, NULL, FALSE);
+                }
+            }
         }
         else
         {
@@ -4697,7 +4702,7 @@ void border_window_paint(HWND hWnd)
 
         // Adjust the rectangle's border pixels to be semi-transparent
         DWORD* pixels = (DWORD*)pBits;
-        int borderWidth = 6; // Match with the pen width
+        int borderWidth = 4; // Match with the pen width
         for (int y = rcClient.top; y < rcClient.bottom; y++)
         {
             for (int x = rcClient.left; x < rcClient.right; x++)
@@ -4711,7 +4716,7 @@ void border_window_paint(HWND hWnd)
                 }
                 else
                 {
-                    *pixel = (*pixel & 0x00FFFFFF) | 0x80000000; // Set alpha to 128 (semi-transparent)
+                    *pixel = (*pixel & 0x00FFFFFF) | (80 << 24); // Set alpha to 128 (semi-transparent)
                 }
             }
         }
@@ -4779,11 +4784,16 @@ static LRESULT border_window_message_loop(HWND h, UINT msg, WPARAM wp, LPARAM lp
                     }
                 }
             }
+            return 1;
         }
         case WM_PAINT:
         {
             border_window_paint(h);
-        } break;
+            return 1;
+        }
+        case WM_ERASEBKGND:
+            return 1;
+        break;
 
         default:
             return DefWindowProc(h, msg, wp, lp);
@@ -4884,7 +4894,7 @@ void drop_target_window_run(WNDCLASSEX *windowClass)
         NULL,
         GetModuleHandle(0),
         NULL);
-    SetLayeredWindowAttributes(hwnd, RGB(0, 0, 0), (255 * 50) / 100, LWA_ALPHA);
+    SetLayeredWindowAttributes(hwnd, RGB(255, 255, 255), (255 * 50) / 100, LWA_ALPHA);
     dropTargetHwnd = hwnd;
 }
 
@@ -5739,8 +5749,8 @@ int run (void)
     configure(configuration);
     currentWindowRoutingMode = configuration->windowRoutingMode;
 
-    borderForegroundPen = CreatePen(PS_SOLID, 6, RGB(250, 189, 47));
-    borderNotForegroundPen = CreatePen(PS_SOLID, 6, RGB(142, 192, 124));
+    borderForegroundPen = CreatePen(PS_SOLID, 8, RGB(250, 189, 47));
+    borderNotForegroundPen = CreatePen(PS_SOLID, 8, RGB(142, 192, 124));
 
     if(configuration->barHeight)
     {
