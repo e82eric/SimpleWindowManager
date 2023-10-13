@@ -3513,16 +3513,7 @@ void menu_focus(MenuView *self)
         ShowWindow(borderWindowHwnd, SW_HIDE);
         ShowWindow(self->hwnd, SW_SHOW);
         SetForegroundWindow(self->hwnd);
-        HDWP hdwp = BeginDeferWindowPos(2);
-        DeferWindowPos(
-                hdwp,
-                borderWindowHwnd,
-                self->hwnd,
-                x - 4,
-                y - 4,
-                w + 8,
-                h + 8,
-                SWP_SHOWWINDOW);
+        HDWP hdwp = BeginDeferWindowPos(1);
         DeferWindowPos(
                 hdwp,
                 self->hwnd,
@@ -4610,6 +4601,7 @@ void border_window_update(void)
         else if(selectedMonitor->workspace->selected)
         {
             ClientData *selectedClientData = selectedMonitor->workspace->selected->data;
+            BOOL isWindowVisible = IsWindowVisible(borderWindowHwnd);
 
             RECT currentPosition;
             GetWindowRect(borderWindowHwnd, &currentPosition);
@@ -4628,12 +4620,12 @@ void border_window_update(void)
             {
                 positionFlags = SWP_HIDEWINDOW;
             }
-            else if(currentHeight == targetHeight && currentWidth == targetWidth)
+            else if(currentHeight == targetHeight && currentWidth == targetWidth && isWindowVisible)
             {
                 positionFlags = SWP_NOREDRAW;
             }
 
-            if(targetTop != currentPosition.top || targetLeft != currentPosition.left || positionFlags == SWP_SHOWWINDOW)
+            if(targetTop != currentPosition.top || targetLeft != currentPosition.left || positionFlags == SWP_SHOWWINDOW || positionFlags == SWP_HIDEWINDOW || !isWindowVisible)
             {
                 SetWindowPos(
                         borderWindowHwnd,
@@ -4643,7 +4635,7 @@ void border_window_update(void)
                         targetWidth,
                         targetHeight,
                         positionFlags);
-                if(positionFlags == SWP_SHOWWINDOW)
+                if(positionFlags == SWP_SHOWWINDOW || !isWindowVisible)
                 {
                     InvalidateRect(borderWindowHwnd, NULL, FALSE);
                 }
@@ -4685,7 +4677,7 @@ void border_window_paint(HWND hWnd)
         LPVOID pBits;
         HBITMAP hBmp = CreateDIBSection(hDC, &bmi, DIB_RGB_COLORS, &pBits, NULL, 0);
         HDC hMemDC = CreateCompatibleDC(hDC);
-        HGDIOBJ hOldBmp = SelectObject(hMemDC, hBmp);
+        SelectObject(hMemDC, hBmp);
 
         memset(pBits, 0, 4 * rcClient.right * rcClient.bottom);
 
@@ -4702,7 +4694,7 @@ void border_window_paint(HWND hWnd)
 
         // Adjust the rectangle's border pixels to be semi-transparent
         DWORD* pixels = (DWORD*)pBits;
-        int borderWidth = 4; // Match with the pen width
+        int borderWidth = 6; // Match with the pen width
         for (int y = rcClient.top; y < rcClient.bottom; y++)
         {
             for (int x = rcClient.left; x < rcClient.right; x++)
@@ -4716,7 +4708,7 @@ void border_window_paint(HWND hWnd)
                 }
                 else
                 {
-                    *pixel = (*pixel & 0x00FFFFFF) | (80 << 24); // Set alpha to 128 (semi-transparent)
+                    *pixel = (*pixel & 0x00000000) | (128 << 24); // Set alpha to 128 (semi-transparent)
                 }
             }
         }
@@ -4761,39 +4753,38 @@ static LRESULT border_window_message_loop(HWND h, UINT msg, WPARAM wp, LPARAM lp
     switch(msg)
     {
         case WM_WINDOWPOSCHANGING:
-        {
-            WINDOWPOS* windowPos = (WINDOWPOS*)lp;
-            if(menuVisible)
             {
-                windowPos->hwndInsertAfter = mView->hwnd;
-            }
-            else if(!selectedMonitor->scratchWindow)
-            {
-                if(selectedMonitor->workspace->selected)
+                WINDOWPOS* windowPos = (WINDOWPOS*)lp;
+                if(menuVisible)
                 {
-                    windowPos->hwndInsertAfter = HWND_BOTTOM;
+                    windowPos->hwndInsertAfter = mView->hwnd;
                 }
-            }
-            else
-            {
-                if(selectedMonitor->scratchWindow->client)
+                else if(!selectedMonitor->scratchWindow)
                 {
                     if(selectedMonitor->workspace->selected)
                     {
-                        windowPos->hwndInsertAfter = selectedMonitor->scratchWindow->client->data->hwnd;
+                        windowPos->hwndInsertAfter = HWND_BOTTOM;
                     }
                 }
+                else
+                {
+                    if(selectedMonitor->scratchWindow->client)
+                    {
+                        if(selectedMonitor->workspace->selected)
+                        {
+                            windowPos->hwndInsertAfter = selectedMonitor->scratchWindow->client->data->hwnd;
+                        }
+                    }
+                }
+                return 1;
             }
-            return 1;
-        }
         case WM_PAINT:
-        {
-            border_window_paint(h);
-            return 1;
-        }
+            {
+                border_window_paint(h);
+                return 1;
+            }
         case WM_ERASEBKGND:
             return 1;
-        break;
 
         default:
             return DefWindowProc(h, msg, wp, lp);
@@ -5749,8 +5740,9 @@ int run (void)
     configure(configuration);
     currentWindowRoutingMode = configuration->windowRoutingMode;
 
-    borderForegroundPen = CreatePen(PS_SOLID, 8, RGB(250, 189, 47));
-    borderNotForegroundPen = CreatePen(PS_SOLID, 8, RGB(142, 192, 124));
+    COLORREF borderColor = RGB(250, 189, 47);
+    COLORREF borderColorLostFocus = RGB(142, 192, 124);
+    int borderWidth = 10;
 
     if(configuration->barHeight)
     {
@@ -5784,18 +5776,27 @@ int run (void)
     {
         barTextColor = configuration->barTextColor;
     }
-    if(configuration->borderForegroundPen)
+    if(configuration->borderColor)
     {
-        borderForegroundPen = configuration->borderForegroundPen;
+        borderColor = configuration->borderColor;
     }
-    if(configuration->borderNotForegroundPen)
+    if(configuration->borderColorLostFocus)
     {
-        borderNotForegroundPen = configuration->borderNotForegroundPen;
+        borderColorLostFocus = configuration->borderColorLostFocus;
+    }
+    if(configuration->borderWidth)
+    {
+        borderWidth = configuration->borderWidth;
     }
     if(configuration->scratchWindowsScreenPadding != 0)
     {
         scratchWindowsScreenPadding = configuration->scratchWindowsScreenPadding;
     }
+
+    borderForegroundPen = CreatePen(PS_SOLID, borderWidth, borderColor);
+    borderNotForegroundPen = CreatePen(PS_SOLID, borderWidth, borderColorLostFocus);
+
+    menu_set_border_pen(mView, borderForegroundPen);
 
     HINSTANCE moduleHandle = GetModuleHandle(NULL);
     barSelectedBackgroundBrush = CreateSolidBrush(barSelectedBackgroundColor);

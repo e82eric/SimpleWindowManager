@@ -109,6 +109,9 @@ struct Configuration
     BOOL floatUwpWindows;
     int easyResizeModifiers;
     int dragDropFloatModifier;
+    COLORREF borderColor;
+    COLORREF borderColorLostFocus;
+    int borderWidth;
 };
 
 struct WorkspaceFilterData

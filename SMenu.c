@@ -1589,6 +1589,22 @@ LRESULT CALLBACK Menu_MessageProcessor(
 
     switch (uMsg)
     {
+        case WM_PAINT:
+            {
+                PAINTSTRUCT ps;
+                HDC hdc = BeginPaint(hWnd, &ps);
+
+                RECT rect;
+                GetClientRect(hWnd, &rect);
+                HBRUSH oldBrush = SelectObject(hdc, highlightedBackgroundBrush);
+                HPEN oldPen = SelectObject(hdc, self->borderPen);
+                Rectangle(hdc, rect.left, rect.top, rect.right, rect.bottom);
+                SelectObject(hdc, oldPen);
+                SelectObject(hdc, oldBrush );
+
+                EndPaint(hWnd, &ps);
+            }
+            break;
         case WM_CTLCOLOREDIT:
             {
                 HDC hdcStatic = (HDC)wParam;
@@ -1627,12 +1643,6 @@ LRESULT CALLBACK Menu_MessageProcessor(
                 MenuView_FitChildControls(self);
             }
             break;
-        /* case WM_MOVE: */
-        /*     { */
-        /*         /1* SetFocus(menuView->searchView->hwnd); *1/ */
-        /*         /1* MenuView_FitChildControls(menuView); *1/ */
-        /*     } */
-        /*     break; */
         case WM_DESTROY:
             {
                 PostQuitMessage(0);
@@ -1662,18 +1672,18 @@ LRESULT CALLBACK Menu_MessageProcessor(
             break; 
 
         case WM_MEASUREITEM:
-        {
-            MEASUREITEMSTRUCT*  pmis = (LPMEASUREITEMSTRUCT)lParam;
-            switch (pmis->CtlID)
             {
-                case IDC_LISTBOX_TEXT:
-                    pmis->itemHeight = listBoxItemHeight;
-                    break;
-                default:
-                    break;
+                MEASUREITEMSTRUCT*  pmis = (LPMEASUREITEMSTRUCT)lParam;
+                switch (pmis->CtlID)
+                {
+                    case IDC_LISTBOX_TEXT:
+                        pmis->itemHeight = listBoxItemHeight;
+                        break;
+                    default:
+                        break;
+                }
+                return TRUE;
             }
-            return TRUE;
-        }
         case WM_DRAWITEM: 
             CHAR achBuffer[BUF_LEN];
             size_t cch;
@@ -1681,12 +1691,12 @@ LRESULT CALLBACK Menu_MessageProcessor(
             HRESULT hr; 
 
             PDRAWITEMSTRUCT pdis = (PDRAWITEMSTRUCT) lParam;
- 
+
             if (pdis->itemID == -1)
             {
                 break;
             }
- 
+
             switch (pdis->itemAction)
             {
                 case ODA_SELECT:
@@ -1756,7 +1766,7 @@ LRESULT CALLBACK Menu_MessageProcessor(
                     }
                     EndBufferedPaint(hBufferedPaint, TRUE);
                     break; 
- 
+
                 case ODA_FOCUS: 
                     // Do not process focus changes. The focus caret 
                     // (outline rectangle) indicates the selection. 
@@ -2119,6 +2129,11 @@ MenuView *menu_create_with_size(int left, int top, int width, int height, TCHAR 
     return menuView;
 }
 
+void menu_set_border_pen(MenuView *self, HPEN pen)
+{
+    self->borderPen = pen;
+}
+
 MenuDefinition* menu_definition_create(MenuView *menuView)
 {
     MenuDefinition *result = calloc(1, sizeof(MenuDefinition));
@@ -2156,7 +2171,6 @@ MenuDefinition* menu_definition_create(MenuView *menuView)
 
     NamedCommand *clearSearchCommand = MenuDefinition_AddAction2NamedCommand(result, "clear search", menuView->searchView, SearchView_Clear, FALSE, FALSE);
     MenuDefinition_AddKeyBindingToNamedCommand(result, clearSearchCommand, VK_CONTROL, VK_L, FALSE);
-    MenuDefinition_AddKeyBindingToNamedCommand(result, clearSearchCommand, VK_CONTROL, VK_U, FALSE);
 
     NamedCommand *selectAllSearchTextCommand = MenuDefinition_AddAction2NamedCommand(result, "select all search text", menuView->searchView, SearchView_SelectAll, FALSE, FALSE);
     MenuDefinition_AddKeyBindingToNamedCommand(result, selectAllSearchTextCommand, VK_CONTROL, VK_A, FALSE);

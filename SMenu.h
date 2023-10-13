@@ -182,6 +182,7 @@ typedef struct MenuView
     int width;
     SearchView *searchView;
     ItemsView *itemsView;
+    HPEN borderPen;
 } MenuView;
 
 void MenuDefinition_AddKeyBindingToNamedCommand(MenuDefinition *self, NamedCommand *namedCommand, unsigned int modifier, unsigned int key, BOOL isLoadCommand);
@@ -191,6 +192,7 @@ void NamedCommand_SetTextRange(NamedCommand *self, int start, int end, BOOL trim
 NamedCommand* MenuDefinition_AddActionNamedCommand_WithTextRange(MenuDefinition *self, CHAR *nameBuff, void (*action)(CHAR *text), BOOL reloadAfter, BOOL quitAfter);
 MenuView *menu_create_with_size(int left, int top, int width, int height, TCHAR *title);
 MenuView *menu_create(TCHAR *title);
+void menu_set_border_pen(MenuView *self, HPEN pen);
 void menu_run_definition(MenuView *self, MenuDefinition *menuDefinition);
 void MenuDefinition_ParseAndAddLoadCommand(MenuDefinition *self, char *argText, BOOL isScrollable);
 void MenuDefinition_ParseAndSetRange(MenuDefinition *self, char *argText);

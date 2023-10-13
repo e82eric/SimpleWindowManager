@@ -1,2 +1,2 @@
-# configFile = ..\dotfiles\simplewindowmanager\config.c
-configFile = SampleConfig.c
+configFile = ..\dotfiles\simplewindowmanager\config.c
+# configFile = SampleConfig.c
