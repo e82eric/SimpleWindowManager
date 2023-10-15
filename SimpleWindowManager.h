@@ -112,6 +112,7 @@ struct Configuration
     COLORREF borderColor;
     COLORREF borderColorLostFocus;
     int borderWidth;
+    int floatWindowMovement;
 };
 
 struct WorkspaceFilterData
@@ -193,6 +194,7 @@ struct ClientData
 
 struct Monitor
 {
+    int id;
     int xOffset;
     int h;
     int w;
@@ -258,6 +260,8 @@ struct Command
     void (*execute)(Command *self);
     void (*getDescription)(Command *self, int maxLen, CHAR *toFill);
     void (*action)(void);
+    void (*monitorAction)(Monitor *arg);
+    Monitor *monitorArg;
     void (*workspaceAction)(Workspace *arg);
     Workspace *workspaceArg;
     void (*scratchWindowAction)(ScratchWindow *arg);
@@ -376,6 +380,7 @@ void show_clients(void);
 void show_keybindings(ScratchWindow *self, Monitor *monitor, int scratchWindowsScreenPadding);
 void keybindings_register_defaults(void);
 void keybindings_register_defaults_with_modifiers(int modifiers);
+void keybindings_register_float_window_movements(int modifiers);
 void register_keybindings_menu_with_modifiers(int modifiers, int virtualKey);
 void register_keybindings_menu(void);
 void register_list_processes_menu(int modifers, int virtualKey);

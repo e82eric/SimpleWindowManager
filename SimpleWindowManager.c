@@ -265,6 +265,7 @@ Command *commands[MAX_COMMANDS];
 int numberOfCommands = 0;
 BOOL isForegroundWindowSameAsSelectMonitorSelected;
 HWND eventForegroundHwnd;
+int floatWindowMovement;
 
 enum WindowRoutingMode currentWindowRoutingMode;
 
@@ -468,7 +469,7 @@ void register_list_processes_menu(int modifiers, int virtualKey)
     MenuDefinition_ParseAndSetRange(listProcessMenu, "76,8");
     MenuDefinition_ParseAndAddKeyBinding(listProcessMenu, "ctl-k:procKill", FALSE);
     MenuDefinition_ParseAndAddKeyBinding(listProcessMenu, "ctl-d:windbg", FALSE);
-    MenuDefinition_ParseAndAddKeyBinding(listProcessMenu, "ctl-x:procdump", FALSE);
+    MenuDefinition_ParseAndAddKeyBinding(listProcessMenu, "ctl-m:procdump", FALSE);
     listProcessMenu->hasHeader = TRUE;
     keybinding_create_with_menu_arg("ProcessListMenu", modifiers, virtualKey, menu_run, listProcessMenu);
 }
@@ -692,7 +693,7 @@ void float_window_move_up(HWND hwnd)
     RECT currentRect;
     GetWindowRect(hwnd, &currentRect);
     int targetLeft = currentRect.left;
-    int targetTop = currentRect.top - 10;
+    int targetTop = currentRect.top - floatWindowMovement;
     int targetWidth = currentRect.right - currentRect.left;
     int targetHeight = currentRect.bottom - currentRect.top;
     MoveWindow(hwnd, targetLeft, targetTop, targetWidth, targetHeight, FALSE);
@@ -703,7 +704,7 @@ void float_window_move_down(HWND hwnd)
     RECT currentRect;
     GetWindowRect(hwnd, &currentRect);
     int targetLeft = currentRect.left;
-    int targetTop = currentRect.top + 10;
+    int targetTop = currentRect.top + floatWindowMovement;
     int targetWidth = currentRect.right - currentRect.left;
     int targetHeight = currentRect.bottom - currentRect.top;
     MoveWindow(hwnd, targetLeft, targetTop, targetWidth, targetHeight, FALSE);
@@ -713,7 +714,7 @@ void float_window_move_right(HWND hwnd)
 {
     RECT currentRect;
     GetWindowRect(hwnd, &currentRect);
-    int targetLeft = currentRect.left + 10;
+    int targetLeft = currentRect.left + floatWindowMovement;
     int targetTop = currentRect.top;
     int targetWidth = currentRect.right - currentRect.left;
     int targetHeight = currentRect.bottom - currentRect.top;
@@ -724,7 +725,7 @@ void float_window_move_left(HWND hwnd)
 {
     RECT currentRect;
     GetWindowRect(hwnd, &currentRect);
-    int targetLeft = currentRect.left - 10;
+    int targetLeft = currentRect.left - floatWindowMovement;
     int targetTop = currentRect.top;
     int targetWidth = currentRect.right - currentRect.left;
     int targetHeight = currentRect.bottom - currentRect.top;
@@ -794,6 +795,27 @@ void move_focused_window_up(void)
     if(!existingClient)
     {
         float_window_move_up(foregroundHwnd);
+    }
+}
+
+void move_focused_window_to_monitor(Monitor *monitor)
+{
+    HWND foregroundHwnd = GetForegroundWindow();
+
+    Client *client = windowManager_find_client_in_workspaces_by_hwnd(foregroundHwnd);
+
+    if(!client)
+    {
+        RECT windowRect;
+        GetWindowRect(foregroundHwnd, &windowRect);
+        int windowWidth = windowRect.right - windowRect.left;
+        int windowHeight = windowRect.bottom - windowRect.top;
+
+        int centerX = (monitor->w - windowWidth) / 2;
+        int x = centerX + monitor->xOffset;
+        int y = (monitor->h - windowHeight) / 2;
+
+        SetWindowPos(foregroundHwnd, NULL, x, y, 0, 0, SWP_NOSIZE | SWP_NOZORDER);
     }
 }
 
@@ -980,10 +1002,10 @@ BOOL is_float_window(Client *client, LONG_PTR styles, LONG_PTR exStyles)
         }
     }
 
-    RECT rect;
-    if(GetWindowRect(client->data->hwnd, &rect))
+    WINDOWPLACEMENT placement;
+    if(GetWindowPlacement(client->data->hwnd, &placement))
     {
-        int height = rect.bottom - rect.top;
+        int height = placement.rcNormalPosition.bottom - placement.rcNormalPosition.top;
         if(height < configuration->nonFloatWindowHeightMinimum)
         {
             return TRUE;
@@ -1010,21 +1032,12 @@ static BOOL CALLBACK enum_windows_callback(HWND hwnd, LPARAM lparam)
         return TRUE;
     }
 
-    Client *client = clientFactory_create_from_hwnd(hwnd);
-
-    BOOL isWindowVisible = IsWindowVisible(hwnd);
-    if(!isWindowVisible)
+    if(!(styles & WS_VISIBLE))
     {
-        if(configuration->clientShouldUseMinimizeToHide)
-        {
-            BOOL clientShouldUseMinimizeToHide = configuration->clientShouldUseMinimizeToHide(client);
-            if(!clientShouldUseMinimizeToHide)
-            {
-                free_client(client);
-                return TRUE;
-            }
-        }
+        return TRUE;
     }
+
+    Client *client = clientFactory_create_from_hwnd(hwnd);
 
     ScratchWindow *scratchWindow = scratch_windows_find_from_client(client);
     if(scratchWindow)
@@ -1046,6 +1059,21 @@ static BOOL CALLBACK enum_windows_callback(HWND hwnd, LPARAM lparam)
     Workspace *workspace = windowManager_find_client_workspace_using_filters(client);
     if(workspace)
     {
+        BOOL isMinimized = IsIconic(hwnd);
+
+        if(isMinimized)
+        {
+            if(configuration->clientShouldUseMinimizeToHide)
+            {
+                BOOL clientShouldUseMinimizeToHide = configuration->clientShouldUseMinimizeToHide(client);
+                if(!clientShouldUseMinimizeToHide)
+                {
+                    free_client(client);
+                    return TRUE;
+                }
+            }
+        }
+
         workspace_add_client(workspace, client);
     }
     else
@@ -4971,12 +4999,29 @@ void command_no_arg_get_description(Command *self, int maxLen, CHAR *toFill)
     toFill[0] = '\0';
 }
 
+void command_execute_monitor_arg(Command *self)
+{
+    if(self->monitorArg && self->monitorAction)
+    {
+        self->monitorAction(self->monitorArg);
+    }
+}
+
 void command_execute_workspace_arg(Command *self)
 {
     if(self->workspaceArg && self->workspaceAction)
     {
         self->workspaceAction(self->workspaceArg);
     }
+}
+
+void command_monitor_arg_get_description(Command *self, int maxLen, CHAR *toFill)
+{
+    sprintf_s(
+            toFill,
+            maxLen,
+            "%.d",
+            self->monitorArg->id);
 }
 
 void command_workspace_arg_get_description(Command *self, int maxLen, CHAR *toFill)
@@ -5079,6 +5124,21 @@ Command *command_create_with_no_arg(CHAR *name, void (*action) (void))
     return result;
 }
 
+Command *command_create_with_monitor_arg(CHAR *name, Monitor *arg, void (*action) (Monitor *arg))
+{
+    Command *result = command_create(name);
+    if(result)
+    {
+        result->type = "MonitorFunction";
+        result->monitorArg = arg;
+        result->monitorAction = action;
+        result->execute = command_execute_monitor_arg;
+        result->getDescription = command_monitor_arg_get_description;
+    }
+
+    return result;
+}
+
 Command *command_create_with_workspace_arg(CHAR *name, Workspace *arg, void (*action) (Workspace *arg))
 {
     Command *result = command_create(name);
@@ -5149,6 +5209,13 @@ void keybinding_create_with_no_arg(CHAR *name, int modifiers, unsigned int key, 
 {
     KeyBinding *keyBinding = keybindings_find_existing_or_create(name, modifiers, key);
     Command *command = command_create_with_no_arg(name, action);
+    keybinding_assign_to_command(keyBinding, command);
+}
+
+void keybinding_create_with_monitor_arg(CHAR *name, int modifiers, unsigned int key, void (*action) (Monitor*), Monitor *arg)
+{
+    KeyBinding *keyBinding = keybindings_find_existing_or_create(name, modifiers, key);
+    Command *command = command_create_with_monitor_arg(name, arg, action);
     keybinding_assign_to_command(keyBinding, command);
 }
 
@@ -5228,10 +5295,6 @@ void keybindings_register_defaults_with_modifiers(int modifiers)
     keybinding_create_with_no_arg("arrange_clients_in_selected_workspace", modifiers, VK_N, arrange_clients_in_selected_workspace);
     keybinding_create_with_no_arg("move_focused_window_right", modifiers, VK_L, move_focused_window_right);
     keybinding_create_with_no_arg("move_focused_window_left", modifiers, VK_H, move_focused_window_left);
-    keybinding_create_with_no_arg("move_focused_window_right", modifiers | LShift, VK_RIGHT, move_focused_window_right);
-    keybinding_create_with_no_arg("move_focused_window_right", modifiers | LShift, VK_LEFT, move_focused_window_left);
-    keybinding_create_with_no_arg("move_focused_window_up", modifiers | LShift, VK_UP, move_focused_window_up);
-    keybinding_create_with_no_arg("move_focused_window_down", modifiers | LShift, VK_DOWN, move_focused_window_down);
     keybinding_create_with_no_arg("move_focused_window_to_master", modifiers, VK_RETURN, move_focused_window_to_master);
     keybinding_create_with_no_arg("mimimize_focused_window", LShift | modifiers, VK_DOWN, mimimize_focused_window);
 
@@ -5306,6 +5369,19 @@ void register_secondary_monitor_default_bindings_with_modifiers(int modifiers, M
     keybinding_create_with_workspace_arg("move_workspace_to_secondary_monitor_without_focus[9]", modifiers, VK_F9, move_workspace_to_secondary_monitor_without_focus, spaces[8]);
 
     keybinding_create_with_no_arg("move_secondary_monitor_focused_window_to_master", modifiers | LShift, VK_RETURN, move_secondary_monitor_focused_window_to_master);
+}
+
+void keybindings_register_float_window_movements(int modifiers)
+{
+    keybinding_create_with_no_arg("move_focused_window_right", modifiers, VK_RIGHT, move_focused_window_right);
+    keybinding_create_with_no_arg("move_focused_window_left", modifiers, VK_LEFT, move_focused_window_left);
+    keybinding_create_with_no_arg("move_focused_window_up", modifiers, VK_UP, move_focused_window_up);
+    keybinding_create_with_no_arg("move_focused_window_down", modifiers, VK_DOWN, move_focused_window_down);
+
+    for(int i = 0; i < numberOfDisplayMonitors; i++)
+    {
+        keybinding_create_with_monitor_arg("move_focused_window_to_monitor", modifiers, VK_1 + i, move_focused_window_to_monitor, monitors[i]);
+    }
 }
 
 void start_process(CHAR *processExe, CHAR *cmdArgs, DWORD creationFlags)
@@ -5780,6 +5856,7 @@ int run (void)
     for(int i = 0; i < numberOfMonitors; i++)
     {
         Monitor *monitor = calloc(1, sizeof(Monitor));
+        monitor->id = i + 1;
         monitors[i] = monitor;
         monitor_calulate_coordinates(monitor, i + 1);
         if(i > 0 && !monitors[i]->isHidden)
@@ -5802,6 +5879,7 @@ int run (void)
     configuration->floatUwpWindows = TRUE;
     configuration->easyResizeModifiers = LWin | LCtl | LAlt;
     configuration->dragDropFloatModifier = LAlt;
+    configuration->floatWindowMovement = 75;
     configure(configuration);
     currentWindowRoutingMode = configuration->windowRoutingMode;
 
@@ -5858,6 +5936,7 @@ int run (void)
         scratchWindowsScreenPadding = configuration->scratchWindowsScreenPadding;
     }
 
+    floatWindowMovement = configuration->floatWindowMovement;
     borderForegroundPen = CreatePen(PS_SOLID, borderWidth, borderColor);
     borderNotForegroundPen = CreatePen(PS_SOLID, borderWidth, borderColorLostFocus);
 

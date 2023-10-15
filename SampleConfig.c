@@ -153,4 +153,5 @@ void configure(Configuration *configuration)
     configuration_add_bar_segment(configuration, L"Internet", 3, fill_is_connected_to_internet);
 
     register_secondary_monitor_default_bindings_with_modifiers(modifiers, configuration->monitors[0], configuration->monitors[1], configuration->workspaces);
+    keybindings_register_float_window_movements(LWin);
 }
