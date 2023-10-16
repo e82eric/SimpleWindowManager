@@ -1073,6 +1073,10 @@ static BOOL CALLBACK enum_windows_callback(HWND hwnd, LPARAM lparam)
                 }
             }
         }
+        if(IsZoomed(hwnd))
+        {
+            ShowWindow(hwnd, SW_RESTORE);
+        }
 
         workspace_add_client(workspace, client);
     }
@@ -5826,6 +5830,21 @@ void configuration_add_bar_segment(Configuration *self, TCHAR *headerText, int v
     self->barSegments[self->numberOfBarSegments - 1] = segment;
 }
 
+BOOL CALLBACK enum_display_monitors_callback(HMONITOR hMonitor, HDC hdcMonitor, LPRECT lprcMonitor, LPARAM dwData)
+{
+    UNREFERENCED_PARAMETER(hMonitor);
+    UNREFERENCED_PARAMETER(hdcMonitor);
+    UNREFERENCED_PARAMETER(lprcMonitor);
+    UNREFERENCED_PARAMETER(dwData);
+    numberOfDisplayMonitors++;
+    return TRUE;
+}
+
+void discover_monitors(void)
+{
+    EnumDisplayMonitors(NULL, NULL, enum_display_monitors_callback, (LPARAM)NULL);
+}
+
 int run (void)
 {
     SetProcessDPIAware();
@@ -5842,7 +5861,7 @@ int run (void)
          return 0;
     }
 
-    numberOfDisplayMonitors = 2;
+    discover_monitors();
     numberOfBars = numberOfDisplayMonitors;
 
     workspaces = calloc(MAX_WORKSPACES, sizeof(Workspace*));
