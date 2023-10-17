@@ -76,7 +76,6 @@ static BOOL CALLBACK enum_windows_callback(HWND hWnd, LPARAM lparam);
 void tileLayout_select_next_window(Workspace *workspace);
 void tileLayout_select_previous_window(Workspace *workspace);
 void tileLayout_swap_clients(Client *client1, Client *client2);
-void tileLayout_move_client_to_master(Client *client);
 void tilelayout_move_client_next(Client *client);
 void tilelayout_move_client_previous(Client *client);
 void tilelayout_calulate_and_apply_client_sizes(Workspace *workspace);
@@ -232,7 +231,7 @@ Layout monacleLayout = {
     .select_next_window = monacleLayout_select_next_client,
     .select_previous_window = monacleLayout_select_previous_client,
     .swap_clients = noop_swap_clients,
-    .move_client_to_master = noop_move_client_to_master,
+    .move_client_to_master = monacleLayout_move_client_next,
     .move_client_next = monacleLayout_move_client_next,
     .move_client_previous = monacleLayout_move_client_previous,
     .apply_to_workspace = monacleLayout_calculate_and_apply_client_sizes,
@@ -244,7 +243,7 @@ Layout tileLayout = {
     .select_next_window = tileLayout_select_next_window,
     .select_previous_window = tileLayout_select_previous_window,
     .swap_clients = tileLayout_swap_clients,
-    .move_client_to_master = tileLayout_move_client_to_master,
+    .move_client_to_master = deckLayout_client_to_master,
     .move_client_next = tilelayout_move_client_next,
     .move_client_previous = tilelayout_move_client_previous,
     .apply_to_workspace = tilelayout_calulate_and_apply_client_sizes,
@@ -589,6 +588,13 @@ void move_focused_window_to_master(void)
         Client *client = selectedMonitor->workspace->selected;
         if(client)
         {
+            if(client == client->workspace->clients)
+            {
+                if(client->next)
+                {
+                    client = client->next;
+                }
+            }
             client->workspace->layout->move_client_to_master(client);
             workspace_arrange_windows(client->workspace);
             workspace_focus_selected_window(client->workspace);
@@ -603,6 +609,13 @@ void move_secondary_monitor_focused_window_to_master(void)
         Client *client = secondaryMonitor->workspace->selected;
         if(client)
         {
+            if(client == client->workspace->clients)
+            {
+                if(client->next)
+                {
+                    client = client->next;
+                }
+            }
             client->workspace->layout->move_client_to_master(client);
             workspace_arrange_windows(client->workspace);
         }
@@ -2918,38 +2931,6 @@ void tileLayout_swap_clients(Client *client1, Client *client2)
     client2->data = tmp;
 }
 
-void tileLayout_move_client_to_master(Client *client)
-{
-    if(client->workspace->clients == client)
-    {
-        if(client->workspace->clients->next)
-        {
-            ClientData *temp = client->workspace->clients->next->data;
-            client->workspace->clients->next->data = client->workspace->clients->data;
-            client->workspace->clients->data = temp;
-            client->workspace->selected = client->workspace->clients;
-        }
-        //This is the master do nothing
-        return;
-    }
-
-    if(client->workspace->clients->next == client &&
-            client->workspace->clients->next &&
-            !client->workspace->clients->next->next)
-    {
-        ClientData *temp = client->workspace->clients->next->data;
-        client->workspace->clients->next->data = client->workspace->clients->data;
-        client->workspace->clients->data = temp;
-        client->workspace->selected = client->workspace->clients->next;
-        return;
-    }
-
-    ClientData *temp = client->data;
-    client->data = client->workspace->clients->data;
-    client->workspace->clients->data = temp;
-    client->workspace->selected = client->workspace->clients;
-}
-
 void tilelayout_move_client_next(Client *client)
 {
     if(client->workspace->clients)
@@ -3165,9 +3146,8 @@ void deckLayout_client_to_master(Client *client)
     if(client->workspace->clients->next)
     {
         ClientData *temp = client->workspace->clients->data;
-        client->workspace->clients->data = client->workspace->clients->next->data;
-        client->workspace->clients->next->data = temp;
-        workspace_arrange_windows(client->workspace);
+        client->workspace->clients->data = client->data;
+        client->data = temp;
     }
 }
 
@@ -5758,24 +5738,28 @@ void open_windows_scratch_exit_callback(char *stdOut)
     HWND hwnd = (HWND)strtoll(stdOut, &lastCharRead, 16);
 
     Client *client = windowManager_find_client_in_workspaces_by_hwnd(hwnd);
-    if(client && !client->data->isMinimized)
+    if(client)
     {
-        client->workspace->selected = client;
         if(client->data->isMinimized)
         {
             ShowWindow(hwnd, SW_RESTORE);
             client_move_from_minimized_to_unminimized(client);
+            client->workspace->selected = client;
         }
-        else if(selectedMonitor->workspace != client->workspace)
+
+        client->workspace->layout->move_client_to_master(client);
+        client->workspace->selected = client->workspace->clients;
+
+        if(selectedMonitor->workspace != client->workspace)
         {
-            workspace_focus_selected_window(client->workspace);
             windowManager_move_workspace_to_monitor(selectedMonitor, client->workspace);
             workspace_arrange_windows(client->workspace);
+            workspace_focus_selected_window(client->workspace);
         }
         else
         {
-            workspace_focus_selected_window(client->workspace);
             workspace_arrange_windows(client->workspace);
+            workspace_focus_selected_window(client->workspace);
         }
     }
     else
