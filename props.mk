@@ -1,2 +1,4 @@
 configFile = SampleConfig.c
-include makefile.local
+!if exists(props.mk.local)
+include props.mk.local
+!endif
