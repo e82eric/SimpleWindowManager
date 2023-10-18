@@ -265,6 +265,7 @@ int numberOfCommands = 0;
 BOOL isForegroundWindowSameAsSelectMonitorSelected;
 HWND eventForegroundHwnd;
 int floatWindowMovement;
+size_t g_longestCommandName;
 
 enum WindowRoutingMode currentWindowRoutingMode;
 
@@ -339,7 +340,7 @@ void run_command_from_menu(char *stdOut)
 
 int commands_list(int maxItems, CHAR **lines)
 {
-    const int nameWidth = 45;
+    size_t nameWidth = g_longestCommandName;
     const int typeWidth = 25;
     const int keyBindingWidth = 30;
     CHAR header[1024];
@@ -347,7 +348,7 @@ int commands_list(int maxItems, CHAR **lines)
             header,
             1024,
             "%-*s %-*s %-*s %s",
-            nameWidth,
+            (int)nameWidth,
             "Name",
             typeWidth,
             "Type",
@@ -422,7 +423,7 @@ int commands_list(int maxItems, CHAR **lines)
                 stringToAdd,
                 1024,
                 "%-*s %-*s %-*s %s",
-                nameWidth,
+                (int)nameWidth,
                 command->name,
                 typeWidth,
                 command->type,
@@ -1072,20 +1073,6 @@ static BOOL CALLBACK enum_windows_callback(HWND hwnd, LPARAM lparam)
     Workspace *workspace = windowManager_find_client_workspace_using_filters(client);
     if(workspace)
     {
-        BOOL isMinimized = IsIconic(hwnd);
-
-        if(isMinimized)
-        {
-            if(configuration->clientShouldUseMinimizeToHide)
-            {
-                BOOL clientShouldUseMinimizeToHide = configuration->clientShouldUseMinimizeToHide(client);
-                if(!clientShouldUseMinimizeToHide)
-                {
-                    free_client(client);
-                    return TRUE;
-                }
-            }
-        }
         if(IsZoomed(hwnd))
         {
             ShowWindow(hwnd, SW_RESTORE);
@@ -1589,15 +1576,6 @@ LRESULT CALLBACK handle_key_press(int code, WPARAM w, LPARAM l)
     return CallNextHookEx(g_kb_hook, code, w, l);
 }
 
-BOOL isMaximized(HWND hwnd)
-{
-    WINDOWPLACEMENT windowPlacement = { 0 };
-    windowPlacement.length = sizeof(WINDOWPLACEMENT);
-    GetWindowPlacement(hwnd, &windowPlacement);
-
-    return windowPlacement.showCmd == SW_MAXIMIZE;
-}
-
 BOOL isFullscreen(HWND windowHandle)
 {
     MONITORINFO monitorInfo = { 0 };
@@ -1882,7 +1860,7 @@ void CALLBACK handle_windows_event(
                         {
                             return;
                         }
-                        else if(isMaximized(hwnd))
+                        else if(IsZoomed(hwnd))
                         {
                             return;
                         }
@@ -5085,6 +5063,11 @@ Command *command_create(CHAR *name)
 {
     if(numberOfCommands < MAX_COMMANDS)
     {
+        size_t nameLen = strlen(name);
+        if(nameLen > g_longestCommandName)
+        {
+            g_longestCommandName = nameLen;
+        }
         Command *result = calloc(1, sizeof(Command));
         result->name = name;
         command_register(result);

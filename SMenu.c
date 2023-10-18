@@ -362,6 +362,10 @@ void ItemsView_PageUp(ItemsView *self)
     {
         int currentTopIndex = (int)SendMessage(self->hwnd, LB_GETTOPINDEX, 0, 0);
         int newTopIndex = currentTopIndex - self->viewPortLines;
+        if(newTopIndex < 0)
+        {
+            newTopIndex = 0;
+        }
         SendMessage(self->hwnd, LB_SETTOPINDEX, newTopIndex, 0);
         SendMessage(self->hwnd, LB_SETCURSEL, newTopIndex, 0);
     }
