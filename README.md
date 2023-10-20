@@ -31,7 +31,7 @@ I wrote this application to target my specific workflow where 90% of windows com
 - Layouts
   - Tile Layout
   - Monacle
-  - Deck (hybrid of Tile and Monacle where the master position is fixed and the windows in the secondary position can be cycled through) 
+  - Deck (hybrid of Tile and Monacle where the main position is fixed and the windows in the secondary position can be cycled through) 
 - Scratch Windows
   - Simple short lived terminal application mapped to key bindings.
 - Scratch Menus
@@ -43,23 +43,23 @@ I wrote this application to target my specific workflow where 90% of windows com
 - Workspace rules and definitions are set in Config.c
 
 ## Key Bindings
-| Key Binding   | Action              |
-| ------------- | -------------       |
-| ALT+?         | Show keybindings    |
-| ALT+J         | Select Next Window  |
-| ALT+K         | Select Previous Window        |
-| ALT+Enter     | Move selected window to master |
-| ALT+Shift+J   | Move window to next postion |
+| Key Binding   | Action                           |
+| ------------- | -------------                    |
+| ALT+?         | Show keybindings                 |
+| ALT+J         | Select Next Window               |
+| ALT+K         | Select Previous Window           |
+| ALT+Enter     | Move selected window to main     |
+| ALT+Shift+J   | Move window to next postion      |
 | ALT+Shift+K   | Move window to previous position |
-| ALT+L         | Increase width of master window |
-| ALT+H         | Decrease width of master window |
-| ALT+T         | Switch to tile layout |
-| ALT+D         | Switch to deck layout |
-| ALT+M         | Switch to monacle layout |
-| ALT+Space     | Toggle next layout |
-| ALT+Shirt+C   | Close selected Window |
-| ALT+,         | Select next monitor |
-| ALT+[1-9]     | Select workspace by number|
+| ALT+L         | Increase width of main window    |
+| ALT+H         | Decrease width of main window    |
+| ALT+T         | Switch to tile layout            |
+| ALT+D         | Switch to deck layout            |
+| ALT+M         | Switch to monacle layout         |
+| ALT+Space     | Toggle next layout               |
+| ALT+Shirt+C   | Close selected Window            |
+| ALT+,         | Select next monitor              |
+| ALT+[1-9]     | Select workspace by number       |
 | ALT+O         | Goto previously selected workspace
 | ALT+Shift+[1-9] | Move selected window to workspace by number |
 | ALT+V         | Toggle Windows Taskbar |
