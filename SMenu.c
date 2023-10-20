@@ -96,10 +96,10 @@ DWORD WINAPI SearchView_Worker(LPVOID lpParam)
         maxDisplayItems = self->itemsView->numberOfItems > MAX_DISPLAY_BUF ? MAX_DISPLAY_BUF : self->itemsView->numberOfItems;
     }
 
-    ProcessChunkJob *jobs[250];
+    ProcessChunkJob **jobs = calloc(self->itemsView->numberOfChunks, sizeof(ProcessChunkJob*));
     int numberOfJobs = 0;
 
-    PTP_WORK completeWorkHandles[50];
+    PTP_WORK *completeWorkHandles = calloc(self->itemsView->numberOfChunks, sizeof(PTP_WORK));
     Chunk *currentChunk = self->itemsView->chunks;
     while(currentChunk)
     {
@@ -127,7 +127,9 @@ DWORD WINAPI SearchView_Worker(LPVOID lpParam)
     for(int i = 0; i < numberOfJobs; i++)
     {
         WaitForThreadpoolWorkCallbacks(completeWorkHandles[i], FALSE);
+        CloseThreadpoolWork(completeWorkHandles[i]);
     }
+    free(completeWorkHandles);
 
     DisplayItemList *mergedDisplayItemList = calloc(1, sizeof(DisplayItemList));
     mergedDisplayItemList->items = calloc(maxDisplayItems, sizeof(ItemMatchResult*));
@@ -142,6 +144,7 @@ DWORD WINAPI SearchView_Worker(LPVOID lpParam)
     self->itemsView->numberOfItemsMatched = totalMatches;
 
     self->itemsView->numberOfDisplayItems = 0;
+    assert(mergedDisplayItemList->count <= maxDisplayItems);
     for(int i = 0; i < mergedDisplayItemList->count; i++)
     {
         self->itemsView->displayItems[i] = mergedDisplayItemList->items[i]->item;
@@ -170,6 +173,7 @@ DWORD WINAPI SearchView_Worker(LPVOID lpParam)
         free(jobs[i]);
     }
 
+    free(jobs);
     self->itemsView->isSearching = FALSE;
     SetEvent(self->searchEvent);
     if(!self->cancelSearch)
@@ -504,6 +508,7 @@ void ItemsView_LoadFromAction(ItemsView *self, int (itemsAction)(int maxItems, C
     ItemsView_SetLoading(self);
     self->chunks = calloc(1, sizeof(Chunk));
     self->chunks->items = calloc(CHUNK_SIZE, sizeof(Item*));
+    self->numberOfChunks = 1;
 
     CHAR *itemsBuf[CHUNK_SIZE];
     int numberOfItems = itemsAction(CHUNK_SIZE, itemsBuf);
@@ -571,6 +576,7 @@ void ItemsView_Clear(ItemsView *self)
 
     self->chunks = NULL;
     self->numberOfItems = 0;
+    self->numberOfChunks = 0;
     self->headerSet = FALSE;
 
     AcquireSRWLockExclusive(&itemsRwLock);
@@ -1041,6 +1047,7 @@ void DisplayItemList_TryAdd(DisplayItemList *self, ItemMatchResult *matchResult)
                         self->items[j + 1] = self->items[j];
                     }
                 }
+                assert(i < self->maxItems);
                 self->items[i] = matchResult;
                 if(self->count < self->maxItems)
                 {
@@ -1087,6 +1094,7 @@ VOID CALLBACK ItemsView_ProcessChunkWorker(PTP_CALLBACK_INSTANCE Instance, PVOID
             matchResult->item = item;
             matchResult->score = score;
             job->numberOfMatches++;
+            assert(job->numberOfMatches - 1 < CHUNK_SIZE);
             job->allItemsWithScores[job->numberOfMatches - 1] = matchResult;
             DisplayItemList_TryAdd(job->displayItemList, matchResult);
         }
@@ -1123,15 +1131,44 @@ void ItemsView_AddToEnd(ItemsView *self, char* text)
     }
 
     Item *item = calloc(1, sizeof(Item));
+    if (!item)
+    {
+        assert(false);
+        return;
+    }
+
     item->text = _strdup(text);
+    if (!item->text)
+    {
+        assert(false);
+        free(item);
+        return;
+    }
+
+    if (!self->chunks)
+    {
+        self->chunks = calloc(1, sizeof(Chunk));
+        self->numberOfChunks = 1;
+        if (!self->chunks)
+        {
+            assert(false);
+            free(item->text);
+            free(item);
+            return;
+        }
+        self->chunks->items = calloc(CHUNK_SIZE, sizeof(Item*));
+        if (!self->chunks->items)
+        {
+            assert(false);
+            free(self->chunks);
+            free(item->text);
+            free(item);
+            return;
+        }
+    }
 
     Chunk *current = self->chunks;
-    while(current->next)
-    {
-        if(current->count < CHUNK_SIZE)
-        {
-            assert(!current->next);
-        }
+    while(current->next) {
         current = current->next;
     }
 
@@ -1143,9 +1180,22 @@ void ItemsView_AddToEnd(ItemsView *self, char* text)
     else if(current->count + 1 == CHUNK_SIZE)
     {
         current->next = calloc(1, sizeof(Chunk));
+        self->numberOfChunks++;
+        if (!current->next) {
+            free(item->text);
+            free(item);
+            return;
+        }
         current->next->items = calloc(CHUNK_SIZE, sizeof(Item*));
-        current->items[current->count] = item;
-        current->count++;
+        if (!current->next->items) {
+            assert(false);
+            free(current->next);
+            free(item->text);
+            free(item);
+            return;
+        }
+        current->next->items[0] = item;
+        current->next->count = 1;
     }
     else
     {
@@ -1158,31 +1208,35 @@ void ItemsView_AddToEnd(ItemsView *self, char* text)
 
 BOOL FillLineFromBuffer(char *target, char *buffer, int max, int *charsRead, int *charsWritten)
 {
+    *charsRead = 0;
+    *charsWritten = 0;
+
     for(int i = 0; i < max; i++)
     {
-        (*charsRead)++;
-        (*charsWritten)++;
         if(buffer[i] == '\n')
         {
-            if(buffer[i -1] == '\r')
+            if(i > 0 && buffer[i - 1] == '\r')
             {
                 target[i - 1] = '\0';
-                (*charsWritten) = i;
-                return TRUE;
+                *charsWritten = i;
             }
             else
             {
                 target[i] = '\0';
-                (*charsWritten) = i + 1;
-                return TRUE;
+                *charsWritten = i + 1;
             }
+            *charsRead = i + 1;
+            return TRUE;
         }
         else
         {
             target[i] = buffer[i];
         }
+        (*charsRead)++;
+        (*charsWritten)++;
     }
 
+    target[*charsWritten] = '\0';
     return FALSE;
 }
 
@@ -1214,6 +1268,7 @@ BOOL ProcessCmdOutJob_ProcessStream(ProcessCmdOutputJob *self)
     if(!self->itemsView->chunks)
     {
         self->itemsView->chunks = calloc(1, sizeof(Chunk));
+        self->itemsView->numberOfChunks = 1;
         self->itemsView->chunks->items = calloc(CHUNK_SIZE, sizeof(Item*));
     }
 
@@ -1290,7 +1345,6 @@ void ProcessWithItemStreamOutput_Start(char *cmdArgs, ProcessCmdOutputJob *job)
 {
     PROCESS_INFORMATION pi = { 0 };
     HANDLE stdOutWriteHandle;
-    HANDLE stdInReadHandle;
 
     SECURITY_ATTRIBUTES sattr;
     sattr.nLength = sizeof(SECURITY_ATTRIBUTES);
@@ -1311,7 +1365,7 @@ void ProcessWithItemStreamOutput_Start(char *cmdArgs, ProcessCmdOutputJob *job)
     si.dwFlags = STARTF_USESTDHANDLES;
     si.hStdOutput = stdOutWriteHandle;
     si.hStdError = stdOutWriteHandle;
-    si.hStdInput = stdInReadHandle;
+    si.hStdInput = NULL;
 
     if(!CreateProcessA(
         NULL,
@@ -1333,7 +1387,6 @@ void ProcessWithItemStreamOutput_Start(char *cmdArgs, ProcessCmdOutputJob *job)
 
     CloseHandle(pi.hThread);
 
-    CloseHandle(stdInReadHandle);
     CloseHandle(stdOutWriteHandle);
 
     job->processHandle = pi.hProcess;

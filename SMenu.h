@@ -150,6 +150,7 @@ struct ItemsView
     fzf_slab_t *fzfSlab;
     UINT numberOfItems;
     Chunk *chunks;
+    int numberOfChunks;
     NamedCommand *namedCommands;
     NamedCommand *lastNamedCommand;
     char selectedString[BUF_LEN];
