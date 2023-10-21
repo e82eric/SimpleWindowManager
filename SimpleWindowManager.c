@@ -414,7 +414,7 @@ int commands_list(int maxItems, CHAR **lines)
                     keyStrBuff);
         }
 
-        CHAR stringToAdd[MAX_PATH];
+        CHAR stringToAdd[1024];
         CHAR commandDescription[MAX_PATH];
         command->getDescription(command, MAX_PATH, commandDescription);
 
@@ -1015,7 +1015,7 @@ BOOL is_float_window(Client *client, LONG_PTR styles, LONG_PTR exStyles)
         }
     }
 
-    WINDOWPLACEMENT placement;
+    WINDOWPLACEMENT placement = {0};
     if(GetWindowPlacement(client->data->hwnd, &placement))
     {
         int height = placement.rcNormalPosition.bottom - placement.rcNormalPosition.top;
@@ -1904,16 +1904,19 @@ void CALLBACK handle_windows_event(
         }
         else if(event == EVENT_SYSTEM_FOREGROUND)
         {
-            bar_trigger_selected_window_paint(selectedMonitor->bar);
-            if(hit_test_hwnd(hwnd))
+            if(selectedMonitor)
             {
-                Client* client = windowManager_find_client_in_workspaces_by_hwnd(hwnd);
-                if(client)
+                bar_trigger_selected_window_paint(selectedMonitor->bar);
+                if(hit_test_hwnd(hwnd))
                 {
-                    if(selectedMonitor->workspace->selected != client)
+                    Client* client = windowManager_find_client_in_workspaces_by_hwnd(hwnd);
+                    if(client)
                     {
-                        client->workspace->selected = client;
-                        monitor_select(client->workspace->monitor);
+                        if(selectedMonitor->workspace->selected != client)
+                        {
+                            client->workspace->selected = client;
+                            monitor_select(client->workspace->monitor);
+                        }
                     }
                 }
             }
@@ -1934,7 +1937,10 @@ void CALLBACK handle_windows_event(
             }
             eventForegroundHwnd = hwnd;
             border_window_update();
-            bar_trigger_selected_window_paint(selectedMonitor->bar);
+            if(selectedMonitor)
+            {
+                bar_trigger_selected_window_paint(selectedMonitor->bar);
+            }
         }
     }
 }
@@ -2166,7 +2172,7 @@ void get_command_line(DWORD processId, Client *target)
     TCHAR *language = L"WQL";
     TCHAR queryBuff[1024];
 
-    swprintf(queryBuff, 1024, L"SELECT * FROM Win32_Process WHERE ProcessID = %d", processId);
+    swprintf(queryBuff, 1024, L"SELECT * FROM Win32_Process WHERE ProcessID = %lu", processId);
     IEnumWbemClassObject *results  = NULL;
     services->lpVtbl->ExecQuery(services, language, queryBuff, WBEM_FLAG_BIDIRECTIONAL, NULL, &results);
 
@@ -2181,6 +2187,10 @@ void get_command_line(DWORD processId, Client *target)
         result->lpVtbl->Get(result, L"CommandLine", 0, &CommandLine, 0, 0);
         int commandLineLen = SysStringLen(CommandLine.bstrVal) + 1;
         target->data->commandLine = calloc(commandLineLen, sizeof(TCHAR));
+        if(!target->data->commandLine)
+        {
+            assert(false);
+        }
         wcscpy_s(target->data->commandLine, commandLineLen, CommandLine.bstrVal);
 
         results->lpVtbl->Next(results, WBEM_INFINITE, 1, &result, &returnedCount);
@@ -2256,6 +2266,10 @@ Client* clientFactory_create_from_hwnd(HWND hwnd)
     BOOL isMinimized = IsIconic(hwnd);
 
     ClientData *clientData = calloc(1, sizeof(ClientData));
+    if(!clientData)
+    {
+        assert(false);
+    }
     clientData->hwnd = hwnd;
     clientData->processId = processId;
     clientData->className = _wcsdup(className);
@@ -2267,6 +2281,10 @@ Client* clientFactory_create_from_hwnd(HWND hwnd)
 
     Client *c;
     c = calloc(1, sizeof(Client));
+    if(!c)
+    {
+        assert(false);
+    }
     c->data = clientData;
 
     if(configuration->clientShouldUseMinimizeToHide)
@@ -2794,42 +2812,90 @@ void workspace_arrange_windows_with_defer_handle(Workspace *workspace, HDWP hdwp
 void workspace_register_classname_contains_filter(Workspace *workspace, TCHAR *className)
 {
     workspace->filterData->numberOfClassNames++;
-    workspace->filterData->classNames = realloc(workspace->filterData->classNames, workspace->filterData->numberOfClassNames);
+    TCHAR **temp = realloc(workspace->filterData->classNames, workspace->filterData->numberOfClassNames);
+    if(!temp)
+    {
+        assert(false);
+    }
+    else
+    {
+        workspace->filterData->classNames = temp;
+    }
     workspace->filterData->classNames[workspace->filterData->numberOfClassNames - 1] = _wcsdup(className);
 }
 
 void workspace_register_classname_not_contains_filter(Workspace *workspace, TCHAR *className)
 {
     workspace->filterData->numberOfNotClassNames++;
-    workspace->filterData->notClassNames = realloc(workspace->filterData->notClassNames, workspace->filterData->numberOfNotClassNames);
+    TCHAR **temp = realloc(workspace->filterData->notClassNames, workspace->filterData->numberOfNotClassNames);
+    if(!temp)
+    {
+        assert(false);
+    }
+    else
+    {
+        workspace->filterData->notClassNames = temp;
+    }
     workspace->filterData->notClassNames[workspace->filterData->numberOfNotClassNames - 1] = _wcsdup(className);
 }
 
 void workspace_register_processimagename_contains_filter(Workspace *workspace, TCHAR *processImageName)
 {
     workspace->filterData->numberOfProcessImageNames++;
-    workspace->filterData->processImageNames = realloc(workspace->filterData->processImageNames, workspace->filterData->numberOfProcessImageNames * sizeof(TCHAR*));
+    TCHAR **temp = realloc(workspace->filterData->processImageNames, workspace->filterData->numberOfProcessImageNames * sizeof(TCHAR*));
+    if(!temp)
+    {
+        assert(false);
+    }
+    else
+    {
+        workspace->filterData->processImageNames = temp;
+    }
     workspace->filterData->processImageNames[workspace->filterData->numberOfProcessImageNames - 1] = _wcsdup(processImageName);
 }
 
 void workspace_register_processimagename_not_contains_filter(Workspace *workspace, TCHAR *processImageName)
 {
     workspace->filterData->numberOfNotProcessImageNames++;
-    workspace->filterData->notProcessImageNames = realloc(workspace->filterData->notProcessImageNames, workspace->filterData->numberOfNotProcessImageNames * sizeof(TCHAR*));
+    TCHAR **temp = realloc(workspace->filterData->notProcessImageNames, workspace->filterData->numberOfNotProcessImageNames * sizeof(TCHAR*));
+    if(!temp)
+    {
+        assert(false);
+    }
+    else
+    {
+        workspace->filterData->notProcessImageNames = temp;
+    }
     workspace->filterData->notProcessImageNames[workspace->filterData->numberOfNotProcessImageNames - 1] = _wcsdup(processImageName);
 }
 
 void workspace_register_title_contains_filter(Workspace *workspace, TCHAR *title)
 {
     workspace->filterData->numberOfTitles++;
-    workspace->filterData->titles = realloc(workspace->filterData->titles, workspace->filterData->numberOfTitles * sizeof(TCHAR*));
+    TCHAR **temp = realloc(workspace->filterData->titles, workspace->filterData->numberOfTitles * sizeof(TCHAR*));
+    if(!temp)
+    {
+        assert(false);
+    }
+    else
+    {
+        workspace->filterData->titles = temp;
+    }
     workspace->filterData->titles[workspace->filterData->numberOfTitles - 1] = _wcsdup(title);
 }
 
 void workspace_register_title_not_contains_filter(Workspace *workspace, TCHAR *title)
 {
     workspace->filterData->numberOfNotTitles++;
-    workspace->filterData->notTitles = realloc(workspace->filterData->notTitles, workspace->filterData->numberOfNotTitles * sizeof(TCHAR*));
+    TCHAR **temp = realloc(workspace->filterData->notTitles, workspace->filterData->numberOfNotTitles * sizeof(TCHAR*));
+    if(!temp)
+    {
+        assert(false);
+    }
+    else
+    {
+        workspace->filterData->notTitles = temp;
+    }
     workspace->filterData->notTitles[workspace->filterData->numberOfNotTitles - 1] = _wcsdup(title);
 }
 
@@ -2905,9 +2971,10 @@ void tileLayout_swap_clients(Client *client1, Client *client2)
 
 void tilelayout_move_client_next(Client *client)
 {
+    assert(client);
+
     if(client->workspace->clients)
     {
-        //Exit no clients
     }
 
     if(client->workspace->clients == client && !client->next)
@@ -2956,6 +3023,8 @@ void tilelayout_move_client_next(Client *client)
 
 void tilelayout_move_client_previous(Client *client)
 {
+    assert(client);
+
     if(client->workspace->clients)
     {
         //Exit no clients
@@ -3125,6 +3194,8 @@ void deckLayout_client_to_main(Client *client)
 
 void deckLayout_move_client_next(Client *client)
 {
+    assert(client);
+
     if(!client->workspace->clients)
     {
         //Exit no clients
@@ -3137,7 +3208,7 @@ void deckLayout_move_client_next(Client *client)
         return;
     }
 
-    if(!client->previous)
+    if(!client->previous && client->workspace->clients->next)
     {
         //We are in the main
         //The end result is that the main is put to the bottom of the deck and the first non visible client is moved to the main
@@ -3166,25 +3237,28 @@ void deckLayout_move_client_next(Client *client)
         return;
     }
 
-    if(!client->previous->previous && !client->next)
+    if(client->previous && !client->previous->previous && !client->next)
     {
         //Exit there isn't another secondary to move to
         return;
     }
 
-    Client *c = client->workspace->clients->next;
-    ClientData *topOfDeckData = c->data;
-    while(c)
+    if(client->workspace->clients->next)
     {
-        if(c->next)
+        Client *c = client->workspace->clients->next;
+        ClientData *topOfDeckData = c->data;
+        while(c)
         {
-            c->data = c->next->data;
+            if(c->next)
+            {
+                c->data = c->next->data;
+            }
+            else
+            {
+                c->data = topOfDeckData;
+            }
+            c = c->next;
         }
-        else
-        {
-            c->data = topOfDeckData;
-        }
-        c = c->next;
     }
 
     client->workspace->selected = client->workspace->clients->next;
@@ -3760,6 +3834,7 @@ ScratchWindow *register_windows_terminal_scratch_with_unique_string(CHAR *name, 
 ScratchWindow *register_scratch_with_unique_string(TCHAR *processImageName, CHAR *name, char *cmd, TCHAR *uniqueStr)
 {
     ScratchWindow *sWindow = calloc(1, sizeof(ScratchWindow));
+    assert(sWindow);
     sWindow->name = _strdup(name);
     sWindow->cmd = _strdup(cmd);
     sWindow->uniqueStr = _wcsdup(uniqueStr);
@@ -4041,7 +4116,7 @@ void bar_render_selected_window_description(Bar *bar, HDC hdc)
         int numberOfWorkspaceClients = workspace_get_number_of_clients(bar->monitor->workspace);
         LPCWSTR processShortFileName = PathFindFileName(clientToRender->data->processImageName);
 
-    displayStrLen = swprintf(displayStr, MAX_PATH, L"[%ls:%d] : %ls (%ls) (%d) (IsAdmin: %d) (Mode: %ls)",
+    displayStrLen = swprintf(displayStr, MAX_PATH, L"[%ls:%d] : %ls (%ls) (%ul) (IsAdmin: %d) (Mode: %ls)",
         bar->monitor->workspace->layout->tag,
         numberOfWorkspaceClients,
         processShortFileName,
@@ -4155,15 +4230,18 @@ void bar_segment_initalize_rectangles(BarSegment *self, HDC hdc, int right, Bar 
 void bar_add_segments_from_configuration(Bar *self, HDC hdc, Configuration *config)
 {
     self->segments = calloc(config->numberOfBarSegments, sizeof(BarSegment*));
+    assert(self->segments);
     self->numberOfSegments = config->numberOfBarSegments;
 
     int segmentRightEdge = self->timesRect->right;
     for(int i = 0; i < config->numberOfBarSegments; i++)
     {
         BarSegment *segment = calloc(1, sizeof(BarSegment));
+        assert(segment);
         segment->headerText = _wcsdup(config->barSegments[i]->headerText);
         segment->variableTextFixedWidth = config->barSegments[i]->variableTextFixedWidth;
         segment->headerRect = calloc(1, sizeof(RECT));
+        assert(segment->headerRect);
         segment->variableRect = calloc(1, sizeof(RECT));
         segment->variableTextFunc = config->barSegments[i]->variableTextFunc;
         self->segments[i] = segment;
@@ -4244,6 +4322,7 @@ LRESULT CALLBACK bar_message_loop(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPa
             {
                 HDC hNewDC;
                 HPAINTBUFFER hBufferedPaint = BeginBufferedPaint(hdc, &ps.rcPaint, BPBF_COMPATIBLEBITMAP, NULL, &hNewDC);
+                assert(hBufferedPaint);
                 HBRUSH brush = bar_get_background_brush(msgBar);
 
                 SelectObject(hNewDC, font);
@@ -4299,6 +4378,7 @@ LRESULT CALLBACK bar_message_loop(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPa
 WNDCLASSEX* bar_register_window_class(void)
 {
     WNDCLASSEX *wc = malloc(sizeof(WNDCLASSEX));
+    assert(wc);
     wc->cbSize        = sizeof(WNDCLASSEX);
     wc->style         = 0;
     wc->lpfnWndProc   = bar_message_loop;
@@ -4337,6 +4417,7 @@ void bar_run(Bar *bar, WNDCLASSEX *barWindowClass)
         NULL,
         GetModuleHandle(0),
         bar);
+    assert(hwnd);
     bar->hwnd = hwnd;
 
     ShowScrollBar(
@@ -4391,7 +4472,7 @@ void fill_system_time(TCHAR *toFill, int maxLen)
     swprintf(
             toFill,
             maxLen,
-            L"%02d:%02d",
+            L"%02hu:%02hu",
             st.wHour,
             st.wMinute);
 }
@@ -4403,7 +4484,7 @@ void fill_local_time(TCHAR *toFill, int maxLen)
     swprintf(
             toFill,
             maxLen,
-            L"%04d-%02d-%02d %02d:%02d",
+            L"%04hu-%02hu-%02hu %02hu:%02hu",
             lt.wYear,
             lt.wMonth,
             lt.wDay,
@@ -4721,6 +4802,7 @@ void border_window_paint(HWND hWnd)
 
             LPVOID pBits;
             HBITMAP hBmp = CreateDIBSection(hDC, &bmi, DIB_RGB_COLORS, &pBits, NULL, 0);
+            assert(hBmp);
             SelectObject(hMemDC, hBmp);
 
             memset(pBits, 0, 4 * rcClient.right * rcClient.bottom);
@@ -4861,6 +4943,7 @@ static LRESULT drop_target_window_message_loop(HWND h, UINT msg, WPARAM wp, LPAR
 WNDCLASSEX* border_window_register_class(void)
 {
     WNDCLASSEX *wc    = malloc(sizeof(WNDCLASSEX));
+    assert(wc);
     wc->cbSize        = sizeof(WNDCLASSEX);
     wc->style         = CS_DBLCLKS | CS_OWNDC | CS_HREDRAW | CS_VREDRAW;
     wc->lpfnWndProc   = border_window_message_loop;
@@ -4882,6 +4965,7 @@ WNDCLASSEX* border_window_register_class(void)
 WNDCLASSEX* drop_target_window_register_class(void)
 {
     WNDCLASSEX *wc    = malloc(sizeof(WNDCLASSEX));
+    assert(wc);
     wc->cbSize        = sizeof(WNDCLASSEX);
     wc->style         = CS_DBLCLKS | CS_OWNDC | CS_HREDRAW | CS_VREDRAW;
     wc->lpfnWndProc   = drop_target_window_message_loop;
@@ -5063,6 +5147,7 @@ Command *command_create(CHAR *name)
             g_longestCommandName = nameLen;
         }
         Command *result = calloc(1, sizeof(Command));
+        assert(result);
         result->name = name;
         command_register(result);
         return result;
@@ -5239,6 +5324,7 @@ KeyBinding* keybindings_find_existing_or_create(CHAR* name, int modifiers, unsig
     }
 
     KeyBinding *result = calloc(1, sizeof(KeyBinding));
+    assert(result);
     result->name = name;
     result->modifiers = modifiers;
     result->key = key;
@@ -5450,7 +5536,6 @@ void start_app(TCHAR *processExe)
 void launcher_fail(PTSTR lpszFunction)
 { 
     LPVOID lpMsgBuf;
-    LPVOID lpDisplayBuf;
     DWORD dw = GetLastError(); 
 
     FormatMessage(
@@ -5464,11 +5549,12 @@ void launcher_fail(PTSTR lpszFunction)
         0,
         NULL);
 
-    lpDisplayBuf = (LPVOID)LocalAlloc(LMEM_ZEROINIT, (lstrlen((LPCTSTR)lpMsgBuf) + lstrlen((LPCTSTR)lpszFunction) + 40) * sizeof(TCHAR)); 
+    TCHAR *lpDisplayBuf = LocalAlloc(LMEM_ZEROINIT, (lstrlen((LPCTSTR)lpMsgBuf) + lstrlen((LPCTSTR)lpszFunction) + 40) * sizeof(TCHAR)); 
+    assert(lpDisplayBuf);
 
     StringCchPrintf((LPTSTR)lpDisplayBuf, 
         LocalSize(lpDisplayBuf) / sizeof(TCHAR),
-        TEXT("%s failed with error %d: %s"), 
+        TEXT("%s failed with error %ul: %s"), 
         lpszFunction, dw, lpMsgBuf); 
 
     MessageBox(NULL, (LPCTSTR)lpDisplayBuf, TEXT("Error"), MB_OK); 
@@ -5492,7 +5578,7 @@ static void CALLBACK process_with_stdout_exit_callback(void* context, BOOLEAN is
 
     CloseHandle(launcherProcess->readFileHandle);
     SetEvent(launcherProcess->event);
-    UnregisterWait(launcherProcess->wait);
+    assert(UnregisterWait(launcherProcess->wait));
     CloseHandle(launcherProcess->event);
     CloseHandle(launcherProcess->wait);
     free(launcherProcess);
@@ -5577,6 +5663,7 @@ void process_with_stdin_start(TCHAR *cmdArgs, CHAR **lines, int numberOfLines, v
         else
         {
             LauncherProcess *launcherProcess = calloc(1, sizeof(LauncherProcess));
+            assert(launcherProcess);
             launcherProcess->readFileHandle = childStdOutRead;
             launcherProcess->processId = piProcInfo.dwProcessId;
             launcherProcess->wait = hWait;
@@ -5662,6 +5749,7 @@ void process_with_stdout_start(CHAR *cmdArgs, void (*onSuccess) (CHAR *))
     else
     {
         LauncherProcess *launcherProcess = calloc(1, sizeof(LauncherProcess));
+        assert(launcherProcess);
         launcherProcess->readFileHandle = hChildStd_OUT_Rd;
         launcherProcess->processId = pi.dwProcessId;
         launcherProcess->wait = hWait;
@@ -5776,16 +5864,27 @@ void configuration_add_bar_segment(Configuration *self, TCHAR *headerText, int v
     if(!self->barSegments)
     {
         self->barSegments = calloc(1, sizeof(BarSegmentConfiguration*));
+        assert(self->barSegments);
         self->numberOfBarSegments = 1;
     }
     else
     {
         self->numberOfBarSegments++;
-        self->barSegments = realloc(self->barSegments, sizeof(BarSegmentConfiguration*) * self->numberOfBarSegments);
+        BarSegmentConfiguration **temp = realloc(self->barSegments, sizeof(BarSegmentConfiguration*) * self->numberOfBarSegments);
+        if(!temp)
+        {
+            assert(false);
+        }
+        else
+        {
+            self->barSegments = temp;
+        }
     }
 
     BarSegmentConfiguration *segment = calloc(1, sizeof(BarSegmentConfiguration));
+    assert(segment);
     segment->headerText = _wcsdup(headerText);
+    assert(segment->headerText);
     segment->variableTextFixedWidth = variableTextFixedWidth;
     segment->variableTextFunc = variableTextFunc;
     self->barSegments[self->numberOfBarSegments - 1] = segment;
@@ -5944,6 +6043,7 @@ int run (void)
     int buttonWidth = 30;
 
     bars = calloc(numberOfBars, sizeof(Bar*));
+    assert(bars);
 
     WNDCLASSEX *barWindowClass = bar_register_window_class();
     for(int i = 0; i < numberOfMonitors; i++)
@@ -6040,6 +6140,7 @@ int run (void)
             &IID_IWbemLocator,
             (LPVOID *) &locator);
 
+    assert(locator);
     hr = locator->lpVtbl->ConnectServer(
             locator,
             resource,
@@ -6127,7 +6228,7 @@ int run (void)
     g_kb_hook = SetWindowsHookEx(WH_MOUSE_LL, &handle_mouse, moduleHandle, 0);
     if (g_kb_hook == NULL)
     {
-        fprintf (stderr, "SetWindowsHookEx WH_KEYBOARD_LL [%p] failed with error %d\n", moduleHandle, GetLastError ());
+        fprintf (stderr, "SetWindowsHookEx WH_KEYBOARD_LL [%p] failed with error %ul\n", moduleHandle, GetLastError ());
         return 0;
     };
 
@@ -6199,7 +6300,11 @@ int run (void)
     return 0;
 }
 
-int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow)
+int WINAPI WinMain(
+        _In_ HINSTANCE hInstance,
+        _In_opt_ HINSTANCE hPrevInstance,
+        _In_ LPSTR lpCmdLine,
+        _In_ int nCmdShow)
 {
     UNREFERENCED_PARAMETER(hInstance);
     UNREFERENCED_PARAMETER(hPrevInstance);

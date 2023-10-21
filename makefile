@@ -20,7 +20,7 @@ fzf.obj:
 	CL /RTCs /RTCu $(nowarncflags) fzf\fzf.c /Fd"$(outdir)\fzf.pdb" /Fo"$(outdir)\fzf.obj"
 
 .c.obj:
-	CL /RTCs /RTCu /c $(cflags) $*.c /Fd"$(outdir)\$*.pdb" /Fo"$(outdir)\$*.obj"
+	CL /RTCs /RTCu /analyze /c $(cflags) $*.c /Fd"$(outdir)\$*.pdb" /Fo"$(outdir)\$*.obj"
 
 SimpleWindowManager.exe: outdir RestoreMovedWindows.exe ListServices.obj ListProcesses.obj ListWindows.obj fzf.obj SMenu.obj SimpleWindowManager.obj Config.obj
 	LINK /DEBUG $(outdir)\ListServices.obj $(outdir)\ListProcesses.obj $(outdir)\ListWindows.obj $(outdir)\fzf.obj $(outdir)\SMenu.obj $(outdir)\SimpleWindowManager.obj $(outdir)\Config.obj $(winlibs) Oleacc.lib Shlwapi.lib OLE32.lib Advapi32.lib Dwmapi.lib Shell32.lib OleAut32.lib uxtheme.lib /OUT:$(outdir)\SimpleWindowManager.exe
