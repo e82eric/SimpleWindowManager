@@ -97,27 +97,34 @@ DWORD WINAPI SearchView_Worker(LPVOID lpParam)
     }
 
     ProcessChunkJob **jobs = calloc(self->itemsView->numberOfChunks, sizeof(ProcessChunkJob*));
+    assert(jobs);
     int numberOfJobs = 0;
 
     PTP_WORK *completeWorkHandles = calloc(self->itemsView->numberOfChunks, sizeof(PTP_WORK));
+    assert(completeWorkHandles);
     Chunk *currentChunk = self->itemsView->chunks;
     while(currentChunk)
     {
         jobs[numberOfJobs] = calloc(1, sizeof(ProcessChunkJob));
+        assert(jobs[numberOfJobs]);
         jobs[numberOfJobs]->fzfSlab = fzf_make_default_slab();
         jobs[numberOfJobs]->fzfPattern = fzf_parse_pattern(CaseSmart, false, self->searchString, true);
         jobs[numberOfJobs]->chunk = currentChunk;
         jobs[numberOfJobs]->allItemsWithScores = calloc(CHUNK_SIZE, sizeof(ItemMatchResult*));
+        assert(jobs[numberOfJobs]->allItemsWithScores);
         jobs[numberOfJobs]->jobNumber = numberOfJobs;
         jobs[numberOfJobs]->searchString = self->searchString;
 
         jobs[numberOfJobs]->displayItemList = calloc(1, sizeof(DisplayItemList));
+        assert(jobs[numberOfJobs]->displayItemList);
         jobs[numberOfJobs]->displayItemList->items = calloc(maxDisplayItems, sizeof(ItemMatchResult*));
+        assert(jobs[numberOfJobs]->displayItemList->items);
         jobs[numberOfJobs]->displayItemList->maxItems = maxDisplayItems;
         jobs[numberOfJobs]->searchView = self;
         jobs[numberOfJobs]->currentSearchNumber = jobCurrentSearchNumber;
 
         completeWorkHandles[numberOfJobs] = CreateThreadpoolWork(ItemsView_ProcessChunkWorker, jobs[numberOfJobs], NULL);
+        assert(completeWorkHandles[numberOfJobs]);
         SubmitThreadpoolWork(completeWorkHandles[numberOfJobs]);
 
         numberOfJobs++;
@@ -132,7 +139,9 @@ DWORD WINAPI SearchView_Worker(LPVOID lpParam)
     free(completeWorkHandles);
 
     DisplayItemList *mergedDisplayItemList = calloc(1, sizeof(DisplayItemList));
+    assert(mergedDisplayItemList);
     mergedDisplayItemList->items = calloc(maxDisplayItems, sizeof(ItemMatchResult*));
+    assert(mergedDisplayItemList->items);
     mergedDisplayItemList->maxItems = maxDisplayItems;
 
     int totalMatches = 0;
@@ -234,6 +243,7 @@ void TriggerSearch(SearchView *self)
             self,
             0,
             &dwThreadIdArray[0]);
+    assert(threadHandle);
 
     CloseHandle(threadHandle);
 }
@@ -252,7 +262,7 @@ LRESULT CALLBACK Summary_MessageProcessor(HWND hWnd, UINT uMsg, WPARAM wParam, L
              wchar_t spinnerBuffer[10];
 
              swprintf(spinnerBuffer, 10, L"%lc ", spinner[spinnerCtr]);
-             swprintf(countBuffer, 256, L"%d/%d", self->numberOfItemsMatched, self->numberOfItems);
+             swprintf(countBuffer, 256, L"%d/%lu", self->numberOfItemsMatched, self->numberOfItems);
              if(spinnerCtr < 8)
              {
                  spinnerCtr++;
@@ -275,7 +285,8 @@ LRESULT CALLBACK Summary_MessageProcessor(HWND hWnd, UINT uMsg, WPARAM wParam, L
              SetTextColor(hdc, textColor);
 
              size_t cch;
-             StringCchLength(countBuffer, BUF_LEN, &cch);
+             HRESULT strResult = StringCchLength(countBuffer, BUF_LEN, &cch);
+             assert(SUCCEEDED(strResult));
 
              GetTextExtentPoint32(hdc, countBuffer, (int)cch, &sz); 
              int offset = width - sz.cx - 2;
@@ -422,6 +433,7 @@ void ItemsView_StartBindingProcess(ItemsView *itemsView, char *cmdArgs, WAITORTI
     CloseHandle(stdOutWriteHandle);
 
     ProcessAsyncState *processAsyncState = calloc(1, sizeof(ProcessAsyncState));
+    assert(processAsyncState);
     processAsyncState->thread = pi.hThread;
     processAsyncState->processId = pi.hProcess;
     processAsyncState->itemsView = itemsView;
@@ -475,6 +487,7 @@ void NamedCommand_Parse(char *dest, char *curSel, NamedCommand *command, size_t 
 void ItemsView_StartLoadItemsFromStdIn(ItemsView *self)
 {
     ProcessCmdOutputJob *job = calloc(1, sizeof(ProcessCmdOutputJob));
+    assert(job);
     job->itemsView = self;
     job->readHandle = GetStdHandle(STD_INPUT_HANDLE);
 
@@ -487,6 +500,7 @@ void ItemsView_StartLoadItemsFromStdIn(ItemsView *self)
             job,
             0,
             &dwThreadIdArray[0]);
+    assert(hThreadArray[0]);
 
     CloseHandle(hThreadArray[0]);
 }
@@ -496,6 +510,7 @@ void ItemsView_StartLoadItems_FromCommand(ItemsView *self, NamedCommand *namedCo
     ItemsView_Clear(self);
     UNREFERENCED_PARAMETER(self);
     ProcessCmdOutputJob *job = calloc(1, sizeof(ProcessCmdOutputJob));
+    assert(job);
     job->itemsView = self;
 
     ProcessWithItemStreamOutput_Start(namedCommand->expression, job);
@@ -507,7 +522,9 @@ void ItemsView_LoadFromAction(ItemsView *self, int (itemsAction)(int maxItems, C
 
     ItemsView_SetLoading(self);
     self->chunks = calloc(1, sizeof(Chunk));
+    assert(self->chunks);
     self->chunks->items = calloc(CHUNK_SIZE, sizeof(Item*));
+    assert(self->chunks->items);
     self->numberOfChunks = 1;
 
     CHAR *itemsBuf[CHUNK_SIZE];
@@ -526,6 +543,7 @@ void ItemsView_LoadFromAction(ItemsView *self, int (itemsAction)(int maxItems, C
 void ItemsView_StartLoadItems(ItemsView *self)
 {
     ProcessCmdOutputJob *job = calloc(1, sizeof(ProcessCmdOutputJob));
+    assert(job);
     job->itemsView = self;
 
     if(self->loadCommand)
@@ -610,7 +628,7 @@ void CALLBACK BindProcessFinishCallback(void* lpParameter, BOOLEAN isTimeout)
     {
         ItemsView_HandleReload(asyncState->itemsView);
     }
-    UnregisterWait(asyncState->waitHandle);
+    assert(UnregisterWait(asyncState->waitHandle));
 
     DWORD exitCode;
     GetExitCodeProcess(asyncState->processId, &exitCode);
@@ -1091,6 +1109,7 @@ VOID CALLBACK ItemsView_ProcessChunkWorker(PTP_CALLBACK_INSTANCE Instance, PVOID
         if(score > 0)
         {
             ItemMatchResult *matchResult = calloc(1, sizeof(ItemMatchResult));
+            assert(matchResult);
             matchResult->item = item;
             matchResult->score = score;
             job->numberOfMatches++;
@@ -1268,8 +1287,10 @@ BOOL ProcessCmdOutJob_ProcessStream(ProcessCmdOutputJob *self)
     if(!self->itemsView->chunks)
     {
         self->itemsView->chunks = calloc(1, sizeof(Chunk));
+        assert(self->itemsView->chunks);
         self->itemsView->numberOfChunks = 1;
         self->itemsView->chunks->items = calloc(CHUNK_SIZE, sizeof(Item*));
+        assert(self->itemsView->chunks->items);
     }
 
     self->itemsView->numberOfItems = 0;
@@ -1400,6 +1421,7 @@ void ProcessWithItemStreamOutput_Start(char *cmdArgs, ProcessCmdOutputJob *job)
             job,
             0,
             &dwThreadIdArray[0]);
+    assert(hThreadArray[0]);
 
     CloseHandle(hThreadArray[0]);
 }
@@ -1763,6 +1785,7 @@ LRESULT CALLBACK Menu_MessageProcessor(
 
                     HDC hNewDC;
                     HPAINTBUFFER hBufferedPaint = BeginBufferedPaint(pdis->hDC, &pdis->rcItem, BPBF_COMPATIBLEBITMAP, NULL, &hNewDC);
+                    assert(hBufferedPaint);
                     SelectObject(hNewDC, font);
 
                     if(pdis->itemState & ODS_SELECTED) 
@@ -1881,6 +1904,7 @@ void MenuDefinition_AddLoadActionKeyBinding(
         char *loadActionDescription)
 {
     MenuKeyBinding *binding = calloc(1, sizeof(MenuKeyBinding));
+    assert(binding);
     binding->modifier = modifier;
     binding->key = key;
     binding->isLoadCommand = TRUE;
@@ -1902,6 +1926,7 @@ void MenuDefinition_AddLoadActionKeyBinding(
 void MenuDefinition_AddKeyBindingToNamedCommand(MenuDefinition *self, NamedCommand *namedCommand, unsigned int modifier, unsigned int key, BOOL isLoadCommand)
 {
     MenuKeyBinding *binding = calloc(1, sizeof(MenuKeyBinding));
+    assert(binding);
     binding->modifier = modifier;
     binding->key = key;
     binding->command = namedCommand;
@@ -1993,6 +2018,7 @@ NamedCommand *MenuDefinition_FindOrAddNamedCommand(MenuDefinition *self, CHAR *n
     if(!command)
     {
         command = calloc(1, sizeof(NamedCommand));
+        assert(command);
         command->name = _strdup(nameBuff);
 
         if(!self->namedCommands)
@@ -2107,13 +2133,16 @@ MenuView *menu_create(TCHAR *title)
 MenuView *menu_create_with_size(int left, int top, int width, int height, TCHAR *title)
 {
     MenuView *menuView = calloc(1, sizeof(MenuView));
+    assert(menuView);
 
     ItemsView *itemsView = calloc(1, sizeof(ItemsView));
+    assert(itemsView);
     itemsView->hasHeader = FALSE;
     itemsView->fzfSlab = fzf_make_default_slab();
     itemsView->isLoading = FALSE;
 
     SearchView *searchView = calloc(1, sizeof(SearchView));
+    assert(searchView);
     searchView->itemsView = itemsView;
     searchView->isSearching = FALSE;
     searchView->searchString = _strdup("");
@@ -2129,15 +2158,17 @@ MenuView *menu_create_with_size(int left, int top, int width, int height, TCHAR 
             TRUE,
             TRUE,
             L"searchEvent");
+    assert(searchView->searchEvent);
     SetEvent(searchView->searchEvent);
 
-    InitializeCriticalSectionAndSpinCount(&itemsView->loadCriticalSection, 0x00000400);
+    assert(InitializeCriticalSectionAndSpinCount(&itemsView->loadCriticalSection, 0x00000400));
     InitializeSRWLock(&itemsRwLock);
     itemsView->loadEvent = CreateEvent(
             NULL,
             TRUE,
             TRUE,
             L"loadEvent");
+    assert(itemsView->loadEvent);
     SetEvent(itemsView->loadEvent);
 
     backgrounBrush = CreateSolidBrush(backgroundColor);
