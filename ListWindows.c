@@ -4,6 +4,7 @@
 #include <shlwapi.h>
 #include <strsafe.h>
 #include <dwmapi.h>
+#include <assert.h>
 
 typedef struct ListWindowsClient ListWindowsClient;
 typedef struct ListWindowsWorkspace ListWindowsWorkspace;
@@ -178,6 +179,7 @@ ListWindowsClient* clientFactory_create_from_hwnd(HWND hwnd)
 
     LPCSTR processShortFileName = PathFindFileNameA(processImageFileName);
     ListWindowsClientData *clientData = calloc(1, sizeof(ListWindowsClientData));
+    assert(clientData);
     clientData->hwnd = hwnd;
     clientData->processId = processId;
     clientData->className = _strdup(className);
@@ -187,6 +189,7 @@ ListWindowsClient* clientFactory_create_from_hwnd(HWND hwnd)
 
     ListWindowsClient *c;
     c = calloc(1, sizeof(ListWindowsClient));
+    assert(c);
     c->data = clientData;
 
     return c;
@@ -259,12 +262,13 @@ static BOOL CALLBACK enum_windows_callback(HWND hwnd, LPARAM lparam)
 int list_windows_run(int maxItems, CHAR** toFill)
 {
     ListWindowsWorkspace *workspace = calloc(1, sizeof(ListWindowsWorkspace));
+    assert(workspace);
     EnumWindows(enum_windows_callback, (LPARAM)workspace);
 
     size_t cchStringSize;
-    TCHAR temp[1024];
-    StringCchPrintf(temp, 1024, TEXT("%-*s %-*s %-*s %s\n"), 8, L"HWND", 8, L"PID", (int)workspace->maxProcessNameLen, L"Name", L"Title");
-    StringCchLength(temp, 1024, &cchStringSize);
+    CHAR temp[1024];
+    StringCchPrintfA(temp, 1024, "%-*s %-*s %-*s %s\n", 8, "HWND", 8, "PID", (int)workspace->maxProcessNameLen, "Name", "Title");
+    assert(SUCCEEDED(StringCchLengthA(temp, 1024, &cchStringSize)));
 
     CHAR header[1024];
     sprintf_s(
@@ -279,14 +283,14 @@ int list_windows_run(int maxItems, CHAR** toFill)
     CHAR lineBuf[1024];
     while(c && numberOfResults <= maxItems)
     {
-        StringCchPrintf(temp, 1024, TEXT("%08x %08d %-*s %s\n"),
-            c->data->hwnd, c->data->processId, (int)workspace->maxProcessNameLen, c->data->processName, c->data->title);
-        StringCchLength(temp, 1024, &cchStringSize);
+        StringCchPrintfA(temp, 1024, "%08Ix %08lu %-*s %s\n",
+                (uintptr_t)c->data->hwnd, c->data->processId, (int)workspace->maxProcessNameLen, c->data->processName, c->data->title);
+        assert(SUCCEEDED(StringCchLengthA(temp, 1024, &cchStringSize)));
         sprintf_s(
                 lineBuf,
                 1024,
-                "%08x %08d %-*s %s\n",
-                c->data->hwnd, c->data->processId, (int)workspace->maxProcessNameLen, c->data->processName, c->data->title);
+                "%08Ix %08lu %-*s %s\n",
+                (uintptr_t)c->data->hwnd, c->data->processId, (int)workspace->maxProcessNameLen, c->data->processName, c->data->title);
 
         toFill[numberOfResults] = _strdup(lineBuf);
         ListWindowsClient *cPrev = c;
