@@ -1,3 +1,4 @@
+#include <assert.h>
 #include <stdio.h>
 #include <windows.h>
 #include <psapi.h>
@@ -6,7 +7,7 @@
 #include <shlwapi.h>
 #include <strsafe.h>
 
-int EnumerateAllServices(SC_HANDLE hSCM, CHAR **toFill, int maxItems)
+int EnumerateAllServices(SC_HANDLE hSCM, CHAR **toFill, DWORD maxItems)
 {
     void* buf = NULL;
     DWORD bufSize = 0;
@@ -28,6 +29,7 @@ int EnumerateAllServices(SC_HANDLE hSCM, CHAR **toFill, int maxItems)
                     NULL,
                     NULL))
         {
+            assert(buf);
             ENUM_SERVICE_STATUS_PROCESS* services = (ENUM_SERVICE_STATUS_PROCESS*)buf;
             for(DWORD i = 0; i < serviceCount && i < maxItems; i++)
             {
@@ -107,7 +109,7 @@ int EnumerateAllServices(SC_HANDLE hSCM, CHAR **toFill, int maxItems)
                     sprintf_s(
                             pidBuff,
                             32,
-                            "%d",
+                            "%ul",
                             services[i].ServiceStatusProcess.dwProcessId);
                 }
                 else
@@ -168,7 +170,7 @@ int list_services_run_no_sort(int maxItems, CHAR** linesToFill)
 
     linesToFill[0] = StrDupA(headerBuff);
 
-    int numberOfServices = EnumerateAllServices(scHandle, &linesToFill[1], maxItems - 1);
+    int numberOfServices = EnumerateAllServices(scHandle, &linesToFill[1], (DWORD)(maxItems - 1));
 
     CloseServiceHandle(scHandle);
 
@@ -187,7 +189,7 @@ void start_service(CHAR *szSvcName)
  
     if (NULL == schSCManager) 
     {
-        printf("OpenSCManager failed (%d)\n", GetLastError());
+        printf("OpenSCManager failed (%ul)\n", GetLastError());
         return;
     }
 
@@ -198,7 +200,7 @@ void start_service(CHAR *szSvcName)
  
     if (schService == NULL)
     { 
-        printf("OpenService failed (%d)\n", GetLastError()); 
+        printf("OpenService failed (%ul)\n", GetLastError()); 
         CloseServiceHandle(schSCManager);
         return;
     }    
@@ -210,7 +212,7 @@ void start_service(CHAR *szSvcName)
             sizeof(SERVICE_STATUS_PROCESS),
             &dwBytesNeeded))
     {
-        printf("QueryServiceStatusEx failed (%d)\n", GetLastError());
+        printf("QueryServiceStatusEx failed (%ul)\n", GetLastError());
         CloseServiceHandle(schService); 
         CloseServiceHandle(schSCManager);
         return; 
@@ -229,7 +231,7 @@ void start_service(CHAR *szSvcName)
             0,
             NULL))
     {
-        printf("StartService failed (%d)\n", GetLastError());
+        printf("StartService failed (%ul)\n", GetLastError());
         CloseServiceHandle(schService); 
         CloseServiceHandle(schSCManager);
         return; 
