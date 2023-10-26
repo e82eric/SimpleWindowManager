@@ -42,21 +42,32 @@ void fill_process_stats(Process *process)
 
     HANDLE hProcess = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, process->pid);
 
-    GetProcessMemoryInfo(hProcess, (PROCESS_MEMORY_COUNTERS*)&pmc, sizeof(pmc));
+    if(GetProcessMemoryInfo(hProcess, (PROCESS_MEMORY_COUNTERS*)&pmc, sizeof(pmc)))
+    {
 
-    FILETIME ftCreation, ftExit, ftKernel, ftUser;
-    GetProcessTimes(hProcess, &ftCreation, &ftExit, &ftKernel, &ftUser);
+        FILETIME ftCreation, ftExit, ftKernel, ftUser;
+        GetProcessTimes(hProcess, &ftCreation, &ftExit, &ftKernel, &ftUser);
 
-    CloseHandle(hProcess);
-    __int64 userTime = (__int64) ftUser.dwHighDateTime << 32 | ftUser.dwLowDateTime;
-    __int64 userTimeSec = userTime / 10000000;
-    __int64 kernalTime = (__int64) ftKernel.dwHighDateTime << 32 | ftKernel.dwLowDateTime;
-    __int64 kernalTimeSec = kernalTime / 10000000;
-    __int64 totalSeconds = userTimeSec + kernalTimeSec;
+        CloseHandle(hProcess);
+        __int64 userTime = (__int64) ftUser.dwHighDateTime << 32 | ftUser.dwLowDateTime;
+        __int64 userTimeSec = userTime / 10000000;
+        __int64 kernalTime = (__int64) ftKernel.dwHighDateTime << 32 | ftKernel.dwLowDateTime;
+        __int64 kernalTimeSec = kernalTime / 10000000;
+        __int64 totalSeconds = userTimeSec + kernalTimeSec;
 
-    process->workingSet = pmc.WorkingSetSize / 1024;
-    process->privateBytes = pmc.PrivateUsage / 1024;
-    process->cpu = totalSeconds;
+        if(pmc.WorkingSetSize && pmc.PrivateUsage)
+        {
+            process->workingSet = pmc.WorkingSetSize / 1024;
+            process->privateBytes = pmc.PrivateUsage / 1024;
+            process->cpu = totalSeconds;
+        }
+    }
+    else
+    {
+        process->workingSet = 0;
+        process->privateBytes = 0;
+        process->cpu = 0;
+    }
 }
 
 int CompareProcessPrivateBytes(const void *a, const void *b)
@@ -109,7 +120,7 @@ void fill_line_from_process(Process *process, CHAR *lineToFill)
     sprintf_s(
             lineToFill,
             1024,
-            "%-75.75ls %08d %20ls %20ls %10ls",
+            "%-75.75ls %08lu %20ls %20ls %10ls",
             process->fileName, process->pid, workingSetFormatedStr, privateBytesFormatedStr, cpuSecondsStrFormated);
 }
 
@@ -130,7 +141,7 @@ int list_processes_run(int maxItems, CHAR** linesToFill, BOOL sort, int (*sortFu
 
     linesToFill[0] = _strdup(headerBuf);
     unsigned int count = 0;
-    Process processes[1024];
+    static Process processes[1024];
 
     do
     {

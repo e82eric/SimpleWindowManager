@@ -4,6 +4,8 @@ publishdir = bin
 winlibs = Gdi32.lib user32.lib ComCtl32.lib
 nowarncflags = /c /EHsc /nologo /DUNICODE /D_UNICODE /Zi
 cflags = $(nowarncflags) /c /W4 /EHsc /nologo /DUNICODE /D_UNICODE /Zi
+DEBUG_FLAGS =
+# DEBUG_FLAGS = /RTCs /RTCu
 
 all: clean SimpleWindowManager.exe ListWindows.exe ListProcesses.exe
 
@@ -14,13 +16,13 @@ outdir:
 	if not exist "$(outdir)" mkdir "$(outdir)"
 
 Config.obj:
-	CL /RTCs /RTCu $(cflags) /I ./ /Ifzf $(configFile) /Fd"$(outdir)\Config.pdb" /Fo"$(outdir)\Config.obj"
+	CL $(DEBUG_FLAGS) $(cflags) /I ./ /Ifzf $(configFile) /Fd"$(outdir)\Config.pdb" /Fo"$(outdir)\Config.obj"
 
 fzf.obj:
-	CL /RTCs /RTCu $(nowarncflags) fzf\fzf.c /Fd"$(outdir)\fzf.pdb" /Fo"$(outdir)\fzf.obj"
+	CL $(DEBUG_FLAGS) $(nowarncflags) fzf\fzf.c /Fd"$(outdir)\fzf.pdb" /Fo"$(outdir)\fzf.obj"
 
 .c.obj:
-	CL /RTCs /RTCu /analyze /c $(cflags) $*.c /Fd"$(outdir)\$*.pdb" /Fo"$(outdir)\$*.obj"
+	CL $(DEBUG_FLAGS) /analyze /c $(cflags) $*.c /Fd"$(outdir)\$*.pdb" /Fo"$(outdir)\$*.obj"
 
 SimpleWindowManager.exe: outdir RestoreMovedWindows.exe ListServices.obj ListProcesses.obj ListWindows.obj fzf.obj SMenu.obj SimpleWindowManager.obj Config.obj
 	LINK /DEBUG $(outdir)\ListServices.obj $(outdir)\ListProcesses.obj $(outdir)\ListWindows.obj $(outdir)\fzf.obj $(outdir)\SMenu.obj $(outdir)\SimpleWindowManager.obj $(outdir)\Config.obj $(winlibs) Oleacc.lib Shlwapi.lib OLE32.lib Advapi32.lib Dwmapi.lib Shell32.lib OleAut32.lib uxtheme.lib /OUT:$(outdir)\SimpleWindowManager.exe
