@@ -527,7 +527,7 @@ void ItemsView_LoadFromAction(ItemsView *self, int (itemsAction)(int maxItems, C
     assert(self->chunks->items);
     self->numberOfChunks = 1;
 
-    CHAR *itemsBuf[CHUNK_SIZE];
+    static CHAR *itemsBuf[CHUNK_SIZE];
     int numberOfItems = itemsAction(CHUNK_SIZE, itemsBuf);
 
     for(int i = 0; i < numberOfItems; i++)
@@ -636,11 +636,11 @@ void CALLBACK BindProcessFinishCallback(void* lpParameter, BOOLEAN isTimeout)
     CloseHandle(asyncState->thread);
     CloseHandle(asyncState->processId);
 
-    CHAR buffer[BUF_LEN];
+    static CHAR buffer[BUF_LEN];
     CHAR winBuffer[BUF_LEN];
     CHAR existingText[BUF_LEN];
     DWORD readBytes = 0;
-    while(ReadFile(asyncState->readFileHandle, buffer, BUF_LEN, &readBytes, NULL))
+    while(ReadFile(asyncState->readFileHandle, buffer, BUF_LEN -1, &readBytes, NULL))
     {
         buffer[readBytes] = '\0';
         GetWindowTextA(
@@ -665,7 +665,7 @@ void CALLBACK BindProcessFinishCallback(void* lpParameter, BOOLEAN isTimeout)
     sprintf_s(
             exitCodeBuf,
             BUF_LEN,
-            "%sExit code: %d",
+            "%sExit code: %u",
             existingText,
             exitCode);
     SetWindowTextA(asyncState->itemsView->cmdResultHwnd, exitCodeBuf);
@@ -708,7 +708,7 @@ void ItemsView_HandleBinding(ItemsView *self, NamedCommand *command)
 
             if(command->trimEnd)
             {
-                for(size_t i = numberOfTextChars - 1; i >= 0; i--)
+                for(int i = numberOfTextChars - 1; i >= 0; i--)
                 {
                     if(isspace(text[i]))
                     {
@@ -751,7 +751,7 @@ void ItemsView_HandleBinding(ItemsView *self, NamedCommand *command)
 
 void SearchView_ShowHelp(SearchView *self)
 {
-    CHAR helpStr[2048];
+    CHAR helpStr[2048] = {0};
     CHAR headerStr[256];
 
     sprintf_s(
