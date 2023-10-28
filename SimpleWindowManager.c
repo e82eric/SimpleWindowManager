@@ -1706,14 +1706,8 @@ void CALLBACK handle_windows_event(
             //We do want to hide the Visual Studio and Outlook windows that are visible and then set to hidden.
             if(!(styles & WS_VISIBLE))
             {
-                Client* client = windowManager_find_client_in_workspaces_by_hwnd(hwnd);
-                if(client)
-                {
-                    workspace_remove_client_and_arrange(client->workspace, client);
-                    workspace_focus_selected_window(client->workspace);
-                    free_client(client);
-                    return;
-                }
+                windowManager_remove_client_if_found_by_hwnd(hwnd);
+                return;
             }
         }
         else if (event == EVENT_OBJECT_SHOW || event == EVENT_OBJECT_UNCLOAKED)
@@ -3813,6 +3807,10 @@ BOOL terminal_with_uniqueStr_filter(ScratchWindow *self, Client *client)
 {
     if(wcsstr(client->data->processImageName, self->processImageName))
     {
+        if(wcsstr(client->data->title, self->uniqueStr))
+        {
+            return TRUE;
+        }
         TCHAR *cmdLine = client_get_command_line(client);
         if(wcsstr(cmdLine, self->uniqueStr))
         {
