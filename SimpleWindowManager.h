@@ -113,6 +113,7 @@ struct Configuration
     COLORREF borderColorLostFocus;
     int borderWidth;
     int floatWindowMovement;
+    int borderWindowBackgroundTransparency;
 };
 
 struct WorkspaceFilterData

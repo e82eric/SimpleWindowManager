@@ -4807,23 +4807,21 @@ void border_window_paint(HWND hWnd)
 
             Rectangle(hMemDC, rcClient.left, rcClient.top, rcClient.right, rcClient.bottom);
 
-            // Adjust the rectangle's border pixels to be semi-transparent
             DWORD* pixels = (DWORD*)pBits;
-            int borderWidth = 6; // Match with the pen width
+            int borderWidth = 6;
             for (int y = rcClient.top; y < rcClient.bottom; y++)
             {
                 for (int x = rcClient.left; x < rcClient.right; x++)
                 {
                     DWORD* pixel = &pixels[y * rcClient.right + x];
-                    // Check if the pixel is part of the border
                     if (y < rcClient.top + borderWidth || y > rcClient.bottom - borderWidth ||
                             x < rcClient.left + borderWidth || x > rcClient.right - borderWidth)
                     {
-                        *pixel |= 0xFF000000; // Set alpha to 255 (fully opaque) for inner part
+                        *pixel |= 0xFF000000;
                     }
                     else
                     {
-                        *pixel = (*pixel & 0x00000000) | (128 << 24); // Set alpha to 128 (semi-transparent)
+                        *pixel = (*pixel & 0x00000000) | configuration->borderWindowBackgroundTransparency;
                     }
                 }
             }
@@ -5957,6 +5955,7 @@ int run (void)
     configuration->easyResizeModifiers = LWin | LCtl | LAlt;
     configuration->dragDropFloatModifier = LAlt;
     configuration->floatWindowMovement = 75;
+    configuration->borderWindowBackgroundTransparency = (128 << 24);
     configure(configuration);
     currentWindowRoutingMode = configuration->windowRoutingMode;
 
