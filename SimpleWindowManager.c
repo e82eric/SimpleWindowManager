@@ -30,6 +30,7 @@
 #include "ListWindows.h"
 #include "ListServices.h"
 #include "SimpleWindowManager.h"
+#include "dcomp_border_window.h"
 
 #define MAX_WORKSPACES 10
 #define MAX_COMMANDS 256
@@ -144,6 +145,7 @@ static void bar_trigger_paint(Bar *bar);
 static void bar_trigger_selected_window_paint(Bar *self);
 static void bar_run(Bar *bar, WNDCLASSEX *barWindowClass);
 static void border_window_update(void);
+static void border_window_update_with_defer(HDWP hdwp);
 static LRESULT CALLBACK button_message_loop( HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam, UINT_PTR uIdSubclass, DWORD_PTR dwRefData);
 static void monitor_select(Monitor *monitor);
 static void monitor_set_layout(Layout *layout);
@@ -2155,9 +2157,10 @@ void windowManager_move_workspace_to_monitor(Monitor *monitor, Workspace *worksp
     int workspaceNumberOfClients = workspace_get_number_of_clients(workspace);
     int selectedMonitorCurrentWorkspaceNumberOfClients = workspace_get_number_of_clients(selectedMonitorCurrentWorkspace);
 
-    HDWP hdwp = BeginDeferWindowPos(workspaceNumberOfClients + selectedMonitorCurrentWorkspaceNumberOfClients);
+    HDWP hdwp = BeginDeferWindowPos(workspaceNumberOfClients + selectedMonitorCurrentWorkspaceNumberOfClients + 1);
     monitor_set_workspace_and_arrange(workspace, monitor, hdwp);
     monitor_set_workspace_and_arrange(selectedMonitorCurrentWorkspace, currentMonitor, hdwp);
+    border_window_update_with_defer(hdwp);
     EndDeferWindowPos(hdwp);
 }
 
@@ -4698,6 +4701,74 @@ LRESULT CALLBACK button_message_loop(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM
     return 0;
 }
 
+void border_window_update_with_defer(HDWP hdwp)
+{
+    if(selectedMonitor)
+    {
+        if(selectedMonitor->scratchWindow || menuVisible)
+        {
+            InvalidateRect(borderWindowHwnd, NULL, FALSE);
+        }
+        else if(selectedMonitor->workspace->selected)
+        {
+            ClientData *selectedClientData = selectedMonitor->workspace->selected->data;
+            BOOL isWindowVisible = IsWindowVisible(borderWindowHwnd);
+
+            RECT currentPosition;
+            GetWindowRect(borderWindowHwnd, &currentPosition);
+
+            int targetLeft = selectedClientData->x - 4;
+            int targetTop = selectedClientData->y - 4;
+            int targetWidth = selectedClientData->w + 8;
+            int targetHeight = selectedClientData->h + 8;
+
+            int currentWidth = currentPosition.right - currentPosition.left;
+            int currentHeight = currentPosition.bottom - currentPosition.top;
+
+            DWORD positionFlags;
+            positionFlags = SWP_SHOWWINDOW;
+            if(g_easyResizeInProgress)
+            {
+                positionFlags = SWP_HIDEWINDOW;
+            }
+            else if(currentHeight == targetHeight && currentWidth == targetWidth && isWindowVisible)
+            {
+                positionFlags = SWP_NOREDRAW;
+            }
+
+            if(targetTop != currentPosition.top || targetLeft != currentPosition.left || positionFlags == SWP_SHOWWINDOW || positionFlags == SWP_HIDEWINDOW || !isWindowVisible)
+            {
+                DeferWindowPos(
+                        hdwp,
+                        borderWindowHwnd,
+                        HWND_BOTTOM,
+                        targetLeft,
+                        targetTop,
+                        targetWidth,
+                        targetHeight,
+                        positionFlags);
+                if(positionFlags == SWP_SHOWWINDOW || !isWindowVisible)
+                {
+                    /* InvalidateRect(borderWindowHwnd, NULL, FALSE); */
+                }
+            }
+        }
+        else
+        {
+            DeferWindowPos(
+                hdwp,
+                borderWindowHwnd,
+                HWND_BOTTOM,
+                0,
+                0,
+                0,
+                0,
+                SWP_HIDEWINDOW);
+            /* RedrawWindow(borderWindowHwnd, NULL, NULL, RDW_ERASE | RDW_INVALIDATE); */
+        }
+    }
+}
+
 void border_window_update(void)
 {
     if(selectedMonitor)
@@ -4745,7 +4816,7 @@ void border_window_update(void)
                         positionFlags);
                 if(positionFlags == SWP_SHOWWINDOW || !isWindowVisible)
                 {
-                    InvalidateRect(borderWindowHwnd, NULL, FALSE);
+                    /* InvalidateRect(borderWindowHwnd, NULL, FALSE); */
                 }
             }
         }
@@ -4759,7 +4830,7 @@ void border_window_update(void)
                 0,
                 0,
                 SWP_HIDEWINDOW);
-            RedrawWindow(borderWindowHwnd, NULL, NULL, RDW_ERASE | RDW_INVALIDATE);
+            /* RedrawWindow(borderWindowHwnd, NULL, NULL, RDW_ERASE | RDW_INVALIDATE); */
         }
     }
 }
@@ -6205,7 +6276,7 @@ int run (void)
         DeleteDC(barHdc);
     }
 
-    WNDCLASSEX* borderWindowClass = border_window_register_class();
+    /* WNDCLASSEX* borderWindowClass = border_window_register_class(); */
     WNDCLASSEX* dropTargetWindowClass = drop_target_window_register_class();
 
     EnumWindows(enum_windows_callback, 0);
@@ -6218,7 +6289,8 @@ int run (void)
         EndDeferWindowPos(hdwp);
     }
 
-    border_window_run(borderWindowClass);
+    borderWindowHwnd = dcomp_border_run(moduleHandle);
+    /* border_window_run(borderWindowClass); */
     drop_target_window_run(dropTargetWindowClass);
 
     g_mouse_hook = SetWindowsHookEx(WH_KEYBOARD_LL, &handle_key_press, moduleHandle, 0);
