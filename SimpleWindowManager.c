@@ -2802,8 +2802,8 @@ void workspace_arrange_windows(Workspace *workspace)
 void workspace_arrange_windows_with_defer_handle(Workspace *workspace, HDWP hdwp)
 {
     workspace->layout->apply_to_workspace(workspace);
-    workspace_arrange_clients(workspace, hdwp);
     border_window_update_with_defer(hdwp);
+    workspace_arrange_clients(workspace, hdwp);
 }
 
 void workspace_register_classname_contains_filter(Workspace *workspace, TCHAR *className)
@@ -3947,7 +3947,6 @@ void monitor_set_workspace_and_arrange(Workspace *workspace, Monitor *monitor, H
 {
     monitor_set_workspace(workspace, monitor);
     workspace_arrange_windows_with_defer_handle(workspace, hdwp);
-    border_window_update_with_defer(hdwp);
     if(!monitor->isHidden)
     {
         bar_trigger_paint(monitor->bar);
