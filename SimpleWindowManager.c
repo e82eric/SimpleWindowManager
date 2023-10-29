@@ -2160,7 +2160,6 @@ void windowManager_move_workspace_to_monitor(Monitor *monitor, Workspace *worksp
     HDWP hdwp = BeginDeferWindowPos(workspaceNumberOfClients + selectedMonitorCurrentWorkspaceNumberOfClients + 1);
     monitor_set_workspace_and_arrange(workspace, monitor, hdwp);
     monitor_set_workspace_and_arrange(selectedMonitorCurrentWorkspace, currentMonitor, hdwp);
-    /* border_window_update_with_defer(hdwp); */
     EndDeferWindowPos(hdwp);
 }
 
@@ -4777,72 +4776,9 @@ void border_window_update_with_defer(HDWP hdwp)
 
 void border_window_update(void)
 {
-    if(selectedMonitor)
-    {
-        if(selectedMonitor->scratchWindow || menuVisible)
-        {
-            InvalidateRect(borderWindowHwnd, NULL, FALSE);
-        }
-        else if(selectedMonitor->workspace->selected)
-        {
-            ClientData *selectedClientData = selectedMonitor->workspace->selected->data;
-            BOOL isWindowVisible = IsWindowVisible(borderWindowHwnd);
-
-            RECT currentPosition;
-            GetWindowRect(borderWindowHwnd, &currentPosition);
-
-            int targetLeft = selectedClientData->x - 4;
-            int targetTop = selectedClientData->y - 4;
-            int targetWidth = selectedClientData->w + 8;
-            int targetHeight = selectedClientData->h + 8;
-
-            int currentWidth = currentPosition.right - currentPosition.left;
-            int currentHeight = currentPosition.bottom - currentPosition.top;
-
-            DWORD positionFlags;
-            positionFlags = SWP_SHOWWINDOW;
-            if(g_easyResizeInProgress)
-            {
-                positionFlags = SWP_HIDEWINDOW;
-            }
-            else if(currentHeight == targetHeight && currentWidth == targetWidth && isWindowVisible)
-            {
-                positionFlags = SWP_NOREDRAW;
-            }
-
-            if(targetTop != currentPosition.top || targetLeft != currentPosition.left || positionFlags == SWP_SHOWWINDOW || positionFlags == SWP_HIDEWINDOW || !isWindowVisible)
-            {
-                SetWindowPos(
-                        borderWindowHwnd,
-                        HWND_BOTTOM,
-                        targetLeft,
-                        targetTop,
-                        targetWidth,
-                        targetHeight,
-                        positionFlags);
-                if(positionFlags == SWP_SHOWWINDOW || !isWindowVisible)
-                {
-                    InvalidateRect(borderWindowHwnd, NULL, FALSE);
-                }
-            }
-            else
-            {
-                InvalidateRect(borderWindowHwnd, NULL, FALSE);
-            }
-        }
-        else
-        {
-            SetWindowPos(
-                borderWindowHwnd,
-                HWND_BOTTOM,
-                0,
-                0,
-                0,
-                0,
-                SWP_HIDEWINDOW);
-            RedrawWindow(borderWindowHwnd, NULL, NULL, RDW_ERASE | RDW_INVALIDATE);
-        }
-    }
+    HDWP hdwp = BeginDeferWindowPos(1);
+    border_window_update_with_defer(hdwp);
+    EndDeferWindowPos(hdwp);
 }
 
 void border_window_paint(HWND hWnd)
