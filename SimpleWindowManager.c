@@ -2160,7 +2160,7 @@ void windowManager_move_workspace_to_monitor(Monitor *monitor, Workspace *worksp
     HDWP hdwp = BeginDeferWindowPos(workspaceNumberOfClients + selectedMonitorCurrentWorkspaceNumberOfClients + 1);
     monitor_set_workspace_and_arrange(workspace, monitor, hdwp);
     monitor_set_workspace_and_arrange(selectedMonitorCurrentWorkspace, currentMonitor, hdwp);
-    border_window_update_with_defer(hdwp);
+    /* border_window_update_with_defer(hdwp); */
     EndDeferWindowPos(hdwp);
 }
 
@@ -2795,7 +2795,7 @@ Client* workspace_find_client_by_hwnd(Workspace *workspace, HWND hwnd)
 void workspace_arrange_windows(Workspace *workspace)
 {
     int numberOfWorkspaceClients = workspace_get_number_of_clients(workspace);
-    HDWP hdwp = BeginDeferWindowPos(numberOfWorkspaceClients);
+    HDWP hdwp = BeginDeferWindowPos(numberOfWorkspaceClients + 1);
     workspace_arrange_windows_with_defer_handle(workspace, hdwp);
     EndDeferWindowPos(hdwp);
 }
@@ -2803,6 +2803,7 @@ void workspace_arrange_windows(Workspace *workspace)
 void workspace_arrange_windows_with_defer_handle(Workspace *workspace, HDWP hdwp)
 {
     workspace->layout->apply_to_workspace(workspace);
+    border_window_update_with_defer(hdwp);
     workspace_arrange_clients(workspace, hdwp);
 }
 
@@ -3946,6 +3947,7 @@ void scratch_window_remove(ScratchWindow *self)
 void monitor_set_workspace_and_arrange(Workspace *workspace, Monitor *monitor, HDWP hdwp)
 {
     monitor_set_workspace(workspace, monitor);
+    border_window_update_with_defer(hdwp);
     workspace_arrange_windows_with_defer_handle(workspace, hdwp);
     if(!monitor->isHidden)
     {
@@ -4749,8 +4751,12 @@ void border_window_update_with_defer(HDWP hdwp)
                         positionFlags);
                 if(positionFlags == SWP_SHOWWINDOW || !isWindowVisible)
                 {
-                    /* InvalidateRect(borderWindowHwnd, NULL, FALSE); */
+                    InvalidateRect(borderWindowHwnd, NULL, FALSE);
                 }
+            }
+            else
+            {
+                InvalidateRect(borderWindowHwnd, NULL, FALSE);
             }
         }
         else
@@ -4764,7 +4770,7 @@ void border_window_update_with_defer(HDWP hdwp)
                 0,
                 0,
                 SWP_HIDEWINDOW);
-            /* RedrawWindow(borderWindowHwnd, NULL, NULL, RDW_ERASE | RDW_INVALIDATE); */
+            RedrawWindow(borderWindowHwnd, NULL, NULL, RDW_ERASE | RDW_INVALIDATE);
         }
     }
 }
@@ -4816,8 +4822,12 @@ void border_window_update(void)
                         positionFlags);
                 if(positionFlags == SWP_SHOWWINDOW || !isWindowVisible)
                 {
-                    /* InvalidateRect(borderWindowHwnd, NULL, FALSE); */
+                    InvalidateRect(borderWindowHwnd, NULL, FALSE);
                 }
+            }
+            else
+            {
+                InvalidateRect(borderWindowHwnd, NULL, FALSE);
             }
         }
         else
@@ -4830,7 +4840,7 @@ void border_window_update(void)
                 0,
                 0,
                 SWP_HIDEWINDOW);
-            /* RedrawWindow(borderWindowHwnd, NULL, NULL, RDW_ERASE | RDW_INVALIDATE); */
+            RedrawWindow(borderWindowHwnd, NULL, NULL, RDW_ERASE | RDW_INVALIDATE);
         }
     }
 }
@@ -4948,6 +4958,70 @@ void drop_target_window_paint(HWND hWnd)
     }
 }
 
+static LRESULT dcomp_border_window_message_loop(HWND window, UINT message, WPARAM wparam, LPARAM lparam)
+{
+    switch (message)
+    {
+        case WM_CREATE:
+            COLORREF borderColor = RGB(250, 189, 47);
+            COLORREF borderColorLostFocus = RGB(142, 192, 124);
+            dcomp_border_window_init(window, borderColor, borderColorLostFocus);
+            break;
+        case WM_WINDOWPOSCHANGING:
+            {
+                WINDOWPOS* windowPos = (WINDOWPOS*)lparam;
+                if(menuVisible)
+                {
+                    windowPos->hwndInsertAfter = mView->hwnd;
+                }
+                else if(!selectedMonitor->scratchWindow)
+                {
+                    if(selectedMonitor->workspace->selected)
+                    {
+                        windowPos->hwndInsertAfter = HWND_BOTTOM;
+                    }
+                }
+                else
+                {
+                    if(selectedMonitor->scratchWindow->client)
+                    {
+                        if(selectedMonitor->workspace->selected)
+                        {
+                            windowPos->hwndInsertAfter = selectedMonitor->scratchWindow->client->data->hwnd;
+                        }
+                    }
+                }
+                return 1;
+            }
+        case WM_SIZE:
+            {
+                UINT width = LOWORD(lparam);
+                UINT height = HIWORD(lparam);
+                dcomp_border_window_draw(width, height, !isForegroundWindowSameAsSelectMonitorSelected);
+            }
+            break;
+        case WM_PAINT:
+            {
+                RECT rcWindow;
+                GetClientRect(window, &rcWindow);
+
+                UINT width = rcWindow.right - rcWindow.left;
+                UINT height = rcWindow.bottom - rcWindow.top;
+                dcomp_border_window_draw(width, height, !isForegroundWindowSameAsSelectMonitorSelected);
+            }
+            break;
+        case WM_ERASEBKGND:
+            return 1;
+
+        case WM_DESTROY:
+            {
+            }
+            break;
+    }
+
+    return DefWindowProc(window, message, wparam, lparam);
+}
+
 static LRESULT border_window_message_loop(HWND h, UINT msg, WPARAM wp, LPARAM lp)
 {
     switch(msg)
@@ -5049,6 +5123,32 @@ WNDCLASSEX* drop_target_window_register_class(void)
     RegisterClassEx(wc);
 
     return wc;
+}
+
+void dcomp_border_run(HINSTANCE module)
+{
+    WNDCLASS wc = {0};
+    wc.hCursor = LoadCursor(NULL, IDC_ARROW);
+    wc.hInstance = module;
+    wc.lpszClassName = L"nwm_dcomp_border_class";
+    wc.style = CS_HREDRAW | CS_VREDRAW;
+    wc.lpfnWndProc = dcomp_border_window_message_loop;
+    RegisterClass(&wc);
+
+    borderWindowHwnd = CreateWindowEx(
+            WS_EX_NOREDIRECTIONBITMAP,
+            wc.lpszClassName,
+            L"nwm_dcomp_border",
+            WS_CLIPSIBLINGS | WS_CLIPCHILDREN,
+            100,
+            100,
+            100,
+            100,
+            NULL,
+            NULL,
+            module,
+            NULL);
+    SetWindowLong(borderWindowHwnd, GWL_STYLE, 0);
 }
 
 void border_window_run(WNDCLASSEX *windowClass)
@@ -6289,8 +6389,7 @@ int run (void)
         EndDeferWindowPos(hdwp);
     }
 
-    borderWindowHwnd = dcomp_border_run(moduleHandle);
-    /* border_window_run(borderWindowClass); */
+    dcomp_border_run(moduleHandle);
     drop_target_window_run(dropTargetWindowClass);
 
     g_mouse_hook = SetWindowsHookEx(WH_KEYBOARD_LL, &handle_key_press, moduleHandle, 0);
@@ -6358,6 +6457,7 @@ int run (void)
         DispatchMessage(&msg);
     };
 
+    dcomp_border_clean();
     CloseHandle(hMutex);
 
     IMMDeviceEnumerator_Release(mmdevice);

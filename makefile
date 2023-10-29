@@ -28,7 +28,7 @@ dcomp_border_window.obj:
 	CL $(DEBUG_FLAGS) /analyze /c $(cflags) $*.c /Fd"$(outdir)\$*.pdb" /Fo"$(outdir)\$*.obj"
 
 SimpleWindowManager.exe: outdir RestoreMovedWindows.exe ListServices.obj ListProcesses.obj ListWindows.obj fzf.obj SMenu.obj SimpleWindowManager.obj Config.obj dcomp_border_window.obj
-	LINK /DEBUG $(outdir)\ListServices.obj $(outdir)\ListProcesses.obj $(outdir)\ListWindows.obj $(outdir)\fzf.obj $(outdir)\SMenu.obj $(outdir)\dcomp_border_window.obj $(outdir)\SimpleWindowManager.obj $(outdir)\Config.obj $(winlibs) Oleacc.lib Shlwapi.lib OLE32.lib Advapi32.lib Dwmapi.lib Shell32.lib OleAut32.lib uxtheme.lib /OUT:$(outdir)\SimpleWindowManager.exe
+	LINK /DEBUG $(outdir)\ListServices.obj $(outdir)\ListProcesses.obj $(outdir)\ListWindows.obj $(outdir)\fzf.obj $(outdir)\SMenu.obj $(outdir)\dcomp_border_window.obj $(outdir)\SimpleWindowManager.obj $(outdir)\Config.obj $(winlibs) Oleacc.lib Shlwapi.lib OLE32.lib Advapi32.lib Dwmapi.lib Shell32.lib OleAut32.lib uxtheme.lib dxgi.lib d3d11.lib d2d1.lib dcomp.lib /OUT:$(outdir)\SimpleWindowManager.exe
 
 ListWindows.exe: outdir ListWindowsConsole.obj ListWindows.obj
 	LINK /DEBUG $(outdir)\ListWindowsConsole.obj $(outdir)\ListWindows.obj $(winlibs) Shlwapi.lib /OUT:$(outdir)\ListWindows.exe
