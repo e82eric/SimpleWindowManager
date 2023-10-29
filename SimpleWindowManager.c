@@ -4118,7 +4118,7 @@ void bar_render_selected_window_description(Bar *bar, HDC hdc)
         int numberOfWorkspaceClients = workspace_get_number_of_clients(bar->monitor->workspace);
         LPCWSTR processShortFileName = PathFindFileName(clientToRender->data->processImageName);
 
-    displayStrLen = swprintf(displayStr, MAX_PATH, L"[%ls:%d] : %ls (%ls) (%ul) (IsAdmin: %d) (Mode: %ls)",
+    displayStrLen = swprintf(displayStr, MAX_PATH, L"[%ls:%d] : %ls (%ls) (%lu) (IsAdmin: %d) (Mode: %ls)",
         bar->monitor->workspace->layout->tag,
         numberOfWorkspaceClients,
         processShortFileName,
