@@ -1,11 +1,28 @@
 INCLUDE props.mk
-outdir = tmp
 publishdir = bin
 winlibs = Gdi32.lib user32.lib ComCtl32.lib
 nowarncflags = /c /EHsc /nologo /DUNICODE /D_UNICODE /Zi
-cflags = $(nowarncflags) /c /W4 /EHsc /nologo /DUNICODE /D_UNICODE /Zi
-# DEBUG_FLAGS =
+LFLAGS = /DEBUG
+
+CONFIG = DEBUG
+
+!IF "$(CONFIG)" == "DEBUG"
+outdir = tmp\debug
+cflags = /c /W4 /EHsc /nologo /DUNICODE /D_UNICODE /Zi
 DEBUG_FLAGS = /RTCs /RTCu
+!ELSE
+outdir = tmp\release
+cflags = /c /W4 /EHsc /nologo /DUNICODE /D_UNICODE /Zi /O2
+DEBUG_FLAGS =
+!ENDIF
+
+debug:
+	nmake /f Makefile CONFIG=DEBUG SimpleWindowManager.exe
+
+release:
+	nmake /f Makefile CONFIG=RELEASE SimpleWindowManager.exe
+
+both: debug release
 
 all: clean SimpleWindowManager.exe ListWindows.exe ListProcesses.exe
 
@@ -28,25 +45,25 @@ dcomp_border_window.obj:
 	CL $(DEBUG_FLAGS) /analyze /c $(cflags) $*.c /Fd"$(outdir)\$*.pdb" /Fo"$(outdir)\$*.obj"
 
 SimpleWindowManager.exe: outdir RestoreMovedWindows.exe ListServices.obj ListProcesses.obj ListWindows.obj fzf.obj SMenu.obj SimpleWindowManager.obj Config.obj dcomp_border_window.obj
-	LINK /DEBUG $(outdir)\ListServices.obj $(outdir)\ListProcesses.obj $(outdir)\ListWindows.obj $(outdir)\fzf.obj $(outdir)\SMenu.obj $(outdir)\dcomp_border_window.obj $(outdir)\SimpleWindowManager.obj $(outdir)\Config.obj $(winlibs) Oleacc.lib Shlwapi.lib OLE32.lib Advapi32.lib Dwmapi.lib Shell32.lib OleAut32.lib uxtheme.lib dxgi.lib d3d11.lib d2d1.lib dcomp.lib /OUT:$(outdir)\SimpleWindowManager.exe
+	LINK $(LFLAGS) $(outdir)\ListServices.obj $(outdir)\ListProcesses.obj $(outdir)\ListWindows.obj $(outdir)\fzf.obj $(outdir)\SMenu.obj $(outdir)\dcomp_border_window.obj $(outdir)\SimpleWindowManager.obj $(outdir)\Config.obj $(winlibs) Oleacc.lib Shlwapi.lib OLE32.lib Advapi32.lib Dwmapi.lib Shell32.lib OleAut32.lib uxtheme.lib dxgi.lib d3d11.lib d2d1.lib dcomp.lib /OUT:$(outdir)\SimpleWindowManager.exe
 
 ListWindows.exe: outdir ListWindowsConsole.obj ListWindows.obj
-	LINK /DEBUG $(outdir)\ListWindowsConsole.obj $(outdir)\ListWindows.obj $(winlibs) Shlwapi.lib /OUT:$(outdir)\ListWindows.exe
+	LINK $(LFLAGS) $(outdir)\ListWindowsConsole.obj $(outdir)\ListWindows.obj $(winlibs) Shlwapi.lib /OUT:$(outdir)\ListWindows.exe
 
 RestoreMovedWindows.exe: outdir RestoreMovedWindows.obj ListWindows.obj
-	LINK /DEBUG $(outdir)\RestoreMovedWindows.obj $(outdir)\ListWindows.obj $(winlibs) Shlwapi.lib Dwmapi.lib /OUT:$(outdir)\RestoreMovedWindows.exe
+	LINK $(LFLAGS) $(outdir)\RestoreMovedWindows.obj $(outdir)\ListWindows.obj $(winlibs) Shlwapi.lib Dwmapi.lib /OUT:$(outdir)\RestoreMovedWindows.exe
 
 SMenu.exe: outdir SMenu.obj SMenuConsole.obj fzf.obj
-	LINK /DEBUG $(outdir)\SMenuConsole.obj $(outdir)\SMenu.obj $(outdir)\fzf.obj $(winlibs) /OUT:$(outdir)\SMenu.exe
+	LINK $(LFLAGS) $(outdir)\SMenuConsole.obj $(outdir)\SMenu.obj $(outdir)\fzf.obj $(winlibs) /OUT:$(outdir)\SMenu.exe
 
 ListProcesses.exe: outdir ListProcesses.obj ListProcessesConsole.obj
-	LINK /DEBUG $(outdir)\ListProcessesConsole.obj $(outdir)\ListProcesses.obj $(winlibs) Shlwapi.lib /OUT:$(outdir)\ListProcesses.exe
+	LINK $(LFLAGS) $(outdir)\ListProcessesConsole.obj $(outdir)\ListProcesses.obj $(winlibs) Shlwapi.lib /OUT:$(outdir)\ListProcesses.exe
 
 ListServices.exe: oubdir ListServices.obj ListServicesConsole.obj
-	LINK /DEBUG $(outdir)\ListServicesConsole.obj $(outdir)\ListServices.obj $(winlibs) Shlwapi.lib Advapi32.lib /OUT:$(outdir)\ListServices.exe
+	LINK $(LFLAGS) $(outdir)\ListServicesConsole.obj $(outdir)\ListServices.obj $(winlibs) Shlwapi.lib Advapi32.lib /OUT:$(outdir)\ListServices.exe
 
 KeyBindingSystem.exe: Process.obj ScratchWindow.obj KeyBindingSystem.obj KeyBindingSystemConsole.obj
-	LINK /DEBUG $(outdir)\ScratchWindow.obj $(outdir)\Process.obj $(outdir)\KeyBindingSystemConsole.obj $(outdir)\KeyBindingSystem.obj $(winlibs) Shlwapi.lib /OUT:$(outdir)\KeyBindingSystem.exe Shell32.lib wbemuuid.lib Oleacc.lib OLE32.lib Advapi32.lib Dwmapi.lib OleAut32.lib
+	LINK $(LFLAGS) $(outdir)\ScratchWindow.obj $(outdir)\Process.obj $(outdir)\KeyBindingSystemConsole.obj $(outdir)\KeyBindingSystem.obj $(winlibs) Shlwapi.lib /OUT:$(outdir)\KeyBindingSystem.exe Shell32.lib wbemuuid.lib Oleacc.lib OLE32.lib Advapi32.lib Dwmapi.lib OleAut32.lib
 
 publish:
 	rd /s /q $(publishdir)
