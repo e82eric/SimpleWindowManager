@@ -96,7 +96,8 @@ typedef struct DisplayItemList
     int maxItems;
     int count;
     int minScore;
-    ItemMatchResult **items;
+    int indexOfMinScore;
+    ItemMatchResult *items;
 } DisplayItemList;
 
 typedef struct SearchView
@@ -119,7 +120,6 @@ typedef struct ProcessChunkJob
 {
     Chunk *chunk;
     DisplayItemList *displayItemList;
-    ItemMatchResult **allItemsWithScores;
     int numberOfMatches;
     fzf_pattern_t *fzfPattern;
     fzf_slab_t *fzfSlab;

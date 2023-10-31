@@ -110,14 +110,12 @@ DWORD WINAPI SearchView_Worker(LPVOID lpParam)
         jobs[numberOfJobs]->fzfSlab = fzf_make_default_slab();
         jobs[numberOfJobs]->fzfPattern = fzf_parse_pattern(CaseSmart, false, self->searchString, true);
         jobs[numberOfJobs]->chunk = currentChunk;
-        jobs[numberOfJobs]->allItemsWithScores = calloc(CHUNK_SIZE, sizeof(ItemMatchResult*));
-        assert(jobs[numberOfJobs]->allItemsWithScores);
         jobs[numberOfJobs]->jobNumber = numberOfJobs;
         jobs[numberOfJobs]->searchString = self->searchString;
 
         jobs[numberOfJobs]->displayItemList = calloc(1, sizeof(DisplayItemList));
         assert(jobs[numberOfJobs]->displayItemList);
-        jobs[numberOfJobs]->displayItemList->items = calloc(maxDisplayItems, sizeof(ItemMatchResult*));
+        jobs[numberOfJobs]->displayItemList->items = calloc(maxDisplayItems, sizeof(ItemMatchResult));
         assert(jobs[numberOfJobs]->displayItemList->items);
         jobs[numberOfJobs]->displayItemList->maxItems = maxDisplayItems;
         jobs[numberOfJobs]->searchView = self;
@@ -140,7 +138,7 @@ DWORD WINAPI SearchView_Worker(LPVOID lpParam)
 
     DisplayItemList *mergedDisplayItemList = calloc(1, sizeof(DisplayItemList));
     assert(mergedDisplayItemList);
-    mergedDisplayItemList->items = calloc(maxDisplayItems, sizeof(ItemMatchResult*));
+    mergedDisplayItemList->items = calloc(maxDisplayItems, sizeof(ItemMatchResult));
     assert(mergedDisplayItemList->items);
     mergedDisplayItemList->maxItems = maxDisplayItems;
 
@@ -149,32 +147,6 @@ DWORD WINAPI SearchView_Worker(LPVOID lpParam)
     {
         totalMatches += jobs[i]->numberOfMatches;
         DisplayItemList_MergeIntoRight(self, jobs[i]->displayItemList, mergedDisplayItemList);
-    }
-    self->itemsView->numberOfItemsMatched = totalMatches;
-
-    self->itemsView->numberOfDisplayItems = 0;
-    assert(mergedDisplayItemList->count <= maxDisplayItems);
-    for(int i = 0; i < mergedDisplayItemList->count; i++)
-    {
-        self->itemsView->displayItems[i] = mergedDisplayItemList->items[i]->item;
-        self->itemsView->numberOfDisplayItems++;
-    }
-
-    free(mergedDisplayItemList->items);
-    free(mergedDisplayItemList);
-
-    for(int i = 0; i < numberOfJobs; i++)
-    {
-        ProcessChunkJob *job = jobs[i];
-        for(int j = 0; j < job->numberOfMatches; j++)
-        {
-            free(jobs[i]->allItemsWithScores[j]);
-        }
-        free(jobs[i]->allItemsWithScores);
-    }
-
-    for(int i = 0; i < numberOfJobs; i++)
-    {
         fzf_free_slab(jobs[i]->fzfSlab);
         fzf_free_pattern(jobs[i]->fzfPattern);
         free(jobs[i]->displayItemList->items);
@@ -183,6 +155,24 @@ DWORD WINAPI SearchView_Worker(LPVOID lpParam)
     }
 
     free(jobs);
+    self->itemsView->numberOfItemsMatched = totalMatches;
+
+    self->itemsView->numberOfDisplayItems = 0;
+    /* if(!(mergedDisplayItemList->count <= maxDisplayItems)) */
+    /* { */
+    /*     int *ptr = NULL; */
+    /*     *ptr = 42; */
+    /* } */
+    /* assert(mergedDisplayItemList->count <= maxDisplayItems); */
+    for(int i = 0; i < mergedDisplayItemList->count; i++)
+    {
+        self->itemsView->displayItems[i] = mergedDisplayItemList->items[i].item;
+        self->itemsView->numberOfDisplayItems++;
+    }
+
+    free(mergedDisplayItemList->items);
+    free(mergedDisplayItemList);
+
     self->itemsView->isSearching = FALSE;
     SetEvent(self->searchEvent);
     if(!self->cancelSearch)
@@ -1036,53 +1026,74 @@ LRESULT CALLBACK SearchView_MessageProcessor(HWND hWnd, UINT uMsg, WPARAM wParam
 
 void DisplayItemList_UpdateMinScore(DisplayItemList *self)
 {
-    self->minScore = self->items[self->count - 1]->score;
+    self->minScore = self->items[self->count - 1].score;
 }
 
-void DisplayItemList_TryAdd(DisplayItemList *self, ItemMatchResult *matchResult)
+int binary_search_insert_position(ItemMatchResult *items, int count, int score)
 {
-    BOOL itemsCheck = self->count < self->maxItems;
-    BOOL minScoreCheck = matchResult->score > self->minScore;
+    int left = 0, right = count - 1;
 
-    if(itemsCheck || minScoreCheck)
+    while(left <= right)
+    {
+        int mid = (left + right) / 2;
+        if(items[mid].score == score)
+        {
+            return mid;
+        }
+        else if(items[mid].score > score)
+        {
+            left = mid + 1;
+        }
+        else
+        {
+            right = mid - 1;
+        }
+    }
+    return left; 
+}
+
+void DisplayItemList_TryAdd(DisplayItemList *self, Item *item, int score)
+{
+    if(self->count < self->maxItems || score > self->minScore)
     {
         if(self->count == 0)
         {
-            self->items[0] = matchResult;
+            self->items[0].item = item;
+            self->items[0].score = score;
             self->count++;
-            return;
         }
-
-        for(int i = 0; i < self->count; i++)
+        else
         {
-            ItemMatchResult *iItem = self->items[i];
-            if(matchResult->score > iItem->score)
+            if(self->count == self->maxItems && score <= self->items[self->count - 1].score)
             {
-                for(int j = self->count; j >= i; j--)
+                self->items[self->count - 1].item = item;
+                self->items[self->count - 1].score = score;
+            }
+            else
+            {
+                int position = binary_search_insert_position(self->items, self->count, score);
+
+                for(int j = self->count; j > position; j--)
                 {
-                    if(j + 1 < self->maxItems)
+                    if(j < self->maxItems)
                     {
-                        self->items[j + 1] = self->items[j];
+                        self->items[j].item = self->items[j-1].item;
+                        self->items[j].score = self->items[j-1].score;
                     }
                 }
-                assert(i < self->maxItems);
-                self->items[i] = matchResult;
-                if(self->count < self->maxItems)
+
+                if(position < self->maxItems)
                 {
-                    self->count++;
+                    self->items[position].item = item;
+                    self->items[position].score = score;
+                    if(self->count < self->maxItems)
+                    {
+                        self->count++;
+                    }
                 }
-                DisplayItemList_UpdateMinScore(self);
-                return;
             }
         }
-
-        if(self->count < self->maxItems)
-        {
-            self->items[self->count] = matchResult;
-            self->count++;
-            DisplayItemList_UpdateMinScore(self);
-            return;
-        }
+        DisplayItemList_UpdateMinScore(self);
     }
 }
 
@@ -1108,14 +1119,9 @@ VOID CALLBACK ItemsView_ProcessChunkWorker(PTP_CALLBACK_INSTANCE Instance, PVOID
 
         if(score > 0)
         {
-            ItemMatchResult *matchResult = calloc(1, sizeof(ItemMatchResult));
-            assert(matchResult);
-            matchResult->item = item;
-            matchResult->score = score;
             job->numberOfMatches++;
             assert(job->numberOfMatches - 1 < CHUNK_SIZE);
-            job->allItemsWithScores[job->numberOfMatches - 1] = matchResult;
-            DisplayItemList_TryAdd(job->displayItemList, matchResult);
+            DisplayItemList_TryAdd(job->displayItemList, item, score);
         }
         ReleaseSRWLockShared(&itemsRwLock);
     }
@@ -1127,15 +1133,15 @@ void DisplayItemList_MergeIntoRight(SearchView *searchView, DisplayItemList *sel
 {
     for(int i = 0; i < self->count; i++)
     {
-        ItemMatchResult *matchResult = self->items[i];
+        ItemMatchResult matchResult = self->items[i];
         if(searchView->cancelSearch)
         {
             return;
         }
 
-        if(matchResult->score > 0)
+        if(matchResult.score > 0)
         {
-            DisplayItemList_TryAdd(resultList2, matchResult);
+            DisplayItemList_TryAdd(resultList2, matchResult.item, matchResult.score);
         }
     }
 }
@@ -2004,12 +2010,15 @@ void MenuDefinition_ParseAndAddLoadCommand(MenuDefinition *self, char *argText, 
 
 void MenuDefinition_ParseAndSetRange(MenuDefinition *self, char *argText)
 {
-    char *nextToken = NULL;
-    char* startStr = strtok_s(argText, ",", &nextToken);
-    char* endStr = strtok_s(NULL, ",", &nextToken);
-    self->hasReturnRange = TRUE;
-    self->returnRangeStart = atoi(startStr);
-    self->returnRangeEnd = atoi(endStr);
+    int num1, num2;
+    
+    if (sscanf_s(argText, "%d,%d", &num1, &num2) == 2) {
+        self->returnRangeStart = num1;
+        self->returnRangeEnd = num2;
+        printf("num1 = %d, num2 = %d\n", num1, num2);
+    } else {
+        assert(false);
+    }
 }
 
 NamedCommand *MenuDefinition_FindOrAddNamedCommand(MenuDefinition *self, CHAR *nameBuff)
