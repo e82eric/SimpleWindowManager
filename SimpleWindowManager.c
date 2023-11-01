@@ -5071,7 +5071,7 @@ void dcomp_border_run(HINSTANCE module)
     RegisterClass(&wc);
 
     borderWindowHwnd = CreateWindowEx(
-            WS_EX_NOREDIRECTIONBITMAP,
+            WS_EX_NOREDIRECTIONBITMAP | WS_EX_NOACTIVATE,
             wc.lpszClassName,
             L"nwm_dcomp_border",
             WS_CLIPSIBLINGS | WS_CLIPCHILDREN,
