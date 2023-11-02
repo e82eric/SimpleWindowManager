@@ -158,12 +158,6 @@ DWORD WINAPI SearchView_Worker(LPVOID lpParam)
     self->itemsView->numberOfItemsMatched = totalMatches;
 
     self->itemsView->numberOfDisplayItems = 0;
-    /* if(!(mergedDisplayItemList->count <= maxDisplayItems)) */
-    /* { */
-    /*     int *ptr = NULL; */
-    /*     *ptr = 42; */
-    /* } */
-    /* assert(mergedDisplayItemList->count <= maxDisplayItems); */
     for(int i = 0; i < mergedDisplayItemList->count; i++)
     {
         self->itemsView->displayItems[i] = mergedDisplayItemList->items[i].item;
@@ -630,6 +624,7 @@ void CALLBACK BindProcessFinishCallback(void* lpParameter, BOOLEAN isTimeout)
     CHAR winBuffer[BUF_LEN];
     CHAR existingText[BUF_LEN];
     DWORD readBytes = 0;
+
     while(ReadFile(asyncState->readFileHandle, buffer, BUF_LEN -1, &readBytes, NULL))
     {
         buffer[readBytes] = '\0';
@@ -645,6 +640,7 @@ void CALLBACK BindProcessFinishCallback(void* lpParameter, BOOLEAN isTimeout)
                 buffer);
         SetWindowTextA(asyncState->itemsView->cmdResultHwnd, winBuffer);
     }
+
     CloseHandle(asyncState->readFileHandle);
 
     CHAR exitCodeBuf[BUF_LEN];
@@ -659,6 +655,15 @@ void CALLBACK BindProcessFinishCallback(void* lpParameter, BOOLEAN isTimeout)
             existingText,
             exitCode);
     SetWindowTextA(asyncState->itemsView->cmdResultHwnd, exitCodeBuf);
+    int lines = (int)SendMessage(asyncState->itemsView->cmdResultHwnd, EM_GETLINECOUNT, 0, 0);
+    if(lines > asyncState->itemsView->cmdViewPortLines)
+    {
+        ShowScrollBar(asyncState->itemsView->cmdResultHwnd, SB_VERT, TRUE);
+    }
+    else
+    {
+        ShowScrollBar(asyncState->itemsView->cmdResultHwnd, SB_VERT, FALSE);
+    }
 
     if(asyncState->quitAfter)
     {
@@ -1466,7 +1471,7 @@ int ItemsView_Move(ItemsView *self, int left, int top, int width, int height)
 
     MoveWindow(self->hwnd, left, listTop, width, listHeight, TRUE);
     self->height = listHeight;
-    self->viewPortLines = ((listHeight - 3) / listBoxItemHeight) - 1;
+    self->viewPortLines = ((listHeight - 3) / listBoxItemHeight);
 
     return listTop + listHeight;
 }
@@ -1510,6 +1515,7 @@ void MenuView_FitChildControls(MenuView *self)
     GetClientRect(self->itemsView->hwnd, &listRect);
     int cmdResultTop = listBottom + padding;
     cmdResultHeight = bottom - cmdResultTop;
+    self->itemsView->cmdViewPortLines = ((cmdResultHeight - 3) / listBoxItemHeight);
     MoveWindow(self->itemsView->cmdResultHwnd, padding, cmdResultTop, width, cmdResultHeight, TRUE);
 
     int helpHeaderTop = padding;
@@ -1629,7 +1635,7 @@ void MenuView_CreateChildControls(MenuView *self)
     self->itemsView->cmdResultHwnd = CreateWindowA(
             "EDIT", 
             NULL, 
-            WS_CHILD  | WS_BORDER | WS_VISIBLE | WS_VSCROLL | ES_LEFT | ES_MULTILINE | ES_AUTOVSCROLL | ES_NOHIDESEL,
+            WS_CHILD  | WS_BORDER | WS_VISIBLE | ES_LEFT | ES_MULTILINE | ES_AUTOVSCROLL | ES_NOHIDESEL,
             260, 
             260, 
             900, 
@@ -1772,9 +1778,8 @@ LRESULT CALLBACK Menu_MessageProcessor(
         case WM_DRAWITEM: 
             CHAR achBuffer[BUF_LEN];
             size_t cch;
-            TEXTMETRIC tm; 
-            HRESULT hr; 
-
+            TEXTMETRIC tm;
+            HRESULT hr;
             PDRAWITEMSTRUCT pdis = (PDRAWITEMSTRUCT) lParam;
 
             if (pdis->itemID == -1)
@@ -2321,5 +2326,7 @@ void menu_run_definition(MenuView *self, MenuDefinition *menuDefinition)
     }
 
     MenuView_FitChildControls(self);
+
+    ShowScrollBar(self->itemsView->cmdResultHwnd, SB_VERT, FALSE);
     SetWindowTextA(self->itemsView->cmdResultHwnd, 0);
 }

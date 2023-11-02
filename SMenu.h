@@ -144,6 +144,7 @@ struct ItemsView
     NamedCommand *loadCommand;
     int (*loadAction)(int maxItems, CHAR**);
     int viewPortLines;
+    int cmdViewPortLines;
     int numberOfItemsMatched;
     BOOL isReading;
     BOOL isSearching;
