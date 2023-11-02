@@ -291,6 +291,20 @@ LRESULT CALLBACK Summary_MessageProcessor(HWND hWnd, UINT uMsg, WPARAM wParam, L
     return DefSubclassProc(hWnd, uMsg, wParam, lParam);
 }
 
+LRESULT CALLBACK ItemsView_MessageProcessor(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam, UINT_PTR uIdSubclass, DWORD_PTR dwRefData)
+{
+    UNREFERENCED_PARAMETER(uIdSubclass);
+    UNREFERENCED_PARAMETER(dwRefData);
+
+    switch (uMsg)
+    {
+        case WM_ERASEBKGND:
+            return TRUE;
+        default:
+            return DefSubclassProc(hWnd, uMsg, wParam, lParam);
+    }
+}
+
 void ItemsView_DrawItem(ItemsView *self, HDC hdc, BOOL isSelected, RECT *rc, CHAR *achBuffer)
 {
     size_t cch;
@@ -1673,6 +1687,7 @@ void MenuView_CreateChildControls(MenuView *self)
             (HINSTANCE)GetWindowLongPtr(self->hwnd, GWLP_HINSTANCE),
             NULL);
     SendMessageA(self->itemsView->hwnd, WM_SETFONT, (WPARAM)font, (LPARAM)TRUE);
+    SetWindowSubclass(self->itemsView->hwnd, ItemsView_MessageProcessor, 0, (DWORD_PTR)NULL);
 
     self->searchView->helpHeaderHwnd = CreateWindow(
             L"STATIC", 
