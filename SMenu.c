@@ -178,8 +178,6 @@ DWORD WINAPI SearchView_Worker(LPVOID lpParam)
 
 void ItemsView_HandleDisplayItemsUpdate(ItemsView *self)
 {
-    /* SendMessageA(self->hwnd, WM_SETREDRAW, FALSE, 0); */
-    /* SendMessageA(self->hwnd, LB_RESETCONTENT, 0, 0); */
     for(int i = 0; i < self->numberOfDisplayItems; i++)
     {
         SendMessage(self->hwnd, LB_DELETESTRING, (WPARAM)i, 0);
@@ -190,12 +188,6 @@ void ItemsView_HandleDisplayItemsUpdate(ItemsView *self)
     {
         SendMessage(self->hwnd, LB_DELETESTRING, (WPARAM)i, 0);
     }
-
-    /* for(int i = self->numberOfDisplayItems - 1; i >= 0; i--) */
-    /* { */
-    /*     SendMessage(self->hwnd, LB_DELETESTRING, (WPARAM)i, 0); */
-    /*     SendMessageA(self->hwnd, LB_INSERTSTRING, i, (LPARAM)self->displayItems[i]->text); */
-    /* } */
 
     LRESULT lResult = SendMessageA(self->hwnd, LB_FINDSTRING, 0, (LPARAM)self->selectedString);
     if(lResult == LB_ERR || !self->itemSelected)
@@ -209,7 +201,6 @@ void ItemsView_HandleDisplayItemsUpdate(ItemsView *self)
     {
         SendMessageA(self->hwnd, LB_SETCURSEL, lResult, 0);
     }
-    /* SendMessageA(self->hwnd, WM_SETREDRAW, TRUE, 0); */
 }
 
 void TriggerSearch(SearchView *self)
@@ -364,71 +355,6 @@ void ItemsView_DrawItem(ItemsView *self, HDC hdc, BOOL isSelected, RECT *rc, CHA
         DrawFocusRect(hdc, rc);
         SetTextColor(hdc, colorText);
         SetBkColor(hdc, colorBack);
-    }
-}
-
-/* BOOL g_RedrawEnabled; */
-
-LRESULT CALLBACK ItemsView_MessageProcessor(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam, UINT_PTR uIdSubclass, DWORD_PTR dwRefData)
-{
-    UNREFERENCED_PARAMETER(uIdSubclass);
-
-    ItemsView *self = (ItemsView*)dwRefData;
-
-    switch (uMsg)
-    {
-        /* case WM_SETREDRAW: */
-        /*     g_RedrawEnabled = (BOOL)wParam; */
-        /*     if(g_RedrawEnabled) */
-        /*     { */
-        /*         InvalidateRect(hWnd, 0, TRUE); */
-        /*     } */
-        /*     return 0; */
-        case WM_PAINT:
-            /* if (g_RedrawEnabled && !self->searchView->cancelSearch) { */
-            if (!self->searchView->cancelSearch) {
-                int numberOfItems = (int)SendMessage(hWnd, LB_GETCOUNT, (WPARAM)NULL, (LPARAM)NULL);
-                if(numberOfItems > 0)
-                {
-                    PAINTSTRUCT ps;
-                    HDC hdc = BeginPaint(hWnd, &ps);
-
-                    RECT rect;
-                    GetClientRect(hWnd, &rect);
-                    int indexOfSelection = (int)SendMessageA(hWnd, LB_GETCURSEL, (WPARAM)NULL, (LPARAM)NULL);
-
-                    HDC hNewDC;
-                    HPAINTBUFFER hBufferedPaint = BeginBufferedPaint(hdc, &rect, BPBF_COMPATIBLEBITMAP, NULL, &hNewDC);
-                    FillRect(hNewDC, &rect, backgrounBrush);
-                    for(int i = 0; i < numberOfItems; i++)
-                    {
-                        RECT rc;
-                        SendMessageA(hWnd, LB_GETITEMRECT, (WPARAM)i, (LPARAM)&rc);
-
-                        char achBuffer[BUF_LEN];
-                        SendMessageA(hWnd, LB_GETTEXT, i, (LPARAM)achBuffer); 
-
-                        BOOL isSelected = i == indexOfSelection;
-                        ItemsView_DrawItem(self, hNewDC, isSelected, &rc, achBuffer);
-                    }
-                    EndBufferedPaint(hBufferedPaint, TRUE);
-                }
-                return DefSubclassProc(hWnd, uMsg, wParam, lParam);
-            } else {
-                ValidateRect(hWnd, NULL);
-            }
-            return 0;
-        case WM_CTLCOLORLISTBOX:
-            {
-                HDC hdcStatic = (HDC)wParam;
-                SetTextColor(hdcStatic, textColor);
-                SetBkColor(hdcStatic, backgroundColor);
-                return (INT_PTR)backgrounBrush;
-            }
-        case WM_ERASEBKGND:
-            return TRUE;
-        default:
-            return DefSubclassProc(hWnd, uMsg, wParam, lParam);
     }
 }
 
@@ -1732,7 +1658,7 @@ void MenuView_CreateChildControls(MenuView *self)
             hinstance,
             NULL);
     SendMessageA(self->itemsView->summaryHwnd, WM_SETFONT, (WPARAM)font, (LPARAM)TRUE);
-    /* SetWindowSubclass(self->itemsView->summaryHwnd, Summary_MessageProcessor, 0, (DWORD_PTR)self->itemsView); */
+    SetWindowSubclass(self->itemsView->summaryHwnd, Summary_MessageProcessor, 0, (DWORD_PTR)self->itemsView);
 
     self->itemsView->hwnd = CreateWindowA(
             "LISTBOX", 
@@ -1746,7 +1672,6 @@ void MenuView_CreateChildControls(MenuView *self)
             (HMENU)IDC_LISTBOX_TEXT, 
             (HINSTANCE)GetWindowLongPtr(self->hwnd, GWLP_HINSTANCE),
             NULL);
-    SetWindowSubclass(self->itemsView->hwnd, ItemsView_MessageProcessor, 0, (DWORD_PTR)self->itemsView);
     SendMessageA(self->itemsView->hwnd, WM_SETFONT, (WPARAM)font, (LPARAM)TRUE);
 
     self->searchView->helpHeaderHwnd = CreateWindow(
