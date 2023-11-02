@@ -178,12 +178,24 @@ DWORD WINAPI SearchView_Worker(LPVOID lpParam)
 
 void ItemsView_HandleDisplayItemsUpdate(ItemsView *self)
 {
-    SendMessageA(self->hwnd, WM_SETREDRAW, FALSE, 0);
-    SendMessageA(self->hwnd, LB_RESETCONTENT, 0, 0);
+    /* SendMessageA(self->hwnd, WM_SETREDRAW, FALSE, 0); */
+    /* SendMessageA(self->hwnd, LB_RESETCONTENT, 0, 0); */
     for(int i = 0; i < self->numberOfDisplayItems; i++)
     {
+        SendMessage(self->hwnd, LB_DELETESTRING, (WPARAM)i, 0);
         SendMessageA(self->hwnd, LB_INSERTSTRING, i, (LPARAM)self->displayItems[i]->text);
     }
+
+    for(int i = self->numberOfDisplayItems; i < self->viewPortLines; i++)
+    {
+        SendMessage(self->hwnd, LB_DELETESTRING, (WPARAM)i, 0);
+    }
+
+    /* for(int i = self->numberOfDisplayItems - 1; i >= 0; i--) */
+    /* { */
+    /*     SendMessage(self->hwnd, LB_DELETESTRING, (WPARAM)i, 0); */
+    /*     SendMessageA(self->hwnd, LB_INSERTSTRING, i, (LPARAM)self->displayItems[i]->text); */
+    /* } */
 
     LRESULT lResult = SendMessageA(self->hwnd, LB_FINDSTRING, 0, (LPARAM)self->selectedString);
     if(lResult == LB_ERR || !self->itemSelected)
@@ -197,7 +209,7 @@ void ItemsView_HandleDisplayItemsUpdate(ItemsView *self)
     {
         SendMessageA(self->hwnd, LB_SETCURSEL, lResult, 0);
     }
-    SendMessageA(self->hwnd, WM_SETREDRAW, TRUE, 0);
+    /* SendMessageA(self->hwnd, WM_SETREDRAW, TRUE, 0); */
 }
 
 void TriggerSearch(SearchView *self)
@@ -286,6 +298,138 @@ LRESULT CALLBACK Summary_MessageProcessor(HWND hWnd, UINT uMsg, WPARAM wParam, L
     }
 
     return DefSubclassProc(hWnd, uMsg, wParam, lParam);
+}
+
+void ItemsView_DrawItem(ItemsView *self, HDC hdc, BOOL isSelected, RECT *rc, CHAR *achBuffer)
+{
+    size_t cch;
+    TEXTMETRIC tm; 
+    HRESULT hr; 
+
+    COLORREF colorText;
+    COLORREF colorBack;
+
+    SelectObject(hdc, font);
+
+    if(isSelected) 
+    {
+        FillRect(hdc, rc, highlightedBackgroundBrush);
+        colorText = selectionBackgroundTextColor;
+        colorBack = SetBkColor(hdc, highlightBackgroundColor);
+    }
+    else
+    {
+        FillRect(hdc, rc, backgrounBrush);
+        colorText = textColor;
+        colorBack = SetBkColor(hdc, backgroundColor);
+    }
+
+    GetTextMetrics(hdc, &tm); 
+
+    hr = StringCchLengthA(achBuffer, BUF_LEN, &cch);
+    if (FAILED(hr))
+    {
+        // TODO: Handle error.
+    }
+
+    SetTextColor(hdc, textColor);
+    TextOutA(hdc, 0, rc->top + 2, achBuffer, (int)cch);
+
+    CHAR searchStringBuff[BUF_LEN];
+    GetWindowTextA(self->searchView->hwnd, searchStringBuff, BUF_LEN);
+    fzf_pattern_t *fzfPattern = fzf_parse_pattern(CaseSmart, false, searchStringBuff, true);
+
+    if(fzfPattern)
+    {
+        fzf_position_t *pos = fzf_get_positions(achBuffer, fzfPattern, self->fzfSlab);
+
+        SIZE sz;
+
+        if(pos && pos->size > 0)
+        {
+            SetTextColor(hdc, fuzzmatchCharTextColor);
+            for(int i = 0; i < pos->size; i++)
+            {
+                GetTextExtentPoint32A(hdc, achBuffer, pos->data[i], &sz); 
+                TextOutA(hdc, sz.cx, rc->top + 2, achBuffer + pos->data[i], 1);
+            }
+        }
+
+        fzf_free_positions(pos);
+        fzf_free_pattern(fzfPattern);
+    }
+
+    if (isSelected) 
+    {
+        DrawFocusRect(hdc, rc);
+        SetTextColor(hdc, colorText);
+        SetBkColor(hdc, colorBack);
+    }
+}
+
+/* BOOL g_RedrawEnabled; */
+
+LRESULT CALLBACK ItemsView_MessageProcessor(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam, UINT_PTR uIdSubclass, DWORD_PTR dwRefData)
+{
+    UNREFERENCED_PARAMETER(uIdSubclass);
+
+    ItemsView *self = (ItemsView*)dwRefData;
+
+    switch (uMsg)
+    {
+        /* case WM_SETREDRAW: */
+        /*     g_RedrawEnabled = (BOOL)wParam; */
+        /*     if(g_RedrawEnabled) */
+        /*     { */
+        /*         InvalidateRect(hWnd, 0, TRUE); */
+        /*     } */
+        /*     return 0; */
+        case WM_PAINT:
+            /* if (g_RedrawEnabled && !self->searchView->cancelSearch) { */
+            if (!self->searchView->cancelSearch) {
+                int numberOfItems = (int)SendMessage(hWnd, LB_GETCOUNT, (WPARAM)NULL, (LPARAM)NULL);
+                if(numberOfItems > 0)
+                {
+                    PAINTSTRUCT ps;
+                    HDC hdc = BeginPaint(hWnd, &ps);
+
+                    RECT rect;
+                    GetClientRect(hWnd, &rect);
+                    int indexOfSelection = (int)SendMessageA(hWnd, LB_GETCURSEL, (WPARAM)NULL, (LPARAM)NULL);
+
+                    HDC hNewDC;
+                    HPAINTBUFFER hBufferedPaint = BeginBufferedPaint(hdc, &rect, BPBF_COMPATIBLEBITMAP, NULL, &hNewDC);
+                    FillRect(hNewDC, &rect, backgrounBrush);
+                    for(int i = 0; i < numberOfItems; i++)
+                    {
+                        RECT rc;
+                        SendMessageA(hWnd, LB_GETITEMRECT, (WPARAM)i, (LPARAM)&rc);
+
+                        char achBuffer[BUF_LEN];
+                        SendMessageA(hWnd, LB_GETTEXT, i, (LPARAM)achBuffer); 
+
+                        BOOL isSelected = i == indexOfSelection;
+                        ItemsView_DrawItem(self, hNewDC, isSelected, &rc, achBuffer);
+                    }
+                    EndBufferedPaint(hBufferedPaint, TRUE);
+                }
+                return DefSubclassProc(hWnd, uMsg, wParam, lParam);
+            } else {
+                ValidateRect(hWnd, NULL);
+            }
+            return 0;
+        case WM_CTLCOLORLISTBOX:
+            {
+                HDC hdcStatic = (HDC)wParam;
+                SetTextColor(hdcStatic, textColor);
+                SetBkColor(hdcStatic, backgroundColor);
+                return (INT_PTR)backgrounBrush;
+            }
+        case WM_ERASEBKGND:
+            return TRUE;
+        default:
+            return DefSubclassProc(hWnd, uMsg, wParam, lParam);
+    }
 }
 
 void ItemsView_HandleSelection(ItemsView *self)
@@ -1588,12 +1732,12 @@ void MenuView_CreateChildControls(MenuView *self)
             hinstance,
             NULL);
     SendMessageA(self->itemsView->summaryHwnd, WM_SETFONT, (WPARAM)font, (LPARAM)TRUE);
-    SetWindowSubclass(self->itemsView->summaryHwnd, Summary_MessageProcessor, 0, (DWORD_PTR)self->itemsView);
+    /* SetWindowSubclass(self->itemsView->summaryHwnd, Summary_MessageProcessor, 0, (DWORD_PTR)self->itemsView); */
 
     self->itemsView->hwnd = CreateWindowA(
             "LISTBOX", 
             NULL, 
-            WS_VISIBLE | WS_CHILD | LBS_STANDARD | LBS_HASSTRINGS | LBS_OWNERDRAWFIXED | WS_CLIPSIBLINGS,
+            WS_VISIBLE | WS_CHILD | LBS_STANDARD | LBS_HASSTRINGS | WS_CLIPSIBLINGS | LBS_OWNERDRAWFIXED,
             260, 
             260, 
             900, 
@@ -1602,6 +1746,7 @@ void MenuView_CreateChildControls(MenuView *self)
             (HMENU)IDC_LISTBOX_TEXT, 
             (HINSTANCE)GetWindowLongPtr(self->hwnd, GWLP_HINSTANCE),
             NULL);
+    SetWindowSubclass(self->itemsView->hwnd, ItemsView_MessageProcessor, 0, (DWORD_PTR)self->itemsView);
     SendMessageA(self->itemsView->hwnd, WM_SETFONT, (WPARAM)font, (LPARAM)TRUE);
 
     self->searchView->helpHeaderHwnd = CreateWindow(
@@ -1777,9 +1922,6 @@ LRESULT CALLBACK Menu_MessageProcessor(
             }
         case WM_DRAWITEM: 
             CHAR achBuffer[BUF_LEN];
-            size_t cch;
-            TEXTMETRIC tm;
-            HRESULT hr;
             PDRAWITEMSTRUCT pdis = (PDRAWITEMSTRUCT) lParam;
 
             if (pdis->itemID == -1)
@@ -1791,73 +1933,11 @@ LRESULT CALLBACK Menu_MessageProcessor(
             {
                 case ODA_SELECT:
                 case ODA_DRAWENTIRE:
-                    COLORREF colorText;
-                    COLORREF colorBack;
-
                     HDC hNewDC;
                     HPAINTBUFFER hBufferedPaint = BeginBufferedPaint(pdis->hDC, &pdis->rcItem, BPBF_COMPATIBLEBITMAP, NULL, &hNewDC);
-                    assert(hBufferedPaint);
-                    SelectObject(hNewDC, font);
-
-                    if(pdis->itemState & ODS_SELECTED) 
-                    {
-                        FillRect(hNewDC, &pdis->rcItem, highlightedBackgroundBrush);
-                        colorText = selectionBackgroundTextColor;
-                        colorBack = SetBkColor(hNewDC, highlightBackgroundColor);
-                    }
-                    else
-                    {
-                        FillRect(hNewDC, &pdis->rcItem, backgrounBrush);
-                        colorText = textColor;
-                        colorBack = SetBkColor(hNewDC, backgroundColor);
-                    }
-
                     SendMessageA(pdis->hwndItem, LB_GETTEXT, pdis->itemID, (LPARAM)achBuffer); 
-
-                    GetTextMetrics(hNewDC, &tm); 
-
-                    hr = StringCchLengthA(achBuffer, BUF_LEN, &cch);
-                    if (FAILED(hr))
-                    {
-                        // TODO: Handle error.
-                    }
-
-                    SetTextColor(hNewDC, textColor);
-                    TextOutA(hNewDC, 0, pdis->rcItem.top + 2, achBuffer, (int)cch);
-
-                    CHAR searchStringBuff[BUF_LEN];
-                    GetWindowTextA(self->searchView->hwnd, searchStringBuff, BUF_LEN);
-                    fzf_pattern_t *fzfPattern = fzf_parse_pattern(CaseSmart, false, searchStringBuff, true);
-
-                    if(fzfPattern)
-                    {
-                        fzf_position_t *pos = fzf_get_positions(achBuffer, fzfPattern, self->itemsView->fzfSlab);
-
-                        SIZE sz;
-
-                        if(pos && pos->size > 0)
-                        {
-                            SetTextColor(hNewDC, fuzzmatchCharTextColor);
-                            for(int i = 0; i < pos->size; i++)
-                            {
-                                GetTextExtentPoint32A(hNewDC, achBuffer, pos->data[i], &sz); 
-                                TextOutA(hNewDC, sz.cx, pdis->rcItem.top + 2, achBuffer + pos->data[i], 1);
-                            }
-                        }
-
-                        fzf_free_positions(pos);
-                        fzf_free_pattern(fzfPattern);
-                    }
-
-                    if (pdis->itemState & ODS_SELECTED) 
-                    {
-                        DrawFocusRect(hNewDC, &pdis->rcItem);
-                        SetTextColor(hNewDC, colorText);
-                        SetBkColor(hNewDC, colorBack);
-                    }
+                    ItemsView_DrawItem(self->itemsView, hNewDC, (pdis->itemState & ODS_SELECTED), &pdis->rcItem, achBuffer);
                     EndBufferedPaint(hBufferedPaint, TRUE);
-                    break; 
-
                 case ODA_FOCUS: 
                     // Do not process focus changes. The focus caret 
                     // (outline rectangle) indicates the selection. 
@@ -1865,7 +1945,6 @@ LRESULT CALLBACK Menu_MessageProcessor(
                     // selection. 
                     break; 
             }
-
         default:
             return (DefWindowProc(hWnd, uMsg, wParam, lParam));
     }
