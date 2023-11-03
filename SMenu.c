@@ -84,7 +84,8 @@ DWORD WINAPI SearchView_Worker(LPVOID lpParam)
     self->cancelSearch = TRUE;
     ReleaseSRWLockExclusive(&itemsRwLock);
 
-    WaitForSingleObject(self->searchEvent, 50000);
+    DWORD waitResult = WaitForSingleObject(self->searchEvent, 50000);
+    assert(waitResult == WAIT_OBJECT_0);
     ResetEvent(self->searchEvent);
 
     self->cancelSearch = FALSE;

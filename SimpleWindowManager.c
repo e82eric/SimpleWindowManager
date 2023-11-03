@@ -4407,7 +4407,7 @@ WNDCLASSEX* bar_register_window_class(void)
 void bar_run(Bar *bar, WNDCLASSEX *barWindowClass)
 {
     HWND hwnd = CreateWindowEx(
-        WS_EX_TOOLWINDOW | WS_EX_CONTROLPARENT,
+        WS_EX_TOOLWINDOW | WS_EX_CONTROLPARENT | WS_EX_COMPOSITED,
         barWindowClass->lpszClassName,
         L"SimpleWM Bar",
         (DWORD) ~ (WS_CAPTION | WS_THICKFRAME | WS_MINIMIZE | WS_MAXIMIZE | WS_SYSMENU | WS_DISABLED | WS_BORDER | WS_DLGFRAME | WS_SIZEBOX),
