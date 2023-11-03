@@ -3782,6 +3782,7 @@ void menu_hide(void)
     menuVisible = FALSE;
     ShowWindow(mView->hwnd, SW_HIDE);
     bar_trigger_selected_window_paint(selectedMonitor->bar);
+    border_window_update();
 }
 
 void menu_on_escape(void)
