@@ -214,7 +214,7 @@ void TriggerSearch(SearchView *self)
         LeaveCriticalSection(&self->itemsView->loadCriticalSection);
         return;
     }
-    CHAR searchString[BUF_LEN];
+    CHAR searchString[BUF_LEN] = {0};
     SendMessageA(self->hwnd, WM_GETTEXT, BUF_LEN, (LPARAM)searchString);
     LeaveCriticalSection(&self->itemsView->loadCriticalSection);
     if (self->searchString != NULL)
@@ -1881,6 +1881,7 @@ LRESULT CALLBACK Menu_MessageProcessor(
                 case ODA_DRAWENTIRE:
                     HDC hNewDC;
                     HPAINTBUFFER hBufferedPaint = BeginBufferedPaint(pdis->hDC, &pdis->rcItem, BPBF_COMPATIBLEBITMAP, NULL, &hNewDC);
+                    assert(hBufferedPaint);
                     SendMessageA(pdis->hwndItem, LB_GETTEXT, pdis->itemID, (LPARAM)achBuffer); 
                     ItemsView_DrawItem(self->itemsView, hNewDC, (pdis->itemState & ODS_SELECTED), &pdis->rcItem, achBuffer);
                     EndBufferedPaint(hBufferedPaint, TRUE);
@@ -2176,6 +2177,7 @@ MenuView *menu_create_with_size(int left, int top, int width, int height, TCHAR 
 
     ItemsView *itemsView = calloc(1, sizeof(ItemsView));
     assert(itemsView);
+    itemsView->chunks = NULL;
     itemsView->hasHeader = FALSE;
     itemsView->fzfSlab = fzf_make_default_slab();
     itemsView->isLoading = FALSE;

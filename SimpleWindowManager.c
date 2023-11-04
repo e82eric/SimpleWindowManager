@@ -5657,8 +5657,8 @@ void launcher_fail(PTSTR lpszFunction)
 
     StringCchPrintf((LPTSTR)lpDisplayBuf, 
         LocalSize(lpDisplayBuf) / sizeof(TCHAR),
-        TEXT("%s failed with error %ul: %s"), 
-        lpszFunction, dw, lpMsgBuf); 
+        TEXT("%s failed with error %lu: %s"), 
+        lpszFunction, dw, (LPCTSTR)lpMsgBuf); 
 
     MessageBox(NULL, (LPCTSTR)lpDisplayBuf, TEXT("Error"), MB_OK); 
 
