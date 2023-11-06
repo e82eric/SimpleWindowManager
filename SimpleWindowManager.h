@@ -74,10 +74,15 @@ enum WindowRoutingMode
     FilteredRoutedNonFilteredCurrentWorkspace = 0x8
 };
 
+typedef struct BarSegmentHeader
+{
+    TCHAR *text;
+    HFONT font;
+} BarSegmentHeader;
+
 struct BarSegmentConfiguration
 {
-    TCHAR *headerText;
-    BOOL hasHeader;
+    BarSegmentHeader *header;
     int variableTextFixedWidth;
     void (*variableTextFunc) (TCHAR *toFill, int maxLen);
 };
@@ -246,8 +251,7 @@ struct Bar
 
 struct BarSegment
 {
-    BOOL hasHeader;
-    TCHAR *headerText;
+    BarSegmentHeader *header; 
     TCHAR variableText[MAX_PATH];
     int variableTextLen;
     int variableTextFixedWidth;
@@ -294,7 +298,7 @@ extern int numberOfBars;
 extern TCHAR *scratchWindowTitle;
 
 void configure(Configuration *configuration);
-HFONT initalize_font(LPCWSTR fontName);
+HFONT initalize_font(LPCWSTR fontName, int size);
 Workspace* workspace_register(TCHAR *name, WCHAR* tag, Layout *layout);
 Workspace* workspace_register_with_window_filter(TCHAR *name, WindowFilter windowFilter, WCHAR* tag, Layout *layout);
 void workspace_register_processimagename_contains_filter(Workspace *workspace, TCHAR *className);
@@ -312,7 +316,8 @@ void keybinding_create_with_shell_arg(CHAR *name, int modifiers, unsigned int ke
 
 TCHAR* client_get_command_line(Client *self);
 
-void configuration_add_bar_segment(Configuration *self, BOOL hasHeader, TCHAR *headerText, int variableTextFixedWidth, void (*variableTextFunc)(TCHAR *toFill, int maxLen));
+void configuration_add_bar_segment(Configuration *self, int variableTextFixedWidth, void (*variableTextFunc)(TCHAR *toFill, int maxLen));
+void configuration_add_bar_segment_with_header(Configuration *self, TCHAR *headerText, HFONT font, int variableTextFixedWidth, void (*variableTextFunc)(TCHAR *toFill, int maxLen));
 void fill_cpu(TCHAR *toFill, int maxLen);
 void fill_volume_percent(TCHAR *toFill, int maxLen);
 void fill_system_time(TCHAR *toFill, int maxLen);

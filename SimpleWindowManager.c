@@ -4159,20 +4159,23 @@ void bar_segment_render_header(BarSegment *self, HDC hdc)
 {
     TCHAR headerBuff[MAX_PATH];
     int headerTextLen = 0;
-    if(self->hasHeader)
+    HFONT oldFont = font;
+    if(self->header)
     {
+        oldFont = (HFONT)SelectObject(hdc, self->header->font);
         headerTextLen = swprintf(
                 headerBuff,
                 MAX_PATH,
                 L" | %ls: ",
-                self->headerText);
+                self->header->text);
     }
     else
     {
-        headerBuff[0] = L'|';
         headerTextLen = 1;
+        headerBuff[0] = L'|';
     }
     DrawText(hdc, headerBuff, headerTextLen, self->headerRect, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+    SelectObject(hdc, oldFont);
 }
 
 void bar_segment_set_variable_text(BarSegment *self)
@@ -4223,13 +4226,13 @@ void bar_segment_initalize_rectangles(BarSegment *self, HDC hdc, int right, Bar 
     RECT headerTextRect = { 0, 0, 0, 0 };
     TCHAR headerBuff[MAX_PATH];
     int headerTextLen = 0;
-    if(self->hasHeader)
+    if(self->header)
     {
         headerTextLen = swprintf(
                 headerBuff,
                 MAX_PATH,
                 L" | %ls: ",
-                self->headerText);
+                self->header->text);
     }
     else
     {
@@ -4258,8 +4261,7 @@ void bar_add_segments_from_configuration(Bar *self, HDC hdc, Configuration *conf
     {
         BarSegment *segment = calloc(1, sizeof(BarSegment));
         assert(segment);
-        segment->hasHeader = config->barSegments[i]->hasHeader;
-        segment->headerText = _wcsdup(config->barSegments[i]->headerText);
+        segment->header = config->barSegments[i]->header;
         segment->variableTextFixedWidth = config->barSegments[i]->variableTextFixedWidth;
         segment->headerRect = calloc(1, sizeof(RECT));
         assert(segment->headerRect);
@@ -5981,17 +5983,17 @@ void open_windows_scratch_exit_callback(char *stdOut)
     }
 }
 
-HFONT initalize_font(LPCWSTR fontName)
+HFONT initalize_font(LPCWSTR fontName, int size)
 {
     HDC hdc = GetDC(NULL);
     long lfHeight;
-    lfHeight = -MulDiv(14, GetDeviceCaps(hdc, LOGPIXELSY), 72);
+    lfHeight = -MulDiv(size, GetDeviceCaps(hdc, LOGPIXELSY), 72);
     HFONT result = CreateFontW(lfHeight, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, fontName);
     DeleteDC(hdc);
     return result;
 }
 
-void configuration_add_bar_segment(Configuration *self, BOOL hasHeader, TCHAR *headerText, int variableTextFixedWidth, void (*variableTextFunc)(TCHAR *toFill, int maxLen))
+void configuration_add_bar_segment_with_header(Configuration *self, TCHAR *headerText, HFONT hFont, int variableTextFixedWidth, void (*variableTextFunc)(TCHAR *toFill, int maxLen))
 {
     if(!self->barSegments)
     {
@@ -6015,9 +6017,40 @@ void configuration_add_bar_segment(Configuration *self, BOOL hasHeader, TCHAR *h
 
     BarSegmentConfiguration *segment = calloc(1, sizeof(BarSegmentConfiguration));
     assert(segment);
-    segment->hasHeader = hasHeader;
-    segment->headerText = _wcsdup(headerText);
-    assert(segment->headerText);
+    BarSegmentHeader *header = calloc(1, sizeof(BarSegmentHeader));
+    assert(header);
+    header->text = _wcsdup(headerText);
+    header->font = hFont;
+    segment->header = header;
+    segment->variableTextFixedWidth = variableTextFixedWidth;
+    segment->variableTextFunc = variableTextFunc;
+    self->barSegments[self->numberOfBarSegments - 1] = segment;
+}
+
+void configuration_add_bar_segment(Configuration *self, int variableTextFixedWidth, void (*variableTextFunc)(TCHAR *toFill, int maxLen))
+{
+    if(!self->barSegments)
+    {
+        self->barSegments = calloc(1, sizeof(BarSegmentConfiguration*));
+        assert(self->barSegments);
+        self->numberOfBarSegments = 1;
+    }
+    else
+    {
+        self->numberOfBarSegments++;
+        BarSegmentConfiguration **temp = realloc(self->barSegments, sizeof(BarSegmentConfiguration*) * self->numberOfBarSegments);
+        if(!temp)
+        {
+            assert(false);
+        }
+        else
+        {
+            self->barSegments = temp;
+        }
+    }
+
+    BarSegmentConfiguration *segment = calloc(1, sizeof(BarSegmentConfiguration));
+    assert(segment);
     segment->variableTextFixedWidth = variableTextFixedWidth;
     segment->variableTextFunc = variableTextFunc;
     self->barSegments[self->numberOfBarSegments - 1] = segment;
@@ -6166,7 +6199,7 @@ int run (void)
     }
     else
     {
-        font = initalize_font(TEXT("Hack Regular Nerd Font Complete"));
+        font = initalize_font(TEXT("Hack Regular Nerd Font Complete"), 14);
     }
 
     hiddenWindowMonitor = calloc(1, sizeof(Monitor));
