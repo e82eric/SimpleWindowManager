@@ -74,10 +74,16 @@ enum WindowRoutingMode
     FilteredRoutedNonFilteredCurrentWorkspace = 0x8
 };
 
+typedef struct TextStyle
+{
+    HFONT font;
+    COLORREF textColor;
+} TextStyle;
+
 typedef struct BarSegmentHeader
 {
     TCHAR *text;
-    HFONT font;
+    TextStyle *textStyle;
 } BarSegmentHeader;
 
 struct BarSegmentConfiguration
@@ -317,7 +323,7 @@ void keybinding_create_with_shell_arg(CHAR *name, int modifiers, unsigned int ke
 TCHAR* client_get_command_line(Client *self);
 
 void configuration_add_bar_segment(Configuration *self, int variableTextFixedWidth, void (*variableTextFunc)(TCHAR *toFill, int maxLen));
-void configuration_add_bar_segment_with_header(Configuration *self, TCHAR *headerText, HFONT font, int variableTextFixedWidth, void (*variableTextFunc)(TCHAR *toFill, int maxLen));
+void configuration_add_bar_segment_with_header(Configuration *self, TCHAR *headerText, TextStyle *textStyle, int variableTextFixedWidth, void (*variableTextFunc)(TCHAR *toFill, int maxLen));
 void fill_cpu(TCHAR *toFill, int maxLen);
 void fill_volume_percent(TCHAR *toFill, int maxLen);
 void fill_system_time(TCHAR *toFill, int maxLen);

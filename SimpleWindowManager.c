@@ -4160,9 +4160,11 @@ void bar_segment_render_header(BarSegment *self, HDC hdc)
     TCHAR headerBuff[MAX_PATH];
     int headerTextLen = 0;
     HFONT oldFont = font;
+    COLORREF oldTextColor = barTextColor;
     if(self->header)
     {
-        oldFont = (HFONT)SelectObject(hdc, self->header->font);
+        oldTextColor = SetTextColor(hdc, self->header->textStyle->textColor);
+        oldFont = (HFONT)SelectObject(hdc, self->header->textStyle->font);
         headerTextLen = swprintf(
                 headerBuff,
                 MAX_PATH,
@@ -4175,6 +4177,7 @@ void bar_segment_render_header(BarSegment *self, HDC hdc)
         headerBuff[0] = L'|';
     }
     DrawText(hdc, headerBuff, headerTextLen, self->headerRect, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+    SetTextColor(hdc, oldTextColor);
     SelectObject(hdc, oldFont);
 }
 
@@ -5993,7 +5996,7 @@ HFONT initalize_font(LPCWSTR fontName, int size)
     return result;
 }
 
-void configuration_add_bar_segment_with_header(Configuration *self, TCHAR *headerText, HFONT hFont, int variableTextFixedWidth, void (*variableTextFunc)(TCHAR *toFill, int maxLen))
+void configuration_add_bar_segment_with_header(Configuration *self, TCHAR *headerText, TextStyle *textStyle, int variableTextFixedWidth, void (*variableTextFunc)(TCHAR *toFill, int maxLen))
 {
     if(!self->barSegments)
     {
@@ -6020,7 +6023,7 @@ void configuration_add_bar_segment_with_header(Configuration *self, TCHAR *heade
     BarSegmentHeader *header = calloc(1, sizeof(BarSegmentHeader));
     assert(header);
     header->text = _wcsdup(headerText);
-    header->font = hFont;
+    header->textStyle = textStyle;
     segment->header = header;
     segment->variableTextFixedWidth = variableTextFixedWidth;
     segment->variableTextFunc = variableTextFunc;
