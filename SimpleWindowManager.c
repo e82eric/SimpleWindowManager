@@ -4177,23 +4177,20 @@ void bar_segment_render_header(BarSegment *self, HDC hdc)
 
 void bar_segment_set_variable_text(BarSegment *self)
 {
-    TCHAR variableTextBuff[MAX_PATH];
     TCHAR variableValueBuff[MAX_PATH];
     self->variableTextFunc(variableValueBuff, MAX_PATH);
-    int variableTextLen = swprintf(
-            variableTextBuff,
-            MAX_PATH,
-            L"%*ls",
-            self->variableTextFixedWidth,
-            variableValueBuff);
-
-    self->variableTextLen = variableTextLen;
-    _tcscpy_s(self->variableText, MAX_PATH, variableTextBuff);
+    self->variable->textLength = _tcslen(variableValueBuff);
+    _tcscpy_s(self->variableText, MAX_PATH, variableValueBuff);
 }
 
 void bar_segment_render_variable_text(BarSegment *self, HDC hdc)
 {
-    DrawText(hdc, self->variableText, self->variableTextLen, self->variableRect, DT_RIGHT | DT_VCENTER | DT_SINGLELINE);
+
+    COLORREF oldTextColor = SetTextColor(hdc, self->variable->textStyle->textColor);
+    HFONT oldFont = (HFONT)SelectObject(hdc, self->variable->textStyle->font);
+    DrawText(hdc, self->variableText, (int)self->variable->textLength, &self->variable->rect, DT_RIGHT | DT_VCENTER | DT_SINGLELINE);
+    SetTextColor(hdc, oldTextColor);
+    SelectObject(hdc, oldFont);
 }
 
 void bar_segment_initalize_rectangles(BarSegment *self, HDC hdc, int right, Bar *bar)
@@ -4208,17 +4205,17 @@ void bar_segment_initalize_rectangles(BarSegment *self, HDC hdc, int right, Bar 
             variableTextBuff,
             MAX_PATH,
             L"%*ls",
-            self->variableTextFixedWidth,
+            (int)self->variable->textLength,
             variableValueBuff);
     DrawText(hdc, variableTextBuff, variableTextLen, &variableTextRect, DT_CALCRECT);
 
     int variableWidth = variableTextRect.right - variableTextRect.left;
     int variableLeft = right - variableWidth;
     
-    self->variableRect->right = right;
-    self->variableRect->left = variableLeft;
-    self->variableRect->top = bar->timesRect->top;
-    self->variableRect->bottom = bar->timesRect->bottom;
+    self->variable->rect.right = right;
+    self->variable->rect.left = variableLeft;
+    self->variable->rect.top = bar->timesRect->top;
+    self->variable->rect.bottom = bar->timesRect->bottom;
 
     int headerWidth = 0;
     int headerLeft = variableLeft;
@@ -4263,8 +4260,7 @@ void bar_add_segments_from_configuration(Bar *self, HDC hdc, Configuration *conf
         assert(segment);
         segment->header = config->barSegments[i]->header;
         segment->separator = config->barSegments[i]->separator;
-        segment->variableTextFixedWidth = config->barSegments[i]->variableTextFixedWidth;
-        segment->variableRect = calloc(1, sizeof(RECT));
+        segment->variable = config->barSegments[i]->variable;
         segment->variableTextFunc = config->barSegments[i]->variableTextFunc;
         self->segments[i] = segment;
 
@@ -5999,7 +5995,8 @@ void configuration_add_bar_segment_with_header(
         TCHAR *headerText,
         TextStyle *headerTextStyle,
         int variableTextFixedWidth,
-        void (*variableTextFunc)(TCHAR *toFill, int maxLen))
+        void (*variableTextFunc)(TCHAR *toFill, int maxLen),
+        TextStyle *variableTextStyle)
 {
     if(!self->barSegments)
     {
@@ -6023,6 +6020,11 @@ void configuration_add_bar_segment_with_header(
 
     BarSegmentConfiguration *segment = calloc(1, sizeof(BarSegmentConfiguration));
     assert(segment);
+    BarSegmentHeader *variable = calloc(1, sizeof(BarSegmentHeader));
+    assert(variable);
+    variable->textLength = variableTextFixedWidth;
+    variable->textStyle = variableTextStyle;
+    segment->variable = variable;
     if(headerText)
     {
         BarSegmentHeader *header = calloc(1, sizeof(BarSegmentHeader));
@@ -6051,7 +6053,8 @@ void configuration_add_bar_segment(
         TCHAR *separatorText,
         TextStyle *separatorTextStyle,
         int variableTextFixedWidth,
-        void (*variableTextFunc)(TCHAR *toFill, int maxLen))
+        void (*variableTextFunc)(TCHAR *toFill, int maxLen),
+        TextStyle *variableTextStyle)
 {
     if(!self->barSegments)
     {
@@ -6075,7 +6078,11 @@ void configuration_add_bar_segment(
 
     BarSegmentConfiguration *segment = calloc(1, sizeof(BarSegmentConfiguration));
     assert(segment);
-    segment->variableTextFixedWidth = variableTextFixedWidth;
+    BarSegmentHeader *variable = calloc(1, sizeof(BarSegmentHeader));
+    assert(variable);
+    variable->textLength = variableTextFixedWidth;
+    variable->textStyle = variableTextStyle;
+    segment->variable = variable;
     segment->variableTextFunc = variableTextFunc;
     self->barSegments[self->numberOfBarSegments - 1] = segment;
     if(separatorText)

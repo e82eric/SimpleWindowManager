@@ -92,6 +92,7 @@ struct BarSegmentConfiguration
 {
     BarSegmentHeader *header;
     BarSegmentHeader *separator;
+    BarSegmentHeader *variable;
     int variableTextFixedWidth;
     void (*variableTextFunc) (TCHAR *toFill, int maxLen);
 };
@@ -262,10 +263,8 @@ struct BarSegment
 {
     BarSegmentHeader *header; 
     BarSegmentHeader *separator; 
+    BarSegmentHeader *variable;
     TCHAR variableText[MAX_PATH];
-    int variableTextLen;
-    int variableTextFixedWidth;
-    RECT *variableRect;
     void (*variableTextFunc) (TCHAR *toFill, int maxLen);
 };
 
@@ -330,7 +329,8 @@ void configuration_add_bar_segment(
         TCHAR *separatorText,
         TextStyle *separatorTextStyle,
         int variableTextFixedWidth,
-        void (*variableTextFunc)(TCHAR *toFill, int maxLen));
+        void (*variableTextFunc)(TCHAR *toFill, int maxLen),
+        TextStyle *variableTextStyle);
 void configuration_add_bar_segment_with_header(
         Configuration *self,
         TCHAR *separatorText,
@@ -338,7 +338,8 @@ void configuration_add_bar_segment_with_header(
         TCHAR *headerText,
         TextStyle *textStyle,
         int variableTextFixedWidth,
-        void (*variableTextFunc)(TCHAR *toFill, int maxLen));
+        void (*variableTextFunc)(TCHAR *toFill, int maxLen),
+        TextStyle *variableTextStyle);
 void fill_cpu(TCHAR *toFill, int maxLen);
 void fill_volume_percent(TCHAR *toFill, int maxLen);
 void fill_system_time(TCHAR *toFill, int maxLen);
