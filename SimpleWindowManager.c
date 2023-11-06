@@ -4158,12 +4158,20 @@ HBRUSH bar_get_background_brush(Bar *self)
 void bar_segment_render_header(BarSegment *self, HDC hdc)
 {
     TCHAR headerBuff[MAX_PATH];
-    int headerTextLen = swprintf(
-            headerBuff,
-            MAX_PATH,
-            L" | %ls: ",
-            self->headerText);
-
+    int headerTextLen = 0;
+    if(self->hasHeader)
+    {
+        headerTextLen = swprintf(
+                headerBuff,
+                MAX_PATH,
+                L" | %ls: ",
+                self->headerText);
+    }
+    else
+    {
+        headerBuff[0] = L'|';
+        headerTextLen = 1;
+    }
     DrawText(hdc, headerBuff, headerTextLen, self->headerRect, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
 }
 
@@ -4191,14 +4199,6 @@ void bar_segment_render_variable_text(BarSegment *self, HDC hdc)
 void bar_segment_initalize_rectangles(BarSegment *self, HDC hdc, int right, Bar *bar)
 {
     int paddingBetweenHeaderAndVariable = 5;
-    RECT headerTextRect = { 0, 0, 0, 0 };
-    TCHAR headerBuff[MAX_PATH];
-    int headerTextLen = swprintf(
-            headerBuff,
-            MAX_PATH,
-            L" | %ls: ",
-            self->headerText);
-    DrawText(hdc, headerBuff, headerTextLen, &headerTextRect, DT_CALCRECT);
 
     RECT variableTextRect = { 0, 0, 0, 0 };
     TCHAR variableValueBuff[MAX_PATH];
@@ -4220,6 +4220,24 @@ void bar_segment_initalize_rectangles(BarSegment *self, HDC hdc, int right, Bar 
     self->variableRect->top = bar->timesRect->top;
     self->variableRect->bottom = bar->timesRect->bottom;
 
+    RECT headerTextRect = { 0, 0, 0, 0 };
+    TCHAR headerBuff[MAX_PATH];
+    int headerTextLen = 0;
+    if(self->hasHeader)
+    {
+        headerTextLen = swprintf(
+                headerBuff,
+                MAX_PATH,
+                L" | %ls: ",
+                self->headerText);
+    }
+    else
+    {
+        headerTextLen = 1;
+        headerBuff[0] = L'|';
+    }
+    DrawText(hdc, headerBuff, headerTextLen, &headerTextRect, DT_CALCRECT);
+
     int headerWidth = headerTextRect.right - headerTextRect.left;
     int headerLeft = variableLeft - headerWidth;
 
@@ -4240,6 +4258,7 @@ void bar_add_segments_from_configuration(Bar *self, HDC hdc, Configuration *conf
     {
         BarSegment *segment = calloc(1, sizeof(BarSegment));
         assert(segment);
+        segment->hasHeader = config->barSegments[i]->hasHeader;
         segment->headerText = _wcsdup(config->barSegments[i]->headerText);
         segment->variableTextFixedWidth = config->barSegments[i]->variableTextFixedWidth;
         segment->headerRect = calloc(1, sizeof(RECT));
@@ -4479,6 +4498,19 @@ void fill_system_time(TCHAR *toFill, int maxLen)
             st.wMinute);
 }
 
+void fill_local_date(TCHAR *toFill, int maxLen)
+{
+    SYSTEMTIME lt;
+    GetLocalTime(&lt);
+    swprintf(
+            toFill,
+            maxLen,
+            L"%04hu-%02hu-%02hu",
+            lt.wYear,
+            lt.wMonth,
+            lt.wDay);
+}
+
 void fill_local_time(TCHAR *toFill, int maxLen)
 {
     SYSTEMTIME lt;
@@ -4486,10 +4518,7 @@ void fill_local_time(TCHAR *toFill, int maxLen)
     swprintf(
             toFill,
             maxLen,
-            L"%04hu-%02hu-%02hu %02hu:%02hu",
-            lt.wYear,
-            lt.wMonth,
-            lt.wDay,
+            L"%02hu:%02hu",
             lt.wHour,
             lt.wMinute);
 }
@@ -5962,7 +5991,7 @@ HFONT initalize_font(LPCWSTR fontName)
     return result;
 }
 
-void configuration_add_bar_segment(Configuration *self, TCHAR *headerText, int variableTextFixedWidth, void (*variableTextFunc)(TCHAR *toFill, int maxLen))
+void configuration_add_bar_segment(Configuration *self, BOOL hasHeader, TCHAR *headerText, int variableTextFixedWidth, void (*variableTextFunc)(TCHAR *toFill, int maxLen))
 {
     if(!self->barSegments)
     {
@@ -5986,6 +6015,7 @@ void configuration_add_bar_segment(Configuration *self, TCHAR *headerText, int v
 
     BarSegmentConfiguration *segment = calloc(1, sizeof(BarSegmentConfiguration));
     assert(segment);
+    segment->hasHeader = hasHeader;
     segment->headerText = _wcsdup(headerText);
     assert(segment->headerText);
     segment->variableTextFixedWidth = variableTextFixedWidth;

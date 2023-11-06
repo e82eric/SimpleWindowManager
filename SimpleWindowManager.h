@@ -77,6 +77,7 @@ enum WindowRoutingMode
 struct BarSegmentConfiguration
 {
     TCHAR *headerText;
+    BOOL hasHeader;
     int variableTextFixedWidth;
     void (*variableTextFunc) (TCHAR *toFill, int maxLen);
 };
@@ -245,6 +246,7 @@ struct Bar
 
 struct BarSegment
 {
+    BOOL hasHeader;
     TCHAR *headerText;
     TCHAR variableText[MAX_PATH];
     int variableTextLen;
@@ -310,11 +312,12 @@ void keybinding_create_with_shell_arg(CHAR *name, int modifiers, unsigned int ke
 
 TCHAR* client_get_command_line(Client *self);
 
-void configuration_add_bar_segment(Configuration *self, TCHAR *headerText, int variableTextFixedWidth, void (*variableTextFunc)(TCHAR *toFill, int maxLen));
+void configuration_add_bar_segment(Configuration *self, BOOL hasHeader, TCHAR *headerText, int variableTextFixedWidth, void (*variableTextFunc)(TCHAR *toFill, int maxLen));
 void fill_cpu(TCHAR *toFill, int maxLen);
 void fill_volume_percent(TCHAR *toFill, int maxLen);
 void fill_system_time(TCHAR *toFill, int maxLen);
 void fill_local_time(TCHAR *toFill, int maxLen);
+void fill_local_date(TCHAR *toFill, int maxLen);
 void fill_memory_percent(TCHAR *toFill, int maxLen);
 void fill_is_connected_to_internet(TCHAR *toFill, int maxLen);
 
