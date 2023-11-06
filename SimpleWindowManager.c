@@ -4157,28 +4157,22 @@ HBRUSH bar_get_background_brush(Bar *self)
 
 void bar_segment_render_header(BarSegment *self, HDC hdc)
 {
-    TCHAR headerBuff[MAX_PATH];
-    int headerTextLen = 0;
-    HFONT oldFont = font;
-    COLORREF oldTextColor = barTextColor;
+    if(self->separator)
+    {
+        COLORREF oldTextColor = SetTextColor(hdc, self->separator->textStyle->textColor);
+        HFONT oldFont = (HFONT)SelectObject(hdc, self->separator->textStyle->font);
+        DrawText(hdc, self->separator->text, (int)self->separator->textLength, &self->separator->rect, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+        SetTextColor(hdc, oldTextColor);
+        SelectObject(hdc, oldFont);
+    }
     if(self->header)
     {
-        oldTextColor = SetTextColor(hdc, self->header->textStyle->textColor);
-        oldFont = (HFONT)SelectObject(hdc, self->header->textStyle->font);
-        headerTextLen = swprintf(
-                headerBuff,
-                MAX_PATH,
-                L" | %ls: ",
-                self->header->text);
+        COLORREF oldTextColor = SetTextColor(hdc, self->header->textStyle->textColor);
+        HFONT oldFont = (HFONT)SelectObject(hdc, self->header->textStyle->font);
+        DrawText(hdc, self->header->text, (int)self->header->textLength, &self->header->rect, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+        SetTextColor(hdc, oldTextColor);
+        SelectObject(hdc, oldFont);
     }
-    else
-    {
-        headerTextLen = 1;
-        headerBuff[0] = L'|';
-    }
-    DrawText(hdc, headerBuff, headerTextLen, self->headerRect, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
-    SetTextColor(hdc, oldTextColor);
-    SelectObject(hdc, oldFont);
 }
 
 void bar_segment_set_variable_text(BarSegment *self)
@@ -4222,35 +4216,38 @@ void bar_segment_initalize_rectangles(BarSegment *self, HDC hdc, int right, Bar 
     int variableLeft = right - variableWidth;
     
     self->variableRect->right = right;
-    self->variableRect->left = right - variableWidth;
+    self->variableRect->left = variableLeft;
     self->variableRect->top = bar->timesRect->top;
     self->variableRect->bottom = bar->timesRect->bottom;
 
-    RECT headerTextRect = { 0, 0, 0, 0 };
-    TCHAR headerBuff[MAX_PATH];
-    int headerTextLen = 0;
+    int headerWidth = 0;
+    int headerLeft = variableLeft;
     if(self->header)
     {
-        headerTextLen = swprintf(
-                headerBuff,
-                MAX_PATH,
-                L" | %ls: ",
-                self->header->text);
+        RECT headerTextRect = { 0, 0, 0, 0 };
+        DrawText(hdc, self->header->text, (int)self->header->textLength, &headerTextRect, DT_CALCRECT);
+        headerWidth = headerTextRect.right - headerTextRect.left;
+        headerLeft = variableLeft - headerWidth - paddingBetweenHeaderAndVariable;
+
+        self->header->rect.right = variableLeft;
+        self->header->rect.left = headerLeft;
+        self->header->rect.top = bar->timesRect->top;
+        self->header->rect.bottom = bar->timesRect->bottom;
     }
-    else
+
+    int separatorLeft = headerLeft;
+    if(self->separator)
     {
-        headerTextLen = 1;
-        headerBuff[0] = L'|';
+        RECT separatorRect = { 0, 0, 0, 0 };
+        DrawText(hdc, self->separator->text, (int)self->separator->textLength, &separatorRect, DT_CALCRECT);
+        int separatorWidth = separatorRect.right - separatorRect.left;
+        separatorLeft = headerLeft - separatorWidth;
+
+        self->separator->rect.right = headerLeft - paddingBetweenHeaderAndVariable;
+        self->separator->rect.left = separatorLeft - paddingBetweenHeaderAndVariable;
+        self->separator->rect.top = bar->timesRect->top;
+        self->separator->rect.bottom = bar->timesRect->bottom;
     }
-    DrawText(hdc, headerBuff, headerTextLen, &headerTextRect, DT_CALCRECT);
-
-    int headerWidth = headerTextRect.right - headerTextRect.left;
-    int headerLeft = variableLeft - headerWidth;
-
-    self->headerRect->right = variableLeft + paddingBetweenHeaderAndVariable;
-    self->headerRect->left = headerLeft + paddingBetweenHeaderAndVariable;
-    self->headerRect->top = bar->timesRect->top;
-    self->headerRect->bottom = bar->timesRect->bottom;
 }
 
 void bar_add_segments_from_configuration(Bar *self, HDC hdc, Configuration *config)
@@ -4265,18 +4262,17 @@ void bar_add_segments_from_configuration(Bar *self, HDC hdc, Configuration *conf
         BarSegment *segment = calloc(1, sizeof(BarSegment));
         assert(segment);
         segment->header = config->barSegments[i]->header;
+        segment->separator = config->barSegments[i]->separator;
         segment->variableTextFixedWidth = config->barSegments[i]->variableTextFixedWidth;
-        segment->headerRect = calloc(1, sizeof(RECT));
-        assert(segment->headerRect);
         segment->variableRect = calloc(1, sizeof(RECT));
         segment->variableTextFunc = config->barSegments[i]->variableTextFunc;
         self->segments[i] = segment;
 
         bar_segment_initalize_rectangles(segment, hdc, segmentRightEdge, self);
-        segmentRightEdge = segment->headerRect->left;
+        segmentRightEdge = segment->separator->rect.left;
 
-        self->selectedWindowDescRect->right = self->segments[i]->headerRect->left;
-        self->timesRect->left = self->segments[i]->headerRect->left;
+        self->selectedWindowDescRect->right = self->segments[i]->separator->rect.left;
+        self->timesRect->left = self->segments[i]->separator->rect.left;
     }
 }
 
@@ -4487,7 +4483,7 @@ void fill_volume_percent(TCHAR *toFill, int maxLen)
     swprintf(
             toFill,
             maxLen,
-            L"%3.0f %%",
+            L"%3.0f%%",
             currentVol * 100);
 }
 
@@ -4534,7 +4530,7 @@ void fill_memory_percent(TCHAR *toFill, int maxLen)
     swprintf(
             toFill,
             maxLen,
-            L"%3ld %%",
+            L"%3ld%%",
             memoryPercent);
 }
 
@@ -4589,7 +4585,7 @@ void fill_cpu(TCHAR *toFill, int maxLen)
     swprintf(
             toFill,
             maxLen,
-            L"%3ld %%",
+            L"%3ld%%",
             cpu);
 }
 
@@ -5996,7 +5992,14 @@ HFONT initalize_font(LPCWSTR fontName, int size)
     return result;
 }
 
-void configuration_add_bar_segment_with_header(Configuration *self, TCHAR *headerText, TextStyle *textStyle, int variableTextFixedWidth, void (*variableTextFunc)(TCHAR *toFill, int maxLen))
+void configuration_add_bar_segment_with_header(
+        Configuration *self,
+        TCHAR *separatorText,
+        TextStyle *separatorTextStyle,
+        TCHAR *headerText,
+        TextStyle *headerTextStyle,
+        int variableTextFixedWidth,
+        void (*variableTextFunc)(TCHAR *toFill, int maxLen))
 {
     if(!self->barSegments)
     {
@@ -6020,17 +6023,35 @@ void configuration_add_bar_segment_with_header(Configuration *self, TCHAR *heade
 
     BarSegmentConfiguration *segment = calloc(1, sizeof(BarSegmentConfiguration));
     assert(segment);
-    BarSegmentHeader *header = calloc(1, sizeof(BarSegmentHeader));
-    assert(header);
-    header->text = _wcsdup(headerText);
-    header->textStyle = textStyle;
-    segment->header = header;
+    if(headerText)
+    {
+        BarSegmentHeader *header = calloc(1, sizeof(BarSegmentHeader));
+        assert(header);
+        header->text = _wcsdup(headerText);
+        header->textStyle = headerTextStyle;
+        header->textLength = _tcslen(headerText);
+        segment->header = header;
+    }
+    if(separatorText)
+    {
+        BarSegmentHeader *separator = calloc(1, sizeof(BarSegmentHeader));
+        assert(separator);
+        separator->text = _wcsdup(separatorText);
+        separator->textStyle = separatorTextStyle;
+        separator->textLength = _tcslen(separatorText);
+        segment->separator = separator;
+    }
     segment->variableTextFixedWidth = variableTextFixedWidth;
     segment->variableTextFunc = variableTextFunc;
     self->barSegments[self->numberOfBarSegments - 1] = segment;
 }
 
-void configuration_add_bar_segment(Configuration *self, int variableTextFixedWidth, void (*variableTextFunc)(TCHAR *toFill, int maxLen))
+void configuration_add_bar_segment(
+        Configuration *self,
+        TCHAR *separatorText,
+        TextStyle *separatorTextStyle,
+        int variableTextFixedWidth,
+        void (*variableTextFunc)(TCHAR *toFill, int maxLen))
 {
     if(!self->barSegments)
     {
@@ -6057,6 +6078,15 @@ void configuration_add_bar_segment(Configuration *self, int variableTextFixedWid
     segment->variableTextFixedWidth = variableTextFixedWidth;
     segment->variableTextFunc = variableTextFunc;
     self->barSegments[self->numberOfBarSegments - 1] = segment;
+    if(separatorText)
+    {
+        BarSegmentHeader *separator = calloc(1, sizeof(BarSegmentHeader));
+        assert(separator);
+        separator->text = _wcsdup(separatorText);
+        separator->textStyle = separatorTextStyle;
+        separator->textLength = _tcslen(separatorText);
+        segment->separator = separator;
+    }
 }
 
 BOOL CALLBACK enum_display_monitors_callback(HMONITOR hMonitor, HDC hdcMonitor, LPRECT lprcMonitor, LPARAM dwData)

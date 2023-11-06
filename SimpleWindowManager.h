@@ -83,12 +83,15 @@ typedef struct TextStyle
 typedef struct BarSegmentHeader
 {
     TCHAR *text;
+    size_t textLength;
     TextStyle *textStyle;
+    RECT rect;
 } BarSegmentHeader;
 
 struct BarSegmentConfiguration
 {
     BarSegmentHeader *header;
+    BarSegmentHeader *separator;
     int variableTextFixedWidth;
     void (*variableTextFunc) (TCHAR *toFill, int maxLen);
 };
@@ -258,10 +261,10 @@ struct Bar
 struct BarSegment
 {
     BarSegmentHeader *header; 
+    BarSegmentHeader *separator; 
     TCHAR variableText[MAX_PATH];
     int variableTextLen;
     int variableTextFixedWidth;
-    RECT *headerRect;
     RECT *variableRect;
     void (*variableTextFunc) (TCHAR *toFill, int maxLen);
 };
@@ -322,8 +325,20 @@ void keybinding_create_with_shell_arg(CHAR *name, int modifiers, unsigned int ke
 
 TCHAR* client_get_command_line(Client *self);
 
-void configuration_add_bar_segment(Configuration *self, int variableTextFixedWidth, void (*variableTextFunc)(TCHAR *toFill, int maxLen));
-void configuration_add_bar_segment_with_header(Configuration *self, TCHAR *headerText, TextStyle *textStyle, int variableTextFixedWidth, void (*variableTextFunc)(TCHAR *toFill, int maxLen));
+void configuration_add_bar_segment(
+        Configuration *self,
+        TCHAR *separatorText,
+        TextStyle *separatorTextStyle,
+        int variableTextFixedWidth,
+        void (*variableTextFunc)(TCHAR *toFill, int maxLen));
+void configuration_add_bar_segment_with_header(
+        Configuration *self,
+        TCHAR *separatorText,
+        TextStyle *separatorTextStyle,
+        TCHAR *headerText,
+        TextStyle *textStyle,
+        int variableTextFixedWidth,
+        void (*variableTextFunc)(TCHAR *toFill, int maxLen));
 void fill_cpu(TCHAR *toFill, int maxLen);
 void fill_volume_percent(TCHAR *toFill, int maxLen);
 void fill_system_time(TCHAR *toFill, int maxLen);
