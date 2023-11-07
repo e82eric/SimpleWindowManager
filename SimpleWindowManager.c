@@ -4699,7 +4699,7 @@ LRESULT CALLBACK button_message_loop(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM
             {
                 if (!button->hasClients)
                 {
-                    textColor = buttonWithoutWindowsTextColor;
+                    textColor = textStyle->disabledColor;
                 }
             }
 
