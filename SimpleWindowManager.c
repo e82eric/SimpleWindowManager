@@ -4156,25 +4156,25 @@ HBRUSH bar_get_background_brush(Bar *self)
     return brush;
 }
 
+void bar_segment_header_render(BarSegmentHeader *self, HDC hdc)
+{
+    COLORREF oldTextColor = SetTextColor(hdc, self->textStyle->textColor);
+    HFONT oldFont = (HFONT)SelectObject(hdc, self->textStyle->font);
+    FillRect(hdc, &self->rect, self->textStyle->backgroundBrush);
+    DrawText(hdc, self->text, (int)self->textLength, &self->rect, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+    SetTextColor(hdc, oldTextColor);
+    SelectObject(hdc, oldFont);
+}
+
 void bar_segment_render_header(BarSegment *self, HDC hdc)
 {
     if(self->separator)
     {
-        COLORREF oldTextColor = SetTextColor(hdc, self->separator->textStyle->textColor);
-        HFONT oldFont = (HFONT)SelectObject(hdc, self->separator->textStyle->font);
-        FillRect(hdc, &self->separator->rect, self->separator->textStyle->backgroundBrush);
-        DrawText(hdc, self->separator->text, (int)self->separator->textLength, &self->separator->rect, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
-        SetTextColor(hdc, oldTextColor);
-        SelectObject(hdc, oldFont);
+        bar_segment_header_render(self->separator, hdc);
     }
     if(self->header)
     {
-        COLORREF oldTextColor = SetTextColor(hdc, self->header->textStyle->textColor);
-        HFONT oldFont = (HFONT)SelectObject(hdc, self->header->textStyle->font);
-        FillRect(hdc, &self->header->rect, self->header->textStyle->backgroundBrush);
-        DrawText(hdc, self->header->text, (int)self->header->textLength, &self->header->rect, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
-        SetTextColor(hdc, oldTextColor);
-        SelectObject(hdc, oldFont);
+        bar_segment_header_render(self->header, hdc);
     }
 }
 
