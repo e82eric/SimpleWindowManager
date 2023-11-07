@@ -4161,6 +4161,7 @@ void bar_segment_render_header(BarSegment *self, HDC hdc)
     {
         COLORREF oldTextColor = SetTextColor(hdc, self->separator->textStyle->textColor);
         HFONT oldFont = (HFONT)SelectObject(hdc, self->separator->textStyle->font);
+        FillRect(hdc, &self->separator->rect, self->separator->textStyle->backgroundBrush);
         DrawText(hdc, self->separator->text, (int)self->separator->textLength, &self->separator->rect, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
         SetTextColor(hdc, oldTextColor);
         SelectObject(hdc, oldFont);
@@ -4169,6 +4170,7 @@ void bar_segment_render_header(BarSegment *self, HDC hdc)
     {
         COLORREF oldTextColor = SetTextColor(hdc, self->header->textStyle->textColor);
         HFONT oldFont = (HFONT)SelectObject(hdc, self->header->textStyle->font);
+        FillRect(hdc, &self->header->rect, self->header->textStyle->backgroundBrush);
         DrawText(hdc, self->header->text, (int)self->header->textLength, &self->header->rect, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
         SetTextColor(hdc, oldTextColor);
         SelectObject(hdc, oldFont);
@@ -4185,9 +4187,9 @@ void bar_segment_set_variable_text(BarSegment *self)
 
 void bar_segment_render_variable_text(BarSegment *self, HDC hdc)
 {
-
     COLORREF oldTextColor = SetTextColor(hdc, self->variable->textStyle->textColor);
     HFONT oldFont = (HFONT)SelectObject(hdc, self->variable->textStyle->font);
+    FillRect(hdc, &self->variable->rect, self->variable->textStyle->backgroundBrush);
     DrawText(hdc, self->variableText, (int)self->variable->textLength, &self->variable->rect, DT_RIGHT | DT_VCENTER | DT_SINGLELINE);
     SetTextColor(hdc, oldTextColor);
     SelectObject(hdc, oldFont);
@@ -4195,8 +4197,6 @@ void bar_segment_render_variable_text(BarSegment *self, HDC hdc)
 
 void bar_segment_initalize_rectangles(BarSegment *self, HDC hdc, int right, Bar *bar)
 {
-    int paddingBetweenHeaderAndVariable = 5;
-
     RECT variableTextRect = { 0, 0, 0, 0 };
     TCHAR variableValueBuff[MAX_PATH];
     self->variableTextFunc(variableValueBuff, MAX_PATH);
@@ -4224,7 +4224,7 @@ void bar_segment_initalize_rectangles(BarSegment *self, HDC hdc, int right, Bar 
         RECT headerTextRect = { 0, 0, 0, 0 };
         DrawText(hdc, self->header->text, (int)self->header->textLength, &headerTextRect, DT_CALCRECT);
         headerWidth = headerTextRect.right - headerTextRect.left;
-        headerLeft = variableLeft - headerWidth - paddingBetweenHeaderAndVariable;
+        headerLeft = variableLeft - headerWidth ;
 
         self->header->rect.right = variableLeft;
         self->header->rect.left = headerLeft;
@@ -4240,8 +4240,8 @@ void bar_segment_initalize_rectangles(BarSegment *self, HDC hdc, int right, Bar 
         int separatorWidth = separatorRect.right - separatorRect.left;
         separatorLeft = headerLeft - separatorWidth;
 
-        self->separator->rect.right = headerLeft - paddingBetweenHeaderAndVariable;
-        self->separator->rect.left = separatorLeft - paddingBetweenHeaderAndVariable;
+        self->separator->rect.right = headerLeft;
+        self->separator->rect.left = separatorLeft;
         self->separator->rect.top = bar->timesRect->top;
         self->separator->rect.bottom = bar->timesRect->bottom;
     }
@@ -4347,7 +4347,7 @@ LRESULT CALLBACK bar_message_loop(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPa
                 SetTextColor(hNewDC, barTextColor);
                 SetBkMode(hNewDC, TRANSPARENT);
 
-                FillRect(hNewDC, &ps.rcPaint, brush);
+                FillRect(hNewDC, msgBar->selectedWindowDescRect, brush);
                 if(ps.rcPaint.left == msgBar->selectedWindowDescRect->left)
                 {
                     bar_render_selected_window_description(msgBar, hNewDC);
@@ -4361,7 +4361,6 @@ LRESULT CALLBACK bar_message_loop(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPa
                 {
                     bar_render_headers(msgBar, hNewDC);
                     bar_render_times(msgBar, hNewDC);
-                    FillRect(hNewDC, msgBar->selectedWindowDescRect, brush);
                     bar_render_selected_window_description(msgBar, hNewDC);
                 }
                 EndBufferedPaint(hBufferedPaint, TRUE);
