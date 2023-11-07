@@ -166,6 +166,7 @@ struct Workspace
     Client *lastClient;
     int numberOfClients;
     WorkspaceFilterData *filterData;
+    TextStyle *textStyle;
 };
 
 struct Client
@@ -308,8 +309,8 @@ extern TCHAR *scratchWindowTitle;
 
 void configure(Configuration *configuration);
 HFONT initalize_font(LPCWSTR fontName, int size);
-Workspace* workspace_register(TCHAR *name, WCHAR* tag, Layout *layout);
-Workspace* workspace_register_with_window_filter(TCHAR *name, WindowFilter windowFilter, WCHAR* tag, Layout *layout);
+Workspace* workspace_register(TCHAR *name, WCHAR* tag, Layout *layout, TextStyle *textStyle);
+Workspace* workspace_register_with_window_filter(TCHAR *name, WindowFilter windowFilter, WCHAR* tag, Layout *layout, TextStyle *textStyle);
 void workspace_register_processimagename_contains_filter(Workspace *workspace, TCHAR *className);
 void workspace_register_classname_contains_filter(Workspace *workspace, TCHAR *className);
 void workspace_register_title_contains_filter(Workspace *workspace, TCHAR *title);

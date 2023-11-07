@@ -2896,18 +2896,19 @@ void workspace_register_title_not_contains_filter(Workspace *workspace, TCHAR *t
     workspace->filterData->notTitles[workspace->filterData->numberOfNotTitles - 1] = _wcsdup(title);
 }
 
-Workspace* workspace_register(TCHAR *name, WCHAR* tag, Layout *layout)
+Workspace* workspace_register(TCHAR *name, WCHAR* tag, Layout *layout, TextStyle *textStyle)
 {
-    Workspace *workspace = workspace_register_with_window_filter(name, NULL, tag, layout);
+    Workspace *workspace = workspace_register_with_window_filter(name, NULL, tag, layout, textStyle);
     return workspace;
 }
 
-Workspace* workspace_register_with_window_filter(TCHAR *name, WindowFilter windowFilter, WCHAR* tag, Layout *layout)
+Workspace* workspace_register_with_window_filter(TCHAR *name, WindowFilter windowFilter, WCHAR* tag, Layout *layout, TextStyle *textStyle)
 {
     if(numberOfWorkspaces < MAX_WORKSPACES)
     {
         Button ** buttons = (Button **) calloc(numberOfBars, sizeof(Button *));
         Workspace *workspace = workspaces[numberOfWorkspaces];
+        workspace->textStyle = textStyle;
         workspace->name = _wcsdup(name);
         workspace->windowFilter = windowFilter;
         workspace->buttons = buttons;
@@ -4570,7 +4571,7 @@ void fill_is_connected_to_internet(TCHAR *toFill, int maxLen)
     swprintf(
             toFill,
             maxLen,
-            L" %lc ",
+            L"%lc",
             internetStatusChar);
 }
 
@@ -4688,6 +4689,7 @@ LRESULT CALLBACK button_message_loop(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM
             RECT rc;
             PAINTSTRUCT ps;
             HDC hdc = BeginPaint(hWnd, &ps);
+
             GetClientRect(hWnd, &rc);
             SetBkColor(hdc, barBackgroundColor);
             if (button->isSelected)
@@ -4706,13 +4708,15 @@ LRESULT CALLBACK button_message_loop(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM
                 }
             }
             FillRect(hdc, &rc, backgroundBrush);
-            SelectObject(hdc, font);
+            HFONT oldFont = (HFONT)SelectObject(hdc, button->workspace->textStyle->font);
             DrawTextW(
                 hdc,
                 button->workspace->tag,
                 1,
                 &rc,
                 DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+            SelectObject(hdc, oldFont);
+            SelectObject(hdc, font);
             EndPaint(hWnd, &ps);
             break;
         }
