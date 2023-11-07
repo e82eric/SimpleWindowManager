@@ -4148,11 +4148,11 @@ HBRUSH bar_get_background_brush(Bar *self)
     HBRUSH brush;
     if(self->monitor->selected)
     {
-        brush = barSelectedBackgroundBrush;
+        brush = self->textStyle->focusBackgroundBrush;
     }
     else
     {
-        brush = backgroundBrush;
+        brush = self->textStyle->backgroundBrush;
     }
 
     return brush;
