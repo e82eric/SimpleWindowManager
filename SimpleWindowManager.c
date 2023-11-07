@@ -4215,7 +4215,9 @@ void bar_segment_initalize_rectangles(BarSegment *self, HDC hdc, int right, Bar 
             L"%*ls",
             (int)self->variable->textLength,
             variableValueBuff);
+    HFONT oldFont = (HFONT)SelectObject(hdc, self->variable->textStyle->font);
     DrawText(hdc, variableTextBuff, variableTextLen, &variableTextRect, DT_CALCRECT);
+    SelectObject(hdc, oldFont);
 
     int variableWidth = variableTextRect.right - variableTextRect.left;
     int variableLeft = right - variableWidth;
