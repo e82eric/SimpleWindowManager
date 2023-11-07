@@ -3951,7 +3951,7 @@ void monitor_set_workspace_and_arrange(Workspace *workspace, Monitor *monitor, H
     workspace_arrange_windows_with_defer_handle(workspace, hdwp);
     if(!monitor->isHidden)
     {
-        bar_trigger_paint(monitor->bar);
+        bar_trigger_selected_window_paint(monitor->bar);
     }
 
     for(int i = 0; i < workspace->numberOfButtons; i++)
@@ -4029,10 +4029,10 @@ void monitor_select(Monitor *monitor)
     {
         workspace_focus_selected_window(selectedMonitor->workspace);
     }
-    bar_trigger_paint(monitor->bar);
+    bar_trigger_selected_window_paint(monitor->bar);
     if(previousSelectedMonitor)
     {
-        bar_trigger_paint(previousSelectedMonitor->bar);
+        bar_trigger_selected_window_paint(previousSelectedMonitor->bar);
     }
 }
 
@@ -4134,12 +4134,14 @@ void bar_render_selected_window_description(Bar *bar, HDC hdc)
     }
 
     COLORREF oldTextColor = SetTextColor(hdc, bar->textStyle->textColor);
+    HFONT oldFont = (HFONT)SelectObject(hdc, bar->textStyle->font);
     DrawText(
             hdc,
             displayStr,
             displayStrLen,
             bar->selectedWindowDescRect,
             DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+    SelectObject(hdc, oldFont);
     SetTextColor(hdc, oldTextColor);
 }
 
@@ -4349,8 +4351,8 @@ LRESULT CALLBACK bar_message_loop(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPa
                 assert(hBufferedPaint);
                 HBRUSH brush = bar_get_background_brush(msgBar);
 
-                SelectObject(hNewDC, font);
-                SetTextColor(hNewDC, barTextColor);
+                /* SelectObject(hNewDC, font); */
+                /* SetTextColor(hNewDC, barTextColor); */
                 SetBkMode(hNewDC, TRANSPARENT);
 
                 FillRect(hNewDC, msgBar->selectedWindowDescRect, brush);
@@ -4365,9 +4367,9 @@ LRESULT CALLBACK bar_message_loop(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPa
                 }
                 else
                 {
+                    bar_render_selected_window_description(msgBar, hNewDC);
                     bar_render_headers(msgBar, hNewDC);
                     bar_render_times(msgBar, hNewDC);
-                    bar_render_selected_window_description(msgBar, hNewDC);
                 }
                 EndBufferedPaint(hBufferedPaint, TRUE);
             }
@@ -6315,7 +6317,7 @@ int run (void)
             bar->monitor = monitors[i];
             monitors[i]->bar = bar;
 
-            int selectWindowLeft = (buttonWidth * numberOfWorkspaces) + 2;
+            int selectWindowLeft = (buttonWidth * numberOfWorkspaces);
             RECT *timesRect = malloc(sizeof(RECT));
             timesRect->left = (monitors[i]->w / 2);
             timesRect->right = monitors[i]->w - 10;
