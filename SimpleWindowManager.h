@@ -83,7 +83,7 @@ typedef struct TextStyle
 
 typedef struct BarSegmentHeader
 {
-    TCHAR *text;
+    TCHAR text[MAX_PATH];
     size_t textLength;
     TextStyle *textStyle;
     RECT rect;
@@ -266,7 +266,6 @@ struct BarSegment
     BarSegmentHeader *header; 
     BarSegmentHeader *separator; 
     BarSegmentHeader *variable;
-    TCHAR variableText[MAX_PATH];
     void (*variableTextFunc) (TCHAR *toFill, int maxLen);
 };
 

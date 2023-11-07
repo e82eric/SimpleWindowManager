@@ -4180,20 +4180,13 @@ void bar_segment_render_header(BarSegment *self, HDC hdc)
 
 void bar_segment_set_variable_text(BarSegment *self)
 {
-    TCHAR variableValueBuff[MAX_PATH];
-    self->variableTextFunc(variableValueBuff, MAX_PATH);
-    self->variable->textLength = _tcslen(variableValueBuff);
-    _tcscpy_s(self->variableText, MAX_PATH, variableValueBuff);
+    self->variableTextFunc(self->variable->text, MAX_PATH);
+    self->variable->textLength = _tcslen(self->variable->text);
 }
 
 void bar_segment_render_variable_text(BarSegment *self, HDC hdc)
 {
-    COLORREF oldTextColor = SetTextColor(hdc, self->variable->textStyle->textColor);
-    HFONT oldFont = (HFONT)SelectObject(hdc, self->variable->textStyle->font);
-    FillRect(hdc, &self->variable->rect, self->variable->textStyle->backgroundBrush);
-    DrawText(hdc, self->variableText, (int)self->variable->textLength, &self->variable->rect, DT_RIGHT | DT_VCENTER | DT_SINGLELINE);
-    SetTextColor(hdc, oldTextColor);
-    SelectObject(hdc, oldFont);
+    bar_segment_header_render(self->variable, hdc);
 }
 
 void bar_segment_initalize_rectangles(BarSegment *self, HDC hdc, int right, Bar *bar)
@@ -6032,7 +6025,7 @@ void configuration_add_bar_segment_with_header(
     {
         BarSegmentHeader *header = calloc(1, sizeof(BarSegmentHeader));
         assert(header);
-        header->text = _wcsdup(headerText);
+        _tcscpy_s(header->text, MAX_PATH, headerText);
         header->textStyle = headerTextStyle;
         header->textLength = _tcslen(headerText);
         segment->header = header;
@@ -6041,7 +6034,7 @@ void configuration_add_bar_segment_with_header(
     {
         BarSegmentHeader *separator = calloc(1, sizeof(BarSegmentHeader));
         assert(separator);
-        separator->text = _wcsdup(separatorText);
+        _tcscpy_s(separator->text, MAX_PATH, separatorText);
         separator->textStyle = separatorTextStyle;
         separator->textLength = _tcslen(separatorText);
         segment->separator = separator;
@@ -6092,7 +6085,7 @@ void configuration_add_bar_segment(
     {
         BarSegmentHeader *separator = calloc(1, sizeof(BarSegmentHeader));
         assert(separator);
-        separator->text = _wcsdup(separatorText);
+        _tcscpy_s(separator->text, MAX_PATH, separatorText);
         separator->textStyle = separatorTextStyle;
         separator->textLength = _tcslen(separatorText);
         segment->separator = separator;
