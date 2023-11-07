@@ -4701,7 +4701,7 @@ LRESULT CALLBACK button_message_loop(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM
             HBRUSH buttonBackgroundBrush = textStyle->backgroundBrush;
             if (button->isSelected)
             {
-                textColor = buttonSelectedTextColor;
+                textColor = textStyle->focusTextColor;
                 backgroundColor = textStyle->focusBackgroundColor;
                 buttonBackgroundBrush = textStyle->focusBackgroundBrush;
             }

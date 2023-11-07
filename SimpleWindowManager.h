@@ -83,6 +83,7 @@ typedef struct TextStyle
     COLORREF disabledColor;
     COLORREF focusBackgroundColor;
     HBRUSH focusBackgroundBrush;
+    COLORREF focusTextColor;
     HBRUSH extraFocusBackgroundBrush;
     COLORREF infoColor;
     HBRUSH infoBrush;
