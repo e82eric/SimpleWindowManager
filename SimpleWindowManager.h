@@ -139,6 +139,7 @@ struct Configuration
     int borderWidth;
     int floatWindowMovement;
     int borderWindowBackgroundTransparency;
+    TextStyle *textStyle;
 };
 
 struct WorkspaceFilterData
@@ -267,6 +268,7 @@ struct Bar
     RECT *timesRect;
     BarSegment **segments;
     int numberOfSegments;
+    TextStyle *textStyle;
 };
 
 struct BarSegment

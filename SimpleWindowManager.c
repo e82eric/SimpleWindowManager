@@ -4133,12 +4133,14 @@ void bar_render_selected_window_description(Bar *bar, HDC hdc)
         free_client(clientToRender);
     }
 
+    COLORREF oldTextColor = SetTextColor(hdc, bar->textStyle->textColor);
     DrawText(
             hdc,
             displayStr,
             displayStrLen,
             bar->selectedWindowDescRect,
             DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+    SetTextColor(hdc, oldTextColor);
 }
 
 HBRUSH bar_get_background_brush(Bar *self)
@@ -6279,6 +6281,7 @@ int run (void)
         if(!monitors[i]->isHidden)
         {
             Bar *bar = calloc(1, sizeof(Bar));
+            bar->textStyle = configuration->textStyle;
             bar->numberOfButtons = numberOfWorkspaces;
             bar->buttons = calloc(bar->numberOfButtons, sizeof(Button*));
             for(int j = 0; j < numberOfWorkspaces; j++)
