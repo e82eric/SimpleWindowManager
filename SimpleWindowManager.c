@@ -4684,11 +4684,16 @@ LRESULT CALLBACK button_message_loop(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM
             HDC hdc = BeginPaint(hWnd, &ps);
 
             GetClientRect(hWnd, &rc);
-            SetBkColor(hdc, button->workspace->textStyle->backgroundColor);
-            COLORREF textColor = button->workspace->textStyle->textColor;
+
+            TextStyle *textStyle = button->workspace->textStyle;
+            COLORREF textColor = textStyle->textColor;
+            COLORREF backgroundColor = textStyle->backgroundColor;
+            HBRUSH buttonBackgroundBrush = textStyle->backgroundBrush;
             if (button->isSelected)
             {
                 textColor = buttonSelectedTextColor;
+                backgroundColor = textStyle->focusBackgroundColor;
+                buttonBackgroundBrush = textStyle->focusBackgroundBrush;
             }
             else
             {
@@ -4698,7 +4703,8 @@ LRESULT CALLBACK button_message_loop(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM
                 }
             }
 
-            FillRect(hdc, &rc, button->workspace->textStyle->backgroundBrush);
+            SetBkColor(hdc, backgroundColor);
+            FillRect(hdc, &rc, buttonBackgroundBrush);
             COLORREF oldTextColor = SetTextColor(hdc, textColor);
             HFONT oldFont = (HFONT)SelectObject(hdc, button->workspace->textStyle->font);
             DrawTextW(
@@ -4707,6 +4713,15 @@ LRESULT CALLBACK button_message_loop(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM
                 1,
                 &rc,
                 DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+            if (button->isSelected)
+            {
+                RECT focusIndicatorRect;
+                focusIndicatorRect.top = rc.bottom - 3;
+                focusIndicatorRect.bottom = rc.bottom;
+                focusIndicatorRect.left = rc.left;
+                focusIndicatorRect.right = rc.right;
+                FillRect(hdc, &focusIndicatorRect, textStyle->extraFocusBackgroundBrush);
+            }
             SetTextColor(hdc, oldTextColor);
             SelectObject(hdc, oldFont);
             SelectObject(hdc, font);
