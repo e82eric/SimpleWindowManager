@@ -4685,22 +4685,21 @@ LRESULT CALLBACK button_message_loop(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM
 
             GetClientRect(hWnd, &rc);
             SetBkColor(hdc, barBackgroundColor);
+            COLORREF textColor = button->workspace->textStyle->textColor;
             if (button->isSelected)
             {
-                SetTextColor(hdc, buttonSelectedTextColor);
+                textColor = buttonSelectedTextColor;
             }
             else
             {
-                if (button->hasClients)
+                if (!button->hasClients)
                 {
-                    SetTextColor(hdc, buttonWithWindowsTextColor);
-                }
-                else
-                {
-                    SetTextColor(hdc, buttonWithoutWindowsTextColor);
+                    textColor = buttonWithoutWindowsTextColor;
                 }
             }
-            FillRect(hdc, &rc, backgroundBrush);
+
+            FillRect(hdc, &rc, button->workspace->textStyle->backgroundBrush);
+            COLORREF oldTextColor = SetTextColor(hdc, textColor);
             HFONT oldFont = (HFONT)SelectObject(hdc, button->workspace->textStyle->font);
             DrawTextW(
                 hdc,
@@ -4708,6 +4707,7 @@ LRESULT CALLBACK button_message_loop(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM
                 1,
                 &rc,
                 DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+            SetTextColor(hdc, oldTextColor);
             SelectObject(hdc, oldFont);
             SelectObject(hdc, font);
             EndPaint(hWnd, &ps);
