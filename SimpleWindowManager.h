@@ -84,6 +84,8 @@ typedef struct TextStyle
     COLORREF focusBackgroundColor;
     HBRUSH focusBackgroundBrush;
     HBRUSH extraFocusBackgroundBrush;
+    COLORREF infoColor;
+    HBRUSH infoBrush;
 } TextStyle;
 
 typedef struct BarSegmentHeader

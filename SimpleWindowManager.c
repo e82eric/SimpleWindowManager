@@ -4722,6 +4722,15 @@ LRESULT CALLBACK button_message_loop(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM
                 focusIndicatorRect.right = rc.right;
                 FillRect(hdc, &focusIndicatorRect, textStyle->extraFocusBackgroundBrush);
             }
+            if (button->hasClients)
+            {
+                RECT hasClientsRect;
+                hasClientsRect.top = rc.top;
+                hasClientsRect.bottom = rc.top + 4;
+                hasClientsRect.left = rc.left;
+                hasClientsRect.right = rc.left + 4;
+                FillRect(hdc, &hasClientsRect, textStyle->infoBrush);
+            }
             SetTextColor(hdc, oldTextColor);
             SelectObject(hdc, oldFont);
             SelectObject(hdc, font);
