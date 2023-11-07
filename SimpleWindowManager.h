@@ -78,6 +78,7 @@ typedef struct TextStyle
 {
     HFONT font;
     COLORREF textColor;
+    COLORREF backgroundColor;
     HBRUSH backgroundBrush;
 } TextStyle;
 

@@ -4684,7 +4684,7 @@ LRESULT CALLBACK button_message_loop(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM
             HDC hdc = BeginPaint(hWnd, &ps);
 
             GetClientRect(hWnd, &rc);
-            SetBkColor(hdc, barBackgroundColor);
+            SetBkColor(hdc, button->workspace->textStyle->backgroundColor);
             COLORREF textColor = button->workspace->textStyle->textColor;
             if (button->isSelected)
             {
