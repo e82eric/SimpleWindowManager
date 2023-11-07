@@ -4156,6 +4156,16 @@ HBRUSH bar_get_background_brush(Bar *self)
     return brush;
 }
 
+void bar_segment_header_render_as_info(BarSegmentHeader *self, HDC hdc)
+{
+    COLORREF oldTextColor = SetTextColor(hdc, self->textStyle->infoColor);
+    HFONT oldFont = (HFONT)SelectObject(hdc, self->textStyle->font);
+    FillRect(hdc, &self->rect, self->textStyle->backgroundBrush);
+    DrawText(hdc, self->text, (int)self->textLength, &self->rect, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+    SetTextColor(hdc, oldTextColor);
+    SelectObject(hdc, oldFont);
+}
+
 void bar_segment_header_render(BarSegmentHeader *self, HDC hdc)
 {
     COLORREF oldTextColor = SetTextColor(hdc, self->textStyle->textColor);
@@ -4170,11 +4180,11 @@ void bar_segment_render_header(BarSegment *self, HDC hdc)
 {
     if(self->separator)
     {
-        bar_segment_header_render(self->separator, hdc);
+        bar_segment_header_render_as_info(self->separator, hdc);
     }
     if(self->header)
     {
-        bar_segment_header_render(self->header, hdc);
+        bar_segment_header_render_as_info(self->header, hdc);
     }
 }
 
@@ -4721,15 +4731,6 @@ LRESULT CALLBACK button_message_loop(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM
                 focusIndicatorRect.left = rc.left;
                 focusIndicatorRect.right = rc.right;
                 FillRect(hdc, &focusIndicatorRect, textStyle->extraFocusBackgroundBrush);
-            }
-            if (button->hasClients)
-            {
-                RECT hasClientsRect;
-                hasClientsRect.top = rc.top;
-                hasClientsRect.bottom = rc.top + 4;
-                hasClientsRect.left = rc.left;
-                hasClientsRect.right = rc.left + 4;
-                FillRect(hdc, &hasClientsRect, textStyle->infoBrush);
             }
             SetTextColor(hdc, oldTextColor);
             SelectObject(hdc, oldFont);
