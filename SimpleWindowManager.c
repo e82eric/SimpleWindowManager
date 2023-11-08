@@ -4088,21 +4088,21 @@ void bar_render_selected_window_description(Bar *bar, HDC hdc)
     Client* focusedClient = windowManager_find_client_in_workspaces_by_hwnd(foregroundHwnd);
     Client* clientToRender;
 
-    TCHAR *isManagedIndicator = L"UNKNOWN";
+    TCHAR *isManagedIndicator = L"\0";
     if(focusedClient)
     {
         if(isForegroundWindowSameAsSelectMonitorSelected)
         {
-            isManagedIndicator = L"M";
+            isManagedIndicator = L"";
         }
         else
         {
-            isManagedIndicator = L"M*";
+            isManagedIndicator = L" (*)";
         }
     }
     else
     {
-        isManagedIndicator = L"U";
+        isManagedIndicator = L" (F)";
     }
 
     if(!focusedClient)
@@ -4117,7 +4117,7 @@ void bar_render_selected_window_description(Bar *bar, HDC hdc)
     TCHAR isAdminBuf[5] = {'\0', '\0', '\0', '\0', '\0'};
     if(clientToRender->data->isElevated)
     {
-        _tcscpy_s(isAdminBuf, 5, L"(A)");
+        _tcscpy_s(isAdminBuf, 5, L" (A)");
     }
 
     TCHAR displayStr[MAX_PATH];
@@ -4125,13 +4125,13 @@ void bar_render_selected_window_description(Bar *bar, HDC hdc)
         int numberOfWorkspaceClients = workspace_get_number_of_clients(bar->monitor->workspace);
         LPCWSTR processShortFileName = PathFindFileName(clientToRender->data->processImageName);
 
-    displayStrLen = swprintf(displayStr, MAX_PATH, L"[%ls:%d][Mode:%ls] : %ls (%ls) (%lu) %ls",
+    displayStrLen = swprintf(displayStr, MAX_PATH, L"[%ls:%d][Mode:%ls] : %ls (%lu)%ls%ls",
         bar->monitor->workspace->layout->tag,
         numberOfWorkspaceClients,
         windowRoutingMode,
         processShortFileName,
-        isManagedIndicator,
         clientToRender->data->processId,
+        isManagedIndicator,
         isAdminBuf);
 
     if(!focusedClient)
