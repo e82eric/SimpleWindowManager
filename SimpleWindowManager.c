@@ -182,8 +182,6 @@ HFONT font;
 
 HPEN borderForegroundPen;
 HPEN borderNotForegroundPen;
-HBRUSH barSelectedBackgroundBrush;
-HBRUSH backgroundBrush;
 HBRUSH dropTargetBrush;
 HWND borderWindowHwnd;
 HWND dropTargetHwnd;
@@ -192,7 +190,6 @@ HWND dropTargetHwnd;
 long barHeight = 29;
 long gapWidth = 13;
 int scratchWindowsScreenPadding = 250;
-COLORREF barSelectedBackgroundColor = RGB(84, 133, 36);
 COLORREF buttonSelectedTextColor = RGB(204, 36, 29);
 COLORREF buttonWithWindowsTextColor = RGB(255, 255, 247);
 COLORREF buttonWithoutWindowsTextColor = 0x504945;
@@ -6223,10 +6220,6 @@ int run (void)
     {
         gapWidth = configuration->gapWidth;
     }
-    if(configuration->barSelectedBackgroundColor)
-    {
-        barSelectedBackgroundColor = configuration->barSelectedBackgroundColor;
-    }
     if(configuration->buttonSelectedTextColor)
     {
         buttonSelectedTextColor = configuration->buttonSelectedTextColor;
@@ -6267,7 +6260,6 @@ int run (void)
     menu_set_border_pen(mView, borderForegroundPen);
 
     HINSTANCE moduleHandle = GetModuleHandle(NULL);
-    barSelectedBackgroundBrush = CreateSolidBrush(barSelectedBackgroundColor);
     dropTargetBrush = CreateSolidBrush(dropTargetColor);
 
     if(configuration->font)
