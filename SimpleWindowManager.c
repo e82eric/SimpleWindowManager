@@ -190,7 +190,6 @@ HWND dropTargetHwnd;
 long barHeight = 29;
 long gapWidth = 13;
 int scratchWindowsScreenPadding = 250;
-COLORREF buttonSelectedTextColor = RGB(204, 36, 29);
 COLORREF buttonWithWindowsTextColor = RGB(255, 255, 247);
 COLORREF buttonWithoutWindowsTextColor = 0x504945;
 COLORREF barTextColor = RGB(235, 219, 178);
@@ -6219,10 +6218,6 @@ int run (void)
     if(configuration->gapWidth)
     {
         gapWidth = configuration->gapWidth;
-    }
-    if(configuration->buttonSelectedTextColor)
-    {
-        buttonSelectedTextColor = configuration->buttonSelectedTextColor;
     }
     if(configuration->buttonWithWindowsTextColor)
     {

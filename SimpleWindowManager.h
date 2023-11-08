@@ -116,9 +116,6 @@ struct Configuration
     long barHeight;
     long gapWidth;
     int scratchWindowsScreenPadding;
-    COLORREF barBackgroundColor;
-    COLORREF barSelectedBackgroundColor;
-    COLORREF buttonSelectedTextColor;
     COLORREF buttonWithWindowsTextColor;
     COLORREF buttonWithoutWindowsTextColor;
     COLORREF barTextColor;
