@@ -438,7 +438,6 @@ HFONT initalize_font();
 extern long barHeight;
 extern long gapWidth;
 
-extern COLORREF barBackgroundColor;
 extern COLORREF barSelectedBackgroundColor;
 extern COLORREF buttonSelectedTextColor;
 extern COLORREF buttonWithWindowsTextColor;

@@ -192,7 +192,6 @@ HWND dropTargetHwnd;
 long barHeight = 29;
 long gapWidth = 13;
 int scratchWindowsScreenPadding = 250;
-COLORREF barBackgroundColor = 0x282828;
 COLORREF barSelectedBackgroundColor = RGB(84, 133, 36);
 COLORREF buttonSelectedTextColor = RGB(204, 36, 29);
 COLORREF buttonWithWindowsTextColor = RGB(255, 255, 247);
@@ -6224,10 +6223,6 @@ int run (void)
     {
         gapWidth = configuration->gapWidth;
     }
-    if(configuration->barBackgroundColor)
-    {
-        barBackgroundColor = configuration->barBackgroundColor;
-    }
     if(configuration->barSelectedBackgroundColor)
     {
         barSelectedBackgroundColor = configuration->barSelectedBackgroundColor;
@@ -6273,7 +6268,6 @@ int run (void)
 
     HINSTANCE moduleHandle = GetModuleHandle(NULL);
     barSelectedBackgroundBrush = CreateSolidBrush(barSelectedBackgroundColor);
-    backgroundBrush = CreateSolidBrush(barBackgroundColor);
     dropTargetBrush = CreateSolidBrush(dropTargetColor);
 
     if(configuration->font)
