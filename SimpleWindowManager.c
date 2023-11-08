@@ -4376,7 +4376,7 @@ LRESULT CALLBACK bar_message_loop(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPa
                 SetBkMode(hNewDC, TRANSPARENT);
 
                 FillRect(hNewDC, msgBar->selectedWindowDescRect, brush);
-                if(ps.rcPaint.left == msgBar->selectedWindowDescRect->left)
+                if(ps.rcPaint.left == msgBar->selectedWindowDescRect->left && ps.rcPaint.right == msgBar->selectedWindowDescRect->right)
                 {
                     bar_render_selected_window_description(msgBar, hNewDC);
                 }
@@ -6073,6 +6073,8 @@ void configuration_add_bar_segment_with_header(
     BarSegmentHeader *variable = calloc(1, sizeof(BarSegmentHeader));
     assert(variable);
     variable->textLength = variableTextFixedWidth;
+    wmemset(variable->text, L' ', variableTextFixedWidth);
+    variable->text[variableTextFixedWidth] = '\0';
     variable->isIcon = variableIsIcon;
     segment->variable = variable;
     if(headerText)
