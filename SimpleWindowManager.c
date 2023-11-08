@@ -2888,23 +2888,23 @@ void workspace_register_title_not_contains_filter(Workspace *workspace, TCHAR *t
     workspace->filterData->notTitles[workspace->filterData->numberOfNotTitles - 1] = _wcsdup(title);
 }
 
-Workspace* workspace_register(TCHAR *name, WCHAR* tag, Layout *layout, TextStyle *textStyle)
+Workspace* workspace_register(TCHAR *name, WCHAR* tag, bool isIcon, Layout *layout)
 {
-    Workspace *workspace = workspace_register_with_window_filter(name, NULL, tag, layout, textStyle);
+    Workspace *workspace = workspace_register_with_window_filter(name, NULL, tag, isIcon, layout);
     return workspace;
 }
 
-Workspace* workspace_register_with_window_filter(TCHAR *name, WindowFilter windowFilter, WCHAR* tag, Layout *layout, TextStyle *textStyle)
+Workspace* workspace_register_with_window_filter(TCHAR *name, WindowFilter windowFilter, WCHAR* tag, bool isIcon, Layout *layout)
 {
     if(numberOfWorkspaces < MAX_WORKSPACES)
     {
         Button ** buttons = (Button **) calloc(numberOfBars, sizeof(Button *));
         Workspace *workspace = workspaces[numberOfWorkspaces];
-        workspace->textStyle = textStyle;
         workspace->name = _wcsdup(name);
         workspace->windowFilter = windowFilter;
         workspace->buttons = buttons;
         workspace->tag = _wcsdup(tag);
+        workspace->isIcon = isIcon;
         workspace->layout = layout;
         workspace->filterData = calloc(1, sizeof(WorkspaceFilterData));
         numberOfWorkspaces++;
@@ -4170,35 +4170,40 @@ HBRUSH bar_get_background_brush(Bar *self)
     return brush;
 }
 
-void bar_segment_header_render_as_info(BarSegmentHeader *self, HDC hdc)
+void text_style_render_text(TextStyle *self, HDC hdc, RECT *rect, TCHAR *text, size_t textLength, COLORREF textColor, bool isIcon)
 {
-    COLORREF oldTextColor = SetTextColor(hdc, self->textStyle->infoColor);
-    HFONT oldFont = (HFONT)SelectObject(hdc, self->textStyle->font);
-    FillRect(hdc, &self->rect, self->textStyle->backgroundBrush);
-    DrawText(hdc, self->text, (int)self->textLength, &self->rect, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+    COLORREF oldTextColor = SetTextColor(hdc, textColor);
+    HFONT hFont = self->font;
+    if(isIcon)
+    {
+        hFont = self->iconFont;
+    }
+    HFONT oldFont = (HFONT)SelectObject(hdc, hFont);
+    FillRect(hdc, rect, self->backgroundBrush);
+    DrawText(hdc, text, (int)textLength, rect, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
     SetTextColor(hdc, oldTextColor);
     SelectObject(hdc, oldFont);
 }
 
-void bar_segment_header_render(BarSegmentHeader *self, HDC hdc)
+void text_style_render_normal_text(TextStyle *self, HDC hdc, RECT *rect, TCHAR *text, size_t textLength, bool isIcon)
 {
-    COLORREF oldTextColor = SetTextColor(hdc, self->textStyle->textColor);
-    HFONT oldFont = (HFONT)SelectObject(hdc, self->textStyle->font);
-    FillRect(hdc, &self->rect, self->textStyle->backgroundBrush);
-    DrawText(hdc, self->text, (int)self->textLength, &self->rect, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
-    SetTextColor(hdc, oldTextColor);
-    SelectObject(hdc, oldFont);
+    text_style_render_text(self,hdc, rect, text, textLength, self->textColor, isIcon);
 }
 
-void bar_segment_render_header(BarSegment *self, HDC hdc)
+void text_style_render_info_text(TextStyle *self, HDC hdc, RECT *rect, TCHAR *text, size_t textLength, bool isIcon)
+{
+    text_style_render_text(self, hdc, rect, text, textLength, self->infoColor, isIcon);
+}
+
+void bar_segment_render_header(BarSegment *self, HDC hdc, TextStyle *textStyle)
 {
     if(self->separator)
     {
-        bar_segment_header_render_as_info(self->separator, hdc);
+        text_style_render_info_text(textStyle, hdc, &self->separator->rect, self->separator->text, self->separator->textLength, self->separator->isIcon);
     }
     if(self->header)
     {
-        bar_segment_header_render_as_info(self->header, hdc);
+        text_style_render_info_text(textStyle, hdc, &self->header->rect, self->header->text, self->header->textLength, self->header->isIcon);
     }
 }
 
@@ -4208,9 +4213,9 @@ void bar_segment_set_variable_text(BarSegment *self)
     self->variable->textLength = _tcslen(self->variable->text);
 }
 
-void bar_segment_render_variable_text(BarSegment *self, HDC hdc)
+void bar_segment_render_variable_text(BarSegment *self, HDC hdc, TextStyle *textStyle)
 {
-    bar_segment_header_render(self->variable, hdc);
+    text_style_render_normal_text(textStyle, hdc, &self->variable->rect, self->variable->text, self->variable->textLength, self->variable->isIcon);
 }
 
 void bar_segment_initalize_rectangles(BarSegment *self, HDC hdc, int right, Bar *bar)
@@ -4225,7 +4230,12 @@ void bar_segment_initalize_rectangles(BarSegment *self, HDC hdc, int right, Bar 
             L"%*ls",
             (int)self->variable->textLength,
             variableValueBuff);
-    HFONT oldFont = (HFONT)SelectObject(hdc, self->variable->textStyle->font);
+    HFONT hFont = bar->textStyle->font;
+    if(self->variable->isIcon)
+    {
+        hFont = bar->textStyle->iconFont;
+    }
+    HFONT oldFont = (HFONT)SelectObject(hdc, hFont);
     DrawText(hdc, variableTextBuff, variableTextLen, &variableTextRect, DT_CALCRECT);
     SelectObject(hdc, oldFont);
 
@@ -4296,7 +4306,7 @@ void bar_render_headers(Bar *bar, HDC hdc)
 {
     for(int i = 0; i < bar->numberOfSegments; i++)
     {
-        bar_segment_render_header(bar->segments[i], hdc);
+        bar_segment_render_header(bar->segments[i], hdc, bar->textStyle);
     }
 }
 
@@ -4304,7 +4314,7 @@ void bar_render_times(Bar *bar, HDC hdc)
 {
     for(int i = 0; i < bar->numberOfSegments; i++)
     {
-        bar_segment_render_variable_text(bar->segments[i], hdc);
+        bar_segment_render_variable_text(bar->segments[i], hdc, bar->textStyle);
     }
 }
 
@@ -4709,7 +4719,7 @@ LRESULT CALLBACK button_message_loop(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM
 
             GetClientRect(hWnd, &rc);
 
-            TextStyle *textStyle = button->workspace->textStyle;
+            TextStyle *textStyle = button->bar->textStyle;
             COLORREF textColor = textStyle->textColor;
             COLORREF backgroundColor = textStyle->backgroundColor;
             HBRUSH buttonBackgroundBrush = textStyle->backgroundBrush;
@@ -4730,7 +4740,12 @@ LRESULT CALLBACK button_message_loop(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM
             SetBkColor(hdc, backgroundColor);
             FillRect(hdc, &rc, buttonBackgroundBrush);
             COLORREF oldTextColor = SetTextColor(hdc, textColor);
-            HFONT oldFont = (HFONT)SelectObject(hdc, button->workspace->textStyle->font);
+            HFONT hFont = textStyle->font;
+            if(button->workspace->isIcon)
+            {
+                hFont = textStyle->iconFont;
+            }
+            HFONT oldFont = (HFONT)SelectObject(hdc, hFont);
             DrawTextW(
                 hdc,
                 button->workspace->tag,
@@ -6026,12 +6041,12 @@ HFONT initalize_font(LPCWSTR fontName, int size)
 void configuration_add_bar_segment_with_header(
         Configuration *self,
         TCHAR *separatorText,
-        TextStyle *separatorTextStyle,
+        bool separatorIsIcon,
         TCHAR *headerText,
-        TextStyle *headerTextStyle,
+        bool headerIsIcon,
         int variableTextFixedWidth,
-        void (*variableTextFunc)(TCHAR *toFill, int maxLen),
-        TextStyle *variableTextStyle)
+        bool variableIsIcon,
+        void (*variableTextFunc)(TCHAR *toFill, int maxLen))
 {
     if(!self->barSegments)
     {
@@ -6058,15 +6073,15 @@ void configuration_add_bar_segment_with_header(
     BarSegmentHeader *variable = calloc(1, sizeof(BarSegmentHeader));
     assert(variable);
     variable->textLength = variableTextFixedWidth;
-    variable->textStyle = variableTextStyle;
+    variable->isIcon = variableIsIcon;
     segment->variable = variable;
     if(headerText)
     {
         BarSegmentHeader *header = calloc(1, sizeof(BarSegmentHeader));
         assert(header);
         _tcscpy_s(header->text, MAX_PATH, headerText);
-        header->textStyle = headerTextStyle;
         header->textLength = _tcslen(headerText);
+        header->isIcon = headerIsIcon;
         segment->header = header;
     }
     if(separatorText)
@@ -6074,8 +6089,8 @@ void configuration_add_bar_segment_with_header(
         BarSegmentHeader *separator = calloc(1, sizeof(BarSegmentHeader));
         assert(separator);
         _tcscpy_s(separator->text, MAX_PATH, separatorText);
-        separator->textStyle = separatorTextStyle;
         separator->textLength = _tcslen(separatorText);
+        separator->isIcon = separatorIsIcon;
         segment->separator = separator;
     }
     segment->variableTextFixedWidth = variableTextFixedWidth;
@@ -6086,49 +6101,12 @@ void configuration_add_bar_segment_with_header(
 void configuration_add_bar_segment(
         Configuration *self,
         TCHAR *separatorText,
-        TextStyle *separatorTextStyle,
+        bool separatorIsIcon,
         int variableTextFixedWidth,
-        void (*variableTextFunc)(TCHAR *toFill, int maxLen),
-        TextStyle *variableTextStyle)
+        bool variableIsIcon,
+        void (*variableTextFunc)(TCHAR *toFill, int maxLen))
 {
-    if(!self->barSegments)
-    {
-        self->barSegments = calloc(1, sizeof(BarSegmentConfiguration*));
-        assert(self->barSegments);
-        self->numberOfBarSegments = 1;
-    }
-    else
-    {
-        self->numberOfBarSegments++;
-        BarSegmentConfiguration **temp = realloc(self->barSegments, sizeof(BarSegmentConfiguration*) * self->numberOfBarSegments);
-        if(!temp)
-        {
-            assert(false);
-        }
-        else
-        {
-            self->barSegments = temp;
-        }
-    }
-
-    BarSegmentConfiguration *segment = calloc(1, sizeof(BarSegmentConfiguration));
-    assert(segment);
-    BarSegmentHeader *variable = calloc(1, sizeof(BarSegmentHeader));
-    assert(variable);
-    variable->textLength = variableTextFixedWidth;
-    variable->textStyle = variableTextStyle;
-    segment->variable = variable;
-    segment->variableTextFunc = variableTextFunc;
-    self->barSegments[self->numberOfBarSegments - 1] = segment;
-    if(separatorText)
-    {
-        BarSegmentHeader *separator = calloc(1, sizeof(BarSegmentHeader));
-        assert(separator);
-        _tcscpy_s(separator->text, MAX_PATH, separatorText);
-        separator->textStyle = separatorTextStyle;
-        separator->textLength = _tcslen(separatorText);
-        segment->separator = separator;
-    }
+    configuration_add_bar_segment_with_header(self, separatorText, separatorIsIcon, NULL, false, variableTextFixedWidth, variableIsIcon, variableTextFunc);
 }
 
 BOOL CALLBACK enum_display_monitors_callback(HMONITOR hMonitor, HDC hdcMonitor, LPRECT lprcMonitor, LPARAM dwData)

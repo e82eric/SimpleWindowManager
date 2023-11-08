@@ -77,6 +77,7 @@ enum WindowRoutingMode
 typedef struct TextStyle
 {
     HFONT font;
+    HFONT iconFont;
     COLORREF textColor;
     COLORREF backgroundColor;
     HBRUSH backgroundBrush;
@@ -93,7 +94,7 @@ typedef struct BarSegmentHeader
 {
     TCHAR text[MAX_PATH];
     size_t textLength;
-    TextStyle *textStyle;
+    bool isIcon;
     RECT rect;
 } BarSegmentHeader;
 
@@ -163,6 +164,7 @@ struct Workspace
     WindowFilter windowFilter;
     HWND barButtonHwnd;
     WCHAR *tag;
+    bool isIcon;
     Button **buttons;
     int numberOfButtons;
     int mainOffset;
@@ -170,7 +172,6 @@ struct Workspace
     Client *lastClient;
     int numberOfClients;
     WorkspaceFilterData *filterData;
-    TextStyle *textStyle;
 };
 
 struct Client
@@ -313,8 +314,8 @@ extern TCHAR *scratchWindowTitle;
 
 void configure(Configuration *configuration);
 HFONT initalize_font(LPCWSTR fontName, int size);
-Workspace* workspace_register(TCHAR *name, WCHAR* tag, Layout *layout, TextStyle *textStyle);
-Workspace* workspace_register_with_window_filter(TCHAR *name, WindowFilter windowFilter, WCHAR* tag, Layout *layout, TextStyle *textStyle);
+Workspace* workspace_register(TCHAR *name, WCHAR* tag, bool isIcon, Layout *layout);
+Workspace* workspace_register_with_window_filter(TCHAR *name, WindowFilter windowFilter, WCHAR* tag, bool isIcon, Layout *layout);
 void workspace_register_processimagename_contains_filter(Workspace *workspace, TCHAR *className);
 void workspace_register_classname_contains_filter(Workspace *workspace, TCHAR *className);
 void workspace_register_title_contains_filter(Workspace *workspace, TCHAR *title);
@@ -333,19 +334,19 @@ TCHAR* client_get_command_line(Client *self);
 void configuration_add_bar_segment(
         Configuration *self,
         TCHAR *separatorText,
-        TextStyle *separatorTextStyle,
+        bool separatorIsIcon,
         int variableTextFixedWidth,
-        void (*variableTextFunc)(TCHAR *toFill, int maxLen),
-        TextStyle *variableTextStyle);
+        bool variableIsIcon,
+        void (*variableTextFunc)(TCHAR *toFill, int maxLen));
 void configuration_add_bar_segment_with_header(
         Configuration *self,
         TCHAR *separatorText,
-        TextStyle *separatorTextStyle,
+        bool separatorIsIcon,
         TCHAR *headerText,
-        TextStyle *textStyle,
+        bool headerIsIcon,
         int variableTextFixedWidth,
-        void (*variableTextFunc)(TCHAR *toFill, int maxLen),
-        TextStyle *variableTextStyle);
+        bool variableIsIcon,
+        void (*variableTextFunc)(TCHAR *toFill, int maxLen));
 void fill_cpu(TCHAR *toFill, int maxLen);
 void fill_volume_percent(TCHAR *toFill, int maxLen);
 void fill_system_time(TCHAR *toFill, int maxLen);
