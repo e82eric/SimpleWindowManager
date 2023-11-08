@@ -165,7 +165,7 @@ void configure(Configuration *configuration)
         "C:\\ProgramData\\Microsoft\\Windows\\Start Menu\\",
         "%USERPROFILE%\\AppData\\Local\\Microsoft\\WindowsApps\\"
     };
-    register_program_launcher_menu(modifiers, VK_P, notElevatedDirectories, 4, FALSE);
+    register_program_launcher_menu(modifiers, VK_P, notElevatedDirectories, 3, FALSE);
 
     char* elevatedDirectories[] = {
         "%USERPROFILE%\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\",
@@ -173,7 +173,7 @@ void configure(Configuration *configuration)
         "%USERPROFILE%\\AppData\\Local\\Microsoft\\WindowsApps\\",
         "C:\\Program Files\\sysinternals\\"
     };
-    register_program_launcher_menu(modifiers | LShift, VK_P, elevatedDirectories, 5, TRUE);
+    register_program_launcher_menu(modifiers | LShift, VK_P, elevatedDirectories, 4, TRUE);
 
     searchDriveMenuDefinition = menu_create_and_register();
     MenuDefinition *searchAllDrivesMenu = menu_create_and_register();
