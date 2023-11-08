@@ -4273,7 +4273,14 @@ void bar_segment_initalize_rectangles(BarSegment *self, HDC hdc, int right, Bar 
     if(self->separator)
     {
         RECT separatorRect = { 0, 0, 0, 0 };
+        HFONT separatorFont = bar->textStyle->font;
+        if(self->separator->isIcon)
+        {
+            separatorFont = bar->textStyle->iconFont;
+        }
+        HFONT separatorOldFont = (HFONT)SelectObject(hdc, separatorFont);
         DrawText(hdc, self->separator->text, (int)self->separator->textLength, &separatorRect, DT_CALCRECT);
+        SelectObject(hdc, separatorOldFont);
         int separatorWidth = separatorRect.right - separatorRect.left;
         separatorLeft = headerLeft - separatorWidth;
 
