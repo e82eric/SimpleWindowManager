@@ -6052,6 +6052,32 @@ HFONT initalize_font(LPCWSTR fontName, int size)
     return result;
 }
 
+void configuration_register_default_text_style(Configuration *self, TCHAR *fontName)
+{
+    HFONT iconFont = initalize_font(fontName, 17);
+    HFONT textFont = initalize_font(fontName, 12);
+
+    COLORREF backgroundColor = 0x282828;
+    COLORREF infoColor = RGB(131, 165, 152);
+    COLORREF extraFocusBackgroundColor = RGB(254, 128, 25);
+    COLORREF focusBackgroundColor = 0x504945;
+    COLORREF normalTextColor = RGB(235, 219, 178);
+    COLORREF disabledColor = 0x504945;
+    COLORREF focusTextColor = RGB(204, 36, 29);
+
+    TextStyle *normalTextStyle = calloc(1, sizeof(TextStyle));
+    normalTextStyle->font = textFont;
+    normalTextStyle->iconFont = iconFont;
+    normalTextStyle->textColor = normalTextColor;
+    normalTextStyle->backgroundColor = backgroundColor;
+    normalTextStyle->disabledColor = disabledColor;
+    normalTextStyle->focusBackgroundColor = focusBackgroundColor;
+    normalTextStyle->extraFocusBackgroundColor = extraFocusBackgroundColor;
+    normalTextStyle->infoColor = infoColor;
+    normalTextStyle->focusTextColor = focusTextColor;
+    self->textStyle = normalTextStyle;
+}
+
 void configuration_add_bar_segment_with_header(
         Configuration *self,
         TCHAR *separatorText,

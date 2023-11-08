@@ -330,6 +330,7 @@ void keybinding_create_with_shell_arg(CHAR *name, int modifiers, unsigned int ke
 
 TCHAR* client_get_command_line(Client *self);
 
+void configuration_register_default_text_style(Configuration *self, TCHAR *fontName);
 void configuration_add_bar_segment(
         Configuration *self,
         TCHAR *separatorText,

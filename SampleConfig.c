@@ -79,39 +79,7 @@ void configure(Configuration *configuration)
     int modifiers = LAlt;
     keybindings_register_defaults_with_modifiers(modifiers);
 
-    TCHAR *fontName = TEXT("JetBrains Mono Regular Nerd Font Complete Mono Windows Compatible");
-    HFONT iconFont = initalize_font(fontName, 17);
-    HFONT textFont = initalize_font(fontName, 12);
-
-    COLORREF backgroundColor = 0x282828;
-    COLORREF infoColor = RGB(131, 165, 152);
-    COLORREF extraFocusBackgroundColor = RGB(254, 128, 25);
-    COLORREF focusBackgroundColor = 0x504945;
-    COLORREF normalTextColor = RGB(235, 219, 178);
-    COLORREF disabledColor = 0x504945;
-    COLORREF focusTextColor = RGB(204, 36, 29);
-
-    TextStyle *normalTextStyle = calloc(1, sizeof(TextStyle));
-    normalTextStyle->font = textFont;
-    normalTextStyle->iconFont = iconFont;
-    normalTextStyle->textColor = normalTextColor;
-    normalTextStyle->backgroundColor = backgroundColor;
-    normalTextStyle->disabledColor = disabledColor;
-    normalTextStyle->focusBackgroundColor = focusBackgroundColor;
-    normalTextStyle->extraFocusBackgroundColor = extraFocusBackgroundColor;
-    normalTextStyle->infoColor = infoColor;
-    normalTextStyle->focusTextColor = focusTextColor;
-
-    configuration->windowsThatShouldNotFloatFunc = is_float_window_from_config;
-    configuration->useOldMoveLogicFunc = should_use_old_move_logic;
-    configuration->windowRoutingMode = FilteredRoutedNonFilteredCurrentWorkspace;
-    configuration->clientShouldUseMinimizeToHide = should_client_use_hide;
-    configuration->alwaysRedraw = TRUE;
-    configuration->floatUwpWindows = FALSE;
-    configuration->easyResizeModifiers = modifiers;
-    configuration->borderWindowBackgroundTransparency = 0;
-    configuration->textStyle = normalTextStyle;
-
+    configuration_register_default_text_style(configuration, TEXT("JetBrains Mono Regular Nerd Font Complete Mono Windows Compatible"));
     keybinding_create_with_shell_arg("NewTerminalWindow", LWin, VK_T, start_app, L"C:\\Users\\eric\\Utilites\\WezTerm\\wezterm.exe -e");
 
     WCHAR chromeTag = { 0xfa9e };
