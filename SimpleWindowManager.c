@@ -4071,16 +4071,16 @@ void bar_render_selected_window_description(Bar *bar, HDC hdc)
     switch(currentWindowRoutingMode)
     {
         case FilteredAndRoutedToWorkspace:
-            windowRoutingMode = L"Normal";
+            windowRoutingMode = L"1";
             break;
         case FilteredCurrentWorkspace:
-            windowRoutingMode = L"CurrentWorkspace";
+            windowRoutingMode = L"2";
             break;
         case NotFilteredCurrentWorkspace:
-            windowRoutingMode = L"CurrentWorkspace*";
+            windowRoutingMode = L"3";
             break;
         case FilteredRoutedNonFilteredCurrentWorkspace:
-            windowRoutingMode = L"NotMappedCurrentWorkspace";
+            windowRoutingMode = L"4";
             break;
     }
 
@@ -4119,14 +4119,14 @@ void bar_render_selected_window_description(Bar *bar, HDC hdc)
         int numberOfWorkspaceClients = workspace_get_number_of_clients(bar->monitor->workspace);
         LPCWSTR processShortFileName = PathFindFileName(clientToRender->data->processImageName);
 
-    displayStrLen = swprintf(displayStr, MAX_PATH, L"[%ls:%d] : %ls (%ls) (%lu) (IsAdmin: %d) (Mode: %ls)",
+    displayStrLen = swprintf(displayStr, MAX_PATH, L"[%ls:%d][Mode:%ls] : %ls (%ls) (%lu) (IsAdmin: %d)",
         bar->monitor->workspace->layout->tag,
         numberOfWorkspaceClients,
+        windowRoutingMode,
         processShortFileName,
         isManagedIndicator,
         clientToRender->data->processId,
-        clientToRender->data->isElevated,
-        windowRoutingMode);
+        clientToRender->data->isElevated);
 
     if(!focusedClient)
     {
