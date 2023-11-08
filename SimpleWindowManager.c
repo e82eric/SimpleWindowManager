@@ -4120,15 +4120,19 @@ void bar_render_selected_window_description(Bar *bar, HDC hdc)
         _tcscpy_s(isAdminBuf, 5, L" (A)");
     }
 
-    TCHAR displayStr[MAX_PATH];
-    int displayStrLen;
-        int numberOfWorkspaceClients = workspace_get_number_of_clients(bar->monitor->workspace);
-        LPCWSTR processShortFileName = PathFindFileName(clientToRender->data->processImageName);
+    TCHAR workspaceInfoBuf[MAX_PATH];
+    TCHAR focusedWindowBuf[MAX_PATH];
+    int focusedWindowBufLen;
+    int workspaceInfoBufLen;
+    int numberOfWorkspaceClients = workspace_get_number_of_clients(bar->monitor->workspace);
+    LPCWSTR processShortFileName = PathFindFileName(clientToRender->data->processImageName);
 
-    displayStrLen = swprintf(displayStr, MAX_PATH, L"[%ls:%d][Mode:%ls] : %ls (%lu)%ls%ls",
+    workspaceInfoBufLen = swprintf(workspaceInfoBuf, MAX_PATH, L"[%ls:%d][Mode:%ls]",
         bar->monitor->workspace->layout->tag,
         numberOfWorkspaceClients,
-        windowRoutingMode,
+        windowRoutingMode);
+
+    focusedWindowBufLen = swprintf(focusedWindowBuf, MAX_PATH, L"%ls (%lu)%ls%ls",
         processShortFileName,
         clientToRender->data->processId,
         isManagedIndicator,
@@ -4139,14 +4143,22 @@ void bar_render_selected_window_description(Bar *bar, HDC hdc)
         free_client(clientToRender);
     }
 
+    RECT clientRect = {0};
+    GetClientRect(bar->hwnd, &clientRect);
     COLORREF oldTextColor = SetTextColor(hdc, bar->textStyle->textColor);
     HFONT oldFont = (HFONT)SelectObject(hdc, bar->textStyle->font);
     DrawText(
             hdc,
-            displayStr,
-            displayStrLen,
+            workspaceInfoBuf,
+            focusedWindowBufLen,
             bar->selectedWindowDescRect,
             DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+    DrawText(
+            hdc,
+            focusedWindowBuf,
+            focusedWindowBufLen,
+            &clientRect,
+            DT_CENTER | DT_VCENTER | DT_SINGLELINE);
     SelectObject(hdc, oldFont);
     SetTextColor(hdc, oldTextColor);
 }
@@ -4359,8 +4371,6 @@ LRESULT CALLBACK bar_message_loop(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPa
                 assert(hBufferedPaint);
                 HBRUSH brush = bar_get_background_brush(msgBar);
 
-                /* SelectObject(hNewDC, font); */
-                /* SetTextColor(hNewDC, barTextColor); */
                 SetBkMode(hNewDC, TRANSPARENT);
 
                 FillRect(hNewDC, msgBar->selectedWindowDescRect, brush);
