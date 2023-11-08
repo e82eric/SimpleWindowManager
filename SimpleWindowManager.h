@@ -116,8 +116,6 @@ struct Configuration
     long barHeight;
     long gapWidth;
     int scratchWindowsScreenPadding;
-    COLORREF buttonWithWindowsTextColor;
-    COLORREF buttonWithoutWindowsTextColor;
     COLORREF barTextColor;
     HPEN borderForegroundPen;
     HPEN borderNotForegroundPen;
@@ -436,6 +434,4 @@ extern long barHeight;
 extern long gapWidth;
 
 extern COLORREF buttonSelectedTextColor;
-extern COLORREF buttonWithWindowsTextColor;
-extern COLORREF buttonWithoutWindowsTextColor;
 extern COLORREF barTextColor;
