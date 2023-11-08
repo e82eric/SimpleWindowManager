@@ -432,6 +432,3 @@ HFONT initalize_font();
 
 extern long barHeight;
 extern long gapWidth;
-
-extern COLORREF buttonSelectedTextColor;
-extern COLORREF barTextColor;

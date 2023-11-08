@@ -190,7 +190,6 @@ HWND dropTargetHwnd;
 long barHeight = 29;
 long gapWidth = 13;
 int scratchWindowsScreenPadding = 250;
-COLORREF barTextColor = RGB(235, 219, 178);
 COLORREF dropTargetColor = RGB(0, 90, 90);
 
 Layout deckLayout = {
@@ -6216,10 +6215,6 @@ int run (void)
     if(configuration->gapWidth)
     {
         gapWidth = configuration->gapWidth;
-    }
-    if(configuration->barTextColor)
-    {
-        barTextColor = configuration->barTextColor;
     }
     if(configuration->borderColor)
     {
