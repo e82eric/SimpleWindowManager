@@ -84,7 +84,6 @@ void configure(Configuration *configuration)
     HFONT textFont = initalize_font(fontName, 12);
 
     COLORREF backgroundColor = 0x282828;
-    HBRUSH backgroundBrush = CreateSolidBrush(backgroundColor);
     COLORREF infoColor = RGB(131, 165, 152);
     HBRUSH infoBrush = CreateSolidBrush(infoColor);
     COLORREF extraFocusBackgroundColor = RGB(254, 128, 25);
@@ -99,7 +98,6 @@ void configure(Configuration *configuration)
     normalTextStyle->iconFont = iconFont;
     normalTextStyle->textColor = normalTextColor;
     normalTextStyle->backgroundColor = backgroundColor;
-    normalTextStyle->backgroundBrush = backgroundBrush;
     normalTextStyle->disabledColor = disabledColor;
     normalTextStyle->focusBackgroundColor = focusBackgroundColor;
     normalTextStyle->focusBackgroundBrush = focusBackgroundBrush;

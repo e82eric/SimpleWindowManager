@@ -4164,7 +4164,7 @@ HBRUSH bar_get_background_brush(Bar *self)
     }
     else
     {
-        brush = self->textStyle->backgroundBrush;
+        brush = self->textStyle->_backgroundBrush;
     }
 
     return brush;
@@ -4179,7 +4179,7 @@ void text_style_render_text(TextStyle *self, HDC hdc, RECT *rect, TCHAR *text, s
         hFont = self->iconFont;
     }
     HFONT oldFont = (HFONT)SelectObject(hdc, hFont);
-    FillRect(hdc, rect, self->backgroundBrush);
+    FillRect(hdc, rect, self->_backgroundBrush);
     DrawText(hdc, text, (int)textLength, rect, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
     SetTextColor(hdc, oldTextColor);
     SelectObject(hdc, oldFont);
@@ -4736,7 +4736,7 @@ LRESULT CALLBACK button_message_loop(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM
             TextStyle *textStyle = button->bar->textStyle;
             COLORREF textColor = textStyle->textColor;
             COLORREF backgroundColor = textStyle->backgroundColor;
-            HBRUSH buttonBackgroundBrush = textStyle->backgroundBrush;
+            HBRUSH buttonBackgroundBrush = textStyle->_backgroundBrush;
             if (button->isSelected)
             {
                 textColor = textStyle->focusTextColor;
@@ -6226,6 +6226,8 @@ int run (void)
     {
         scratchWindowsScreenPadding = configuration->scratchWindowsScreenPadding;
     }
+
+    configuration->textStyle->_backgroundBrush = CreateSolidBrush(configuration->textStyle->backgroundColor);
 
     floatWindowMovement = configuration->floatWindowMovement;
     borderForegroundPen = CreatePen(PS_SOLID, borderWidth, borderColor);
