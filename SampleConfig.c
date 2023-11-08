@@ -188,8 +188,8 @@ void configure(Configuration *configuration)
     configuration_add_bar_segment(configuration, L" | ", false, 10, false, fill_local_date);
     configuration_add_bar_segment_with_header(configuration, L" | ", false, L"CPU:", false, 3, false, fill_cpu);
     configuration_add_bar_segment_with_header(configuration, L" | ", false, L"RAM:", false, 3, false, fill_memory_percent);
-    configuration_add_bar_segment_with_header(configuration, L" | ", true, volumeIcon, false, 3, false, fill_volume_percent);
-    configuration_add_bar_segment(configuration,L" | ", false, 1, true, fill_is_connected_to_internet);
+    configuration_add_bar_segment_with_header(configuration, L" | ", false, volumeIcon, true, 3, false, fill_volume_percent);
+    configuration_add_bar_segment(configuration, L" | ", false, 1, true, fill_is_connected_to_internet);
 
     register_secondary_monitor_default_bindings_with_modifiers(modifiers, configuration->monitors[0], configuration->monitors[1], configuration->workspaces);
     keybindings_register_float_window_movements(LWin);

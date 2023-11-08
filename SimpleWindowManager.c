@@ -4251,8 +4251,15 @@ void bar_segment_initalize_rectangles(BarSegment *self, HDC hdc, int right, Bar 
     int headerLeft = variableLeft;
     if(self->header)
     {
+        HFONT headerFont = bar->textStyle->font;
+        if(self->header->isIcon)
+        {
+            headerFont = bar->textStyle->iconFont;
+        }
         RECT headerTextRect = { 0, 0, 0, 0 };
+        HFONT headerOldFont = (HFONT)SelectObject(hdc, headerFont);
         DrawText(hdc, self->header->text, (int)self->header->textLength, &headerTextRect, DT_CALCRECT);
+        SelectObject(hdc, headerOldFont);
         headerWidth = headerTextRect.right - headerTextRect.left;
         headerLeft = variableLeft - headerWidth ;
 
