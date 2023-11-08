@@ -113,7 +113,6 @@ struct Configuration
     BOOL (*shouldAlwaysExcludeFunc) (Client* client);
     BOOL (*useOldMoveLogicFunc) (Client *client);
     BOOL (*clientShouldUseMinimizeToHide) (Client *client);
-    HFONT font;
     long barHeight;
     long gapWidth;
     int scratchWindowsScreenPadding;

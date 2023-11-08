@@ -6222,15 +6222,6 @@ int run (void)
     HINSTANCE moduleHandle = GetModuleHandle(NULL);
     dropTargetBrush = CreateSolidBrush(dropTargetColor);
 
-    if(configuration->font)
-    {
-        font = configuration->font;
-    }
-    else
-    {
-        font = initalize_font(TEXT("Hack Regular Nerd Font Complete"), 14);
-    }
-
     hiddenWindowMonitor = calloc(1, sizeof(Monitor));
     monitor_calulate_coordinates(hiddenWindowMonitor, numberOfMonitors);
 
