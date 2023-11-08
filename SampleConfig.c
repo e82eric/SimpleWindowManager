@@ -85,25 +85,21 @@ void configure(Configuration *configuration)
 
     COLORREF backgroundColor = 0x282828;
     COLORREF infoColor = RGB(131, 165, 152);
-    HBRUSH infoBrush = CreateSolidBrush(infoColor);
     COLORREF extraFocusBackgroundColor = RGB(254, 128, 25);
     COLORREF focusBackgroundColor = 0x504945;
-    HBRUSH focusBackgroundBrush = CreateSolidBrush(focusBackgroundColor);
-    HBRUSH extraFocusBackgroundBrush = CreateSolidBrush(extraFocusBackgroundColor);
-    TextStyle *normalTextStyle = calloc(1, sizeof(TextStyle));
     COLORREF normalTextColor = RGB(235, 219, 178);
     COLORREF disabledColor = 0x504945;
     COLORREF focusTextColor = RGB(204, 36, 29);
+
+    TextStyle *normalTextStyle = calloc(1, sizeof(TextStyle));
     normalTextStyle->font = textFont;
     normalTextStyle->iconFont = iconFont;
     normalTextStyle->textColor = normalTextColor;
     normalTextStyle->backgroundColor = backgroundColor;
     normalTextStyle->disabledColor = disabledColor;
     normalTextStyle->focusBackgroundColor = focusBackgroundColor;
-    normalTextStyle->focusBackgroundBrush = focusBackgroundBrush;
-    normalTextStyle->extraFocusBackgroundBrush = extraFocusBackgroundBrush;
+    normalTextStyle->extraFocusBackgroundColor = extraFocusBackgroundColor;
     normalTextStyle->infoColor = infoColor;
-    normalTextStyle->infoBrush = infoBrush;
     normalTextStyle->focusTextColor = focusTextColor;
 
     configuration->windowsThatShouldNotFloatFunc = is_float_window_from_config;

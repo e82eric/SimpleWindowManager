@@ -4160,7 +4160,7 @@ HBRUSH bar_get_background_brush(Bar *self)
     HBRUSH brush;
     if(self->monitor->selected)
     {
-        brush = self->textStyle->focusBackgroundBrush;
+        brush = self->textStyle->_focusBackgroundBrush;
     }
     else
     {
@@ -4741,7 +4741,7 @@ LRESULT CALLBACK button_message_loop(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM
             {
                 textColor = textStyle->focusTextColor;
                 backgroundColor = textStyle->focusBackgroundColor;
-                buttonBackgroundBrush = textStyle->focusBackgroundBrush;
+                buttonBackgroundBrush = textStyle->_focusBackgroundBrush;
             }
             else
             {
@@ -4773,7 +4773,7 @@ LRESULT CALLBACK button_message_loop(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM
                 focusIndicatorRect.bottom = rc.bottom;
                 focusIndicatorRect.left = rc.left;
                 focusIndicatorRect.right = rc.right;
-                FillRect(hdc, &focusIndicatorRect, textStyle->extraFocusBackgroundBrush);
+                FillRect(hdc, &focusIndicatorRect, textStyle->_extraFocusBackgroundBrush);
             }
             SetTextColor(hdc, oldTextColor);
             SelectObject(hdc, oldFont);
@@ -6228,6 +6228,8 @@ int run (void)
     }
 
     configuration->textStyle->_backgroundBrush = CreateSolidBrush(configuration->textStyle->backgroundColor);
+    configuration->textStyle->_extraFocusBackgroundBrush = CreateSolidBrush(configuration->textStyle->extraFocusBackgroundColor);
+    configuration->textStyle->_focusBackgroundBrush = CreateSolidBrush(configuration->textStyle->focusBackgroundColor);
 
     floatWindowMovement = configuration->floatWindowMovement;
     borderForegroundPen = CreatePen(PS_SOLID, borderWidth, borderColor);
