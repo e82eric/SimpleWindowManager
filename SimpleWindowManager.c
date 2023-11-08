@@ -4150,7 +4150,7 @@ void bar_render_selected_window_description(Bar *bar, HDC hdc)
     DrawText(
             hdc,
             workspaceInfoBuf,
-            focusedWindowBufLen,
+            workspaceInfoBufLen,
             bar->selectedWindowDescRect,
             DT_LEFT | DT_VCENTER | DT_SINGLELINE);
     DrawText(
