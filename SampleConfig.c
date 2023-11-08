@@ -16,7 +16,7 @@ void search_drive(char* stdOut)
     sprintf_s(
             cmdBuf,
             MAX_PATH,
-            "ld:cmd /c dir /s /b %s\\",
+            "ld:cmd /c dir /s /b %s",
             stdOut);
 
     MenuDefinition_AddNamedCommand(searchDriveMenuDefinition, cmdBuf, FALSE, FALSE);
@@ -57,6 +57,10 @@ BOOL should_client_use_hide(Client *client)
     {
         return TRUE;
     }
+    if(wcsstr(client->data->processImageName, L"devenv.exe"))
+    {
+        return TRUE;
+    }
     return FALSE;
 }
 
@@ -75,7 +79,34 @@ void configure(Configuration *configuration)
     int modifiers = LAlt;
     keybindings_register_defaults_with_modifiers(modifiers);
 
-    /* configuration->font = initalize_font(TEXT("Mononoki Nerd Font Complete Windows Compatible Bold")); */
+    TCHAR *fontName = TEXT("JetBrains Mono Regular Nerd Font Complete Mono Windows Compatible");
+    HFONT iconFont = initalize_font(fontName, 17);
+    HFONT textFont = initalize_font(fontName, 12);
+
+    COLORREF backgroundColor = 0x282828;
+    HBRUSH backgroundBrush = CreateSolidBrush(backgroundColor);
+    COLORREF infoColor = RGB(131, 165, 152);
+    HBRUSH infoBrush = CreateSolidBrush(infoColor);
+    COLORREF extraFocusBackgroundColor = RGB(254, 128, 25);
+    COLORREF focusBackgroundColor = 0x504945;
+    HBRUSH focusBackgroundBrush = CreateSolidBrush(focusBackgroundColor);
+    HBRUSH extraFocusBackgroundBrush = CreateSolidBrush(extraFocusBackgroundColor);
+    TextStyle *normalTextStyle = calloc(1, sizeof(TextStyle));
+    COLORREF normalTextColor = RGB(235, 219, 178);
+    COLORREF disabledColor = 0x504945;
+    COLORREF focusTextColor = RGB(204, 36, 29);
+    normalTextStyle->font = textFont;
+    normalTextStyle->iconFont = iconFont;
+    normalTextStyle->textColor = normalTextColor;
+    normalTextStyle->backgroundColor = backgroundColor;
+    normalTextStyle->backgroundBrush = backgroundBrush;
+    normalTextStyle->disabledColor = disabledColor;
+    normalTextStyle->focusBackgroundColor = focusBackgroundColor;
+    normalTextStyle->focusBackgroundBrush = focusBackgroundBrush;
+    normalTextStyle->extraFocusBackgroundBrush = extraFocusBackgroundBrush;
+    normalTextStyle->infoColor = infoColor;
+    normalTextStyle->infoBrush = infoBrush;
+    normalTextStyle->focusTextColor = focusTextColor;
 
     configuration->windowsThatShouldNotFloatFunc = is_float_window_from_config;
     configuration->useOldMoveLogicFunc = should_use_old_move_logic;
@@ -83,34 +114,40 @@ void configure(Configuration *configuration)
     configuration->clientShouldUseMinimizeToHide = should_client_use_hide;
     configuration->alwaysRedraw = TRUE;
     configuration->floatUwpWindows = FALSE;
+    configuration->easyResizeModifiers = modifiers;
+    configuration->borderWindowBackgroundTransparency = 0;
+    configuration->textStyle = normalTextStyle;
+
+    keybinding_create_with_shell_arg("NewTerminalWindow", LWin, VK_T, start_app, L"C:\\Users\\eric\\Utilites\\WezTerm\\wezterm.exe -e");
 
     WCHAR chromeTag = { 0xfa9e };
     WCHAR terminalTag = { 0xf120 };
     WCHAR riderTag = { 0xf668 };
     WCHAR teamsTag = { 0xf865 };
 
-    Workspace *browserWorkspace = workspace_register(L"Chrome", &chromeTag, &deckLayout);
+    Workspace *browserWorkspace = workspace_register(L"Chrome", &chromeTag, true, &deckLayout);
     workspace_register_processimagename_contains_filter(browserWorkspace, L"chrome.exe");
     workspace_register_processimagename_contains_filter(browserWorkspace, L"brave.exe");
     workspace_register_processimagename_contains_filter(browserWorkspace, L"firefox.exe");
     workspace_register_processimagename_contains_filter(browserWorkspace, L"msedge.exe");
 
-    Workspace *terminalWorkspace = workspace_register(L"Terminal", &terminalTag, &deckLayout);
+    Workspace *terminalWorkspace = workspace_register(L"Terminal", &terminalTag, true, &deckLayout);
     workspace_register_processimagename_contains_filter(terminalWorkspace, L"WindowsTerminal.exe");
 
-    Workspace *ideWorkspace = workspace_register(L"Rider", &riderTag, &monacleLayout);
+    Workspace *ideWorkspace = workspace_register(L"Rider", &riderTag, true, &monacleLayout);
     workspace_register_processimagename_contains_filter(ideWorkspace, L"rider64.exe");
     workspace_register_processimagename_contains_filter(ideWorkspace, L"Code.exe");
+    workspace_register_processimagename_contains_filter(ideWorkspace, L"devenv.exe");
 
-    Workspace *teamsWorkspace = workspace_register(L"Teams", &teamsTag, &deckLayout);
+    Workspace *teamsWorkspace = workspace_register(L"Teams", &teamsTag, true, &deckLayout);
     workspace_register_processimagename_contains_filter(teamsWorkspace, L"Teams.exe");
 
-    workspace_register(L"5", L"5", &tileLayout);
-    workspace_register(L"6", L"6", &tileLayout);
-    workspace_register(L"7", L"7", &tileLayout);
-    workspace_register(L"8", L"8", &tileLayout);
-    workspace_register(L"9", L"9", &tileLayout);
-    workspace_register(L"Desktop", L"0", &deckLayout);
+    workspace_register(L"5", L"5", false, &tileLayout);
+    workspace_register(L"6", L"6", false, &tileLayout);
+    workspace_register(L"7", L"7", false, &tileLayout);
+    workspace_register(L"8", L"8", false, &tileLayout);
+    workspace_register(L"9", L"9", false, &tileLayout);
+    workspace_register(L"Desktop", L"0", false, &deckLayout);
 
     ScratchWindow *powershellScratch = register_windows_terminal_scratch_with_unique_string(
             "Powershell",
@@ -128,7 +165,7 @@ void configure(Configuration *configuration)
         "C:\\ProgramData\\Microsoft\\Windows\\Start Menu\\",
         "%USERPROFILE%\\AppData\\Local\\Microsoft\\WindowsApps\\"
     };
-    register_program_launcher_menu(modifiers, VK_P, notElevatedDirectories, 3, FALSE);
+    register_program_launcher_menu(modifiers, VK_P, notElevatedDirectories, 4, FALSE);
 
     char* elevatedDirectories[] = {
         "%USERPROFILE%\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\",
@@ -136,7 +173,7 @@ void configure(Configuration *configuration)
         "%USERPROFILE%\\AppData\\Local\\Microsoft\\WindowsApps\\",
         "C:\\Program Files\\sysinternals\\"
     };
-    register_program_launcher_menu(modifiers | LShift, VK_P, elevatedDirectories, 4, TRUE);
+    register_program_launcher_menu(modifiers | LShift, VK_P, elevatedDirectories, 5, TRUE);
 
     searchDriveMenuDefinition = menu_create_and_register();
     MenuDefinition *searchAllDrivesMenu = menu_create_and_register();
@@ -145,12 +182,14 @@ void configure(Configuration *configuration)
     searchAllDrivesMenu->onSelection = search_drive;
     keybinding_create_with_menu_arg("SearchAllDrivesMenu", modifiers, VK_F16, menu_run, searchAllDrivesMenu);
 
-    configuration_add_bar_segment(configuration, L"UTC", 5, fill_system_time);
-    configuration_add_bar_segment(configuration, L"Time", 16, fill_local_time);
-    configuration_add_bar_segment(configuration, L"CPU", 6, fill_cpu);
-    configuration_add_bar_segment(configuration, L"Memory", 6, fill_memory_percent);
-    configuration_add_bar_segment(configuration, L"Volume", 7, fill_volume_percent);
-    configuration_add_bar_segment(configuration, L"Internet", 3, fill_is_connected_to_internet);
+    TCHAR volumeIcon[2] = { 0xf028, '\0' };
+    configuration_add_bar_segment(configuration, L" | ", false, 5, false, fill_system_time);
+    configuration_add_bar_segment(configuration, L" | ", false, 5, false, fill_local_time);
+    configuration_add_bar_segment(configuration, L" | ", false, 10, false, fill_local_date);
+    configuration_add_bar_segment_with_header(configuration, L" | ", false, L"CPU:", false, 3, false, fill_cpu);
+    configuration_add_bar_segment_with_header(configuration, L" | ", false, L"RAM:", false, 3, false, fill_memory_percent);
+    configuration_add_bar_segment_with_header(configuration, L" | ", true, volumeIcon, false, 3, false, fill_volume_percent);
+    configuration_add_bar_segment(configuration,L" | ", false, 1, true, fill_is_connected_to_internet);
 
     register_secondary_monitor_default_bindings_with_modifiers(modifiers, configuration->monitors[0], configuration->monitors[1], configuration->workspaces);
     keybindings_register_float_window_movements(LWin);
