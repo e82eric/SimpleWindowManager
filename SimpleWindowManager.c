@@ -6044,11 +6044,27 @@ void open_windows_scratch_exit_callback(char *stdOut)
 
 HFONT initalize_font(LPCWSTR fontName, int size)
 {
-    HDC hdc = GetDC(NULL);
-    long lfHeight;
-    lfHeight = -MulDiv(size, GetDeviceCaps(hdc, LOGPIXELSY), 72);
-    HFONT result = CreateFontW(lfHeight, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, fontName);
-    DeleteDC(hdc);
+    HDC screen = GetDC(NULL);
+    int dpi = GetDeviceCaps(screen, LOGPIXELSX);
+    ReleaseDC(NULL, screen);
+
+    int scaledFontSize = MulDiv(size, dpi, 96);
+
+    HFONT result = CreateFontW(
+        -scaledFontSize,
+        0,
+        0,
+        0,
+        FW_NORMAL,
+        FALSE,
+        FALSE,
+        FALSE,
+        DEFAULT_CHARSET,
+        OUT_DEFAULT_PRECIS,
+        CLIP_DEFAULT_PRECIS,
+        DEFAULT_QUALITY,
+        DEFAULT_PITCH | FF_DONTCARE,
+        fontName);
     return result;
 }
 
