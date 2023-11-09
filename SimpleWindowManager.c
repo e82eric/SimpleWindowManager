@@ -6052,10 +6052,10 @@ HFONT initalize_font(LPCWSTR fontName, int size)
     return result;
 }
 
-void configuration_register_default_text_style(Configuration *self, TCHAR *fontName)
+void configuration_register_default_text_style(Configuration *self, TCHAR *fontName, int normalFontSize, int iconFontSize)
 {
-    HFONT iconFont = initalize_font(fontName, 17);
-    HFONT textFont = initalize_font(fontName, 12);
+    HFONT iconFont = initalize_font(fontName, iconFontSize);
+    HFONT textFont = initalize_font(fontName, normalFontSize);
 
     COLORREF backgroundColor = 0x282828;
     COLORREF infoColor = RGB(131, 165, 152);

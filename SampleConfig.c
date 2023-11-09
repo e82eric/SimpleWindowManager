@@ -79,7 +79,7 @@ void configure(Configuration *configuration)
     int modifiers = LAlt;
     keybindings_register_defaults_with_modifiers(modifiers);
 
-    configuration_register_default_text_style(configuration, TEXT("JetBrains Mono Regular Nerd Font Complete Mono Windows Compatible"));
+    configuration_register_default_text_style(configuration, TEXT("JetBrains Mono Regular Nerd Font Complete Mono Windows Compatible"), 12, 17);
     keybinding_create_with_shell_arg("NewTerminalWindow", LWin, VK_T, start_app, L"C:\\Users\\eric\\Utilites\\WezTerm\\wezterm.exe -e");
 
     WCHAR chromeTag = { 0xfa9e };
