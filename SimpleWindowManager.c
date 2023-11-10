@@ -4582,7 +4582,7 @@ int get_memory_percent(void)
 void fill_is_connected_to_internet(TCHAR *toFill, int maxLen)
 {
     WCHAR internetUnknown = { 0xf128 };
-    WCHAR internetUp = { 0xf817 };
+    WCHAR internetUp = { 0xeb79 };
     WCHAR internetDown = { 0xf127 };
     WCHAR internetStatusChar = internetUnknown;
 

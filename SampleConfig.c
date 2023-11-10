@@ -79,13 +79,13 @@ void configure(Configuration *configuration)
     int modifiers = LAlt;
     keybindings_register_defaults_with_modifiers(modifiers);
 
-    configuration_register_default_text_style(configuration, TEXT("JetBrains Mono Regular Nerd Font Complete Mono Windows Compatible"), 12, 17);
+    configuration_register_default_text_style(configuration, TEXT("JetBrainsMonoNL NFP Regular"), 12, 13);
     keybinding_create_with_shell_arg("NewTerminalWindow", LWin, VK_T, start_app, L"C:\\Users\\eric\\Utilites\\WezTerm\\wezterm.exe -e");
 
-    WCHAR chromeTag = { 0xfa9e };
+    WCHAR chromeTag = { 0xeb01 };
     WCHAR terminalTag = { 0xf120 };
-    WCHAR riderTag = { 0xf668 };
-    WCHAR teamsTag = { 0xf865 };
+    WCHAR riderTag = { 0xeb0f };
+    WCHAR teamsTag = { 0xf075 };
 
     Workspace *browserWorkspace = workspace_register(L"Chrome", &chromeTag, true, &deckLayout);
     workspace_register_processimagename_contains_filter(browserWorkspace, L"chrome.exe");
