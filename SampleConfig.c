@@ -82,6 +82,9 @@ void configure(Configuration *configuration)
     configuration_register_default_text_style(configuration, TEXT("JetBrainsMonoNL NFP Regular"), 12, 13);
     keybinding_create_with_shell_arg("NewTerminalWindow", LWin, VK_T, start_app, L"C:\\Users\\eric\\Utilites\\WezTerm\\wezterm.exe -e");
 
+    configuration->windowRoutingMode = FilteredRoutedNonFilteredCurrentWorkspace;
+    configuration->alwaysRedraw = TRUE;
+
     WCHAR chromeTag = { 0xeb01 };
     WCHAR terminalTag = { 0xf120 };
     WCHAR riderTag = { 0xeb0f };
