@@ -41,7 +41,6 @@
 
 COLORREF selectionBackgroundTextColor = RGB(168, 153, 132);
 COLORREF highlightBackgroundColor = RGB(60,56,54);
-COLORREF fuzzmatchCharTextColor = RGB(69, 133, 136);
 COLORREF headerTextColor = RGB(250, 189, 47);
 COLORREF searchTextColor = RGB(168, 153, 132);
 
@@ -280,7 +279,7 @@ LRESULT CALLBACK Summary_MessageProcessor(HWND hWnd, UINT uMsg, WPARAM wParam, L
              if(self->isReading || self->isSearching)
              {
                  GetTextExtentPoint32(hdc, spinnerBuffer, 2, &sz); 
-                 SetTextColor(hdc, fuzzmatchCharTextColor);
+                 SetTextColor(hdc, g_textStyle->infoColor);
                  TextOut(hdc, offset - sz.cx, 2, spinnerBuffer, 1);
              }
              EndPaint(hWnd, &ps); 
@@ -356,7 +355,7 @@ void ItemsView_DrawItem(ItemsView *self, HDC hdc, BOOL isSelected, RECT *rc, CHA
 
         if(pos && pos->size > 0)
         {
-            SetTextColor(hdc, fuzzmatchCharTextColor);
+            SetTextColor(hdc, g_textStyle->infoColor);
             for(int i = 0; i < pos->size; i++)
             {
                 GetTextExtentPoint32A(hdc, achBuffer, pos->data[i], &sz); 
