@@ -39,7 +39,6 @@
 
 #define WM_REDRAW_DISPLAY_LIST    (WM_USER + 1)
 
-COLORREF selectionBackgroundTextColor = RGB(168, 153, 132);
 COLORREF highlightBackgroundColor = RGB(60,56,54);
 COLORREF headerTextColor = RGB(250, 189, 47);
 
@@ -321,7 +320,7 @@ void ItemsView_DrawItem(ItemsView *self, HDC hdc, BOOL isSelected, RECT *rc, CHA
     if(isSelected) 
     {
         FillRect(hdc, rc, highlightedBackgroundBrush);
-        colorText = selectionBackgroundTextColor;
+        colorText = g_textStyle->textColor;
         colorBack = SetBkColor(hdc, highlightBackgroundColor);
     }
     else
