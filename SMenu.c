@@ -39,10 +39,8 @@
 
 #define WM_REDRAW_DISPLAY_LIST    (WM_USER + 1)
 
-/* COLORREF backgroundColor = 0x282828; */
 COLORREF selectionBackgroundTextColor = RGB(168, 153, 132);
 COLORREF highlightBackgroundColor = RGB(60,56,54);
-COLORREF textColor = RGB(168, 153, 132);
 COLORREF fuzzmatchCharTextColor = RGB(69, 133, 136);
 COLORREF headerTextColor = RGB(250, 189, 47);
 COLORREF searchTextColor = RGB(168, 153, 132);
@@ -270,7 +268,7 @@ LRESULT CALLBACK Summary_MessageProcessor(HWND hWnd, UINT uMsg, WPARAM wParam, L
 
              SIZE sz;
              int width = ps.rcPaint.right - ps.rcPaint.left;
-             SetTextColor(hdc, textColor);
+             SetTextColor(hdc, g_textStyle->textColor);
 
              size_t cch;
              HRESULT strResult = StringCchLength(countBuffer, BUF_LEN, &cch);
@@ -331,7 +329,7 @@ void ItemsView_DrawItem(ItemsView *self, HDC hdc, BOOL isSelected, RECT *rc, CHA
     else
     {
         FillRect(hdc, rc, backgrounBrush);
-        colorText = textColor;
+        colorText = g_textStyle->textColor;
         colorBack = SetBkColor(hdc, g_textStyle->backgroundColor);
     }
 
@@ -343,7 +341,7 @@ void ItemsView_DrawItem(ItemsView *self, HDC hdc, BOOL isSelected, RECT *rc, CHA
         // TODO: Handle error.
     }
 
-    SetTextColor(hdc, textColor);
+    SetTextColor(hdc, g_textStyle->textColor);
     TextOutA(hdc, 0, rc->top + 2, achBuffer, (int)cch);
 
     CHAR searchStringBuff[BUF_LEN];
@@ -1809,7 +1807,7 @@ LRESULT CALLBACK Menu_MessageProcessor(
         case WM_CTLCOLORLISTBOX:
             {
                 HDC hdcStatic = (HDC)wParam;
-                SetTextColor(hdcStatic, textColor);
+                SetTextColor(hdcStatic, g_textStyle->textColor);
                 SetBkColor(hdcStatic, g_textStyle->backgroundColor);
                 return (INT_PTR)backgrounBrush;
             }
