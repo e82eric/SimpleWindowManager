@@ -42,7 +42,6 @@
 COLORREF selectionBackgroundTextColor = RGB(168, 153, 132);
 COLORREF highlightBackgroundColor = RGB(60,56,54);
 COLORREF headerTextColor = RGB(250, 189, 47);
-COLORREF searchTextColor = RGB(168, 153, 132);
 
 HBRUSH backgrounBrush;
 HBRUSH highlightedBackgroundBrush;
@@ -1782,7 +1781,7 @@ LRESULT CALLBACK Menu_MessageProcessor(
         case WM_CTLCOLOREDIT:
             {
                 HDC hdcStatic = (HDC)wParam;
-                SetTextColor(hdcStatic, searchTextColor);
+                SetTextColor(hdcStatic, g_textStyle->textColor);
                 SetBkColor(hdcStatic, g_textStyle->backgroundColor);
                 return (INT_PTR)backgrounBrush;
             }
