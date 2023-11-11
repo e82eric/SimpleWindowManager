@@ -39,10 +39,6 @@
 
 #define WM_REDRAW_DISPLAY_LIST    (WM_USER + 1)
 
-COLORREF highlightBackgroundColor = RGB(60,56,54);
-COLORREF headerTextColor = RGB(250, 189, 47);
-
-HBRUSH backgrounBrush;
 HBRUSH highlightedBackgroundBrush;
 SRWLOCK itemsRwLock;
 UINT currentSearchNumber = 0;
@@ -259,7 +255,7 @@ LRESULT CALLBACK Summary_MessageProcessor(HWND hWnd, UINT uMsg, WPARAM wParam, L
              HDC hdc = BeginPaint(hWnd, &ps);
 
              SetTextAlign( hdc, TA_LEFT);
-             FillRect(hdc, &ps.rcPaint, backgrounBrush);
+             FillRect(hdc, &ps.rcPaint, g_textStyle->_backgroundBrush);
              SelectObject(hdc, g_textStyle->font);
              SetBkMode(hdc, TRANSPARENT);
 
@@ -321,11 +317,11 @@ void ItemsView_DrawItem(ItemsView *self, HDC hdc, BOOL isSelected, RECT *rc, CHA
     {
         FillRect(hdc, rc, highlightedBackgroundBrush);
         colorText = g_textStyle->textColor;
-        colorBack = SetBkColor(hdc, highlightBackgroundColor);
+        colorBack = SetBkColor(hdc, g_textStyle->focusBackgroundColor);
     }
     else
     {
-        FillRect(hdc, rc, backgrounBrush);
+        FillRect(hdc, rc, g_textStyle->_backgroundBrush);
         colorText = g_textStyle->textColor;
         colorBack = SetBkColor(hdc, g_textStyle->backgroundColor);
     }
@@ -1769,7 +1765,7 @@ LRESULT CALLBACK Menu_MessageProcessor(
                 RECT rect;
                 GetClientRect(hWnd, &rect);
                 HBRUSH oldBrush = SelectObject(hdc, highlightedBackgroundBrush);
-                HPEN oldPen = SelectObject(hdc, self->borderPen);
+                HPEN oldPen = SelectObject(hdc, g_textStyle->_focusPen2);
                 Rectangle(hdc, rect.left, rect.top, rect.right, rect.bottom);
                 SelectObject(hdc, oldPen);
                 SelectObject(hdc, oldBrush );
@@ -1782,23 +1778,23 @@ LRESULT CALLBACK Menu_MessageProcessor(
                 HDC hdcStatic = (HDC)wParam;
                 SetTextColor(hdcStatic, g_textStyle->textColor);
                 SetBkColor(hdcStatic, g_textStyle->backgroundColor);
-                return (INT_PTR)backgrounBrush;
+                return (INT_PTR)g_textStyle->_backgroundBrush;
             }
         case WM_CTLCOLORSTATIC:
             {
                 if((HWND)lParam == self->itemsView->headerHwnd)
                 {
                     HDC hdcStatic = (HDC)wParam;
-                    SetTextColor(hdcStatic, headerTextColor);
+                    SetTextColor(hdcStatic, g_textStyle->focusColor2);
                     SetBkColor(hdcStatic, g_textStyle->backgroundColor);
-                    return (INT_PTR)backgrounBrush;
+                    return (INT_PTR)g_textStyle->_backgroundBrush;
                 }
                 else if((HWND)lParam == self->searchView->helpHeaderHwnd)
                 {
                     HDC hdcStatic = (HDC)wParam;
-                    SetTextColor(hdcStatic, headerTextColor);
+                    SetTextColor(hdcStatic, g_textStyle->focusColor2);
                     SetBkColor(hdcStatic, g_textStyle->backgroundColor);
-                    return (INT_PTR)backgrounBrush;
+                    return (INT_PTR)g_textStyle->_backgroundBrush;
                 }
             }
         case WM_CTLCOLORLISTBOX:
@@ -1806,7 +1802,7 @@ LRESULT CALLBACK Menu_MessageProcessor(
                 HDC hdcStatic = (HDC)wParam;
                 SetTextColor(hdcStatic, g_textStyle->textColor);
                 SetBkColor(hdcStatic, g_textStyle->backgroundColor);
-                return (INT_PTR)backgrounBrush;
+                return (INT_PTR)g_textStyle->_backgroundBrush;
             }
         case WM_SIZE:
             {
@@ -2170,7 +2166,8 @@ void menu_set_text_style(MenuView *self, TextStyle *textStyle)
     SendMessage(self->searchView->hwnd, WM_SETFONT, (WPARAM)g_textStyle->font, (LPARAM)TRUE);
     SendMessageA(self->itemsView->hwnd, WM_SETFONT, (WPARAM)g_textStyle->font, (LPARAM)TRUE);
 
-    backgrounBrush = CreateSolidBrush(g_textStyle->backgroundColor);
+    highlightedBackgroundBrush = CreateSolidBrush(g_textStyle->focusBackgroundColor);
+
 }
 
 MenuView *menu_create_with_size(int left, int top, int width, int height, TCHAR *title)
@@ -2215,8 +2212,6 @@ MenuView *menu_create_with_size(int left, int top, int width, int height, TCHAR 
     assert(itemsView->loadEvent);
     SetEvent(itemsView->loadEvent);
 
-    highlightedBackgroundBrush = CreateSolidBrush(highlightBackgroundColor);
-
     HDC hdc = GetDC(NULL);
     long lfHeight;
     lfHeight = -MulDiv(14, GetDeviceCaps(hdc, LOGPIXELSY), 72);
@@ -2257,11 +2252,6 @@ MenuView *menu_create_with_size(int left, int top, int width, int height, TCHAR 
             menuView);
 
     return menuView;
-}
-
-void menu_set_border_pen(MenuView *self, HPEN pen)
-{
-    self->borderPen = pen;
 }
 
 MenuDefinition* menu_definition_create(MenuView *menuView)

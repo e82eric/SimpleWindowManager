@@ -103,8 +103,6 @@ struct Configuration
     long gapWidth;
     int scratchWindowsScreenPadding;
     COLORREF barTextColor;
-    HPEN borderForegroundPen;
-    HPEN borderNotForegroundPen;
     BarSegmentConfiguration **barSegments;
     int numberOfBarSegments;
     Monitor **monitors;
@@ -115,9 +113,6 @@ struct Configuration
     BOOL floatUwpWindows;
     int easyResizeModifiers;
     int dragDropFloatModifier;
-    COLORREF borderColor;
-    COLORREF borderColorLostFocus;
-    int borderWidth;
     int floatWindowMovement;
     int borderWindowBackgroundTransparency;
     TextStyle *textStyle;

@@ -12,9 +12,13 @@ typedef struct TextStyle
     COLORREF focusBackgroundColor;
     HBRUSH _focusBackgroundBrush;
     COLORREF focusTextColor;
+    COLORREF focusColor2;
+    COLORREF lostFocusColor;
+    HPEN _focusPen2; 
     COLORREF extraFocusBackgroundColor;
     HBRUSH _extraFocusBackgroundBrush;
     COLORREF infoColor;
+    int borderWidth;
 } TextStyle;
 
 #endif // COMMON_TYPES_H

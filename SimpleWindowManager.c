@@ -3796,7 +3796,7 @@ void menu_run(MenuDefinition *definition)
     }
 
     definition->onEscape = menu_on_escape;
-    menu_run_definition(mView, definition, selectedMonitor->bar->textStyle);
+    menu_run_definition(mView, definition);
     menu_focus(mView);
 }
 
@@ -4989,9 +4989,9 @@ static LRESULT dcomp_border_window_message_loop(HWND window, UINT message, WPARA
     switch (message)
     {
         case WM_CREATE:
-            COLORREF borderColor = RGB(250, 189, 47);
-            COLORREF borderColorLostFocus = RGB(142, 192, 124);
-            dcomp_border_window_init(window, borderColor, borderColorLostFocus);
+            CREATESTRUCT *pCreate = (CREATESTRUCT *)lparam;
+            TextStyle *textStyle = (TextStyle*)pCreate->lpCreateParams;
+            dcomp_border_window_init(window, textStyle->focusColor2, textStyle->lostFocusColor);
             break;
         case WM_WINDOWPOSCHANGING:
             {
@@ -5151,7 +5151,7 @@ WNDCLASSEX* drop_target_window_register_class(void)
     return wc;
 }
 
-void dcomp_border_run(HINSTANCE module)
+void dcomp_border_run(HINSTANCE module, TextStyle *textStyle)
 {
     WNDCLASS wc = {0};
     wc.hCursor = LoadCursor(NULL, IDC_ARROW);
@@ -5173,7 +5173,7 @@ void dcomp_border_run(HINSTANCE module)
             NULL,
             NULL,
             module,
-            NULL);
+            textStyle);
     SetWindowLong(borderWindowHwnd, GWL_STYLE, 0);
 }
 
@@ -6080,6 +6080,8 @@ void configuration_register_default_text_style(Configuration *self, TCHAR *fontN
     COLORREF normalTextColor = RGB(235, 219, 178);
     COLORREF disabledColor = 0x504945;
     COLORREF focusTextColor = RGB(204, 36, 29);
+    COLORREF focusColor2 = RGB(250, 189, 47);
+    COLORREF lostFocusColor = RGB(142, 192, 124);
 
     TextStyle *normalTextStyle = calloc(1, sizeof(TextStyle));
     normalTextStyle->font = textFont;
@@ -6091,6 +6093,9 @@ void configuration_register_default_text_style(Configuration *self, TCHAR *fontN
     normalTextStyle->extraFocusBackgroundColor = extraFocusBackgroundColor;
     normalTextStyle->infoColor = infoColor;
     normalTextStyle->focusTextColor = focusTextColor;
+    normalTextStyle->focusColor2 = focusColor2;
+    normalTextStyle->lostFocusColor = lostFocusColor;
+    normalTextStyle->borderWidth = 10;
     self->textStyle = normalTextStyle;
 }
 
@@ -6240,10 +6245,6 @@ int run (void)
     configure(configuration);
     currentWindowRoutingMode = configuration->windowRoutingMode;
 
-    COLORREF borderColor = RGB(250, 189, 47);
-    COLORREF borderColorLostFocus = RGB(142, 192, 124);
-    int borderWidth = 10;
-
     if(configuration->barHeight)
     {
         barHeight = configuration->barHeight;
@@ -6251,18 +6252,6 @@ int run (void)
     if(configuration->gapWidth)
     {
         gapWidth = configuration->gapWidth;
-    }
-    if(configuration->borderColor)
-    {
-        borderColor = configuration->borderColor;
-    }
-    if(configuration->borderColorLostFocus)
-    {
-        borderColorLostFocus = configuration->borderColorLostFocus;
-    }
-    if(configuration->borderWidth)
-    {
-        borderWidth = configuration->borderWidth;
     }
     if(configuration->scratchWindowsScreenPadding != 0)
     {
@@ -6272,14 +6261,13 @@ int run (void)
     configuration->textStyle->_backgroundBrush = CreateSolidBrush(configuration->textStyle->backgroundColor);
     configuration->textStyle->_extraFocusBackgroundBrush = CreateSolidBrush(configuration->textStyle->extraFocusBackgroundColor);
     configuration->textStyle->_focusBackgroundBrush = CreateSolidBrush(configuration->textStyle->focusBackgroundColor);
+    configuration->textStyle->_focusPen2 = CreatePen(PS_SOLID, configuration->textStyle->borderWidth, configuration->textStyle->focusColor2);
 
     menu_set_text_style(mView, configuration->textStyle);
 
     floatWindowMovement = configuration->floatWindowMovement;
-    borderForegroundPen = CreatePen(PS_SOLID, borderWidth, borderColor);
-    borderNotForegroundPen = CreatePen(PS_SOLID, borderWidth, borderColorLostFocus);
-
-    menu_set_border_pen(mView, borderForegroundPen);
+    borderForegroundPen = CreatePen(PS_SOLID, configuration->textStyle->borderWidth, configuration->textStyle->focusColor2);
+    borderNotForegroundPen = CreatePen(PS_SOLID, configuration->textStyle->borderWidth, configuration->textStyle->lostFocusColor);
 
     HINSTANCE moduleHandle = GetModuleHandle(NULL);
     dropTargetBrush = CreateSolidBrush(dropTargetColor);
@@ -6471,7 +6459,7 @@ int run (void)
         EndDeferWindowPos(hdwp);
     }
 
-    dcomp_border_run(moduleHandle);
+    dcomp_border_run(moduleHandle, configuration->textStyle);
     drop_target_window_run(dropTargetWindowClass);
 
     g_mouse_hook = SetWindowsHookEx(WH_KEYBOARD_LL, &handle_key_press, moduleHandle, 0);
