@@ -54,7 +54,7 @@ UINT currentSearchNumber = 0;
 
 int listBoxItemHeight = 25;
 
-HFONT font;
+TextStyle *g_textStyle;
 
 void ItemsView_SetLoading(ItemsView *self);
 void ItemsView_SetDoneLoading(ItemsView *self);
@@ -265,7 +265,7 @@ LRESULT CALLBACK Summary_MessageProcessor(HWND hWnd, UINT uMsg, WPARAM wParam, L
 
              SetTextAlign( hdc, TA_LEFT);
              FillRect(hdc, &ps.rcPaint, backgrounBrush);
-             SelectObject(hdc, font);
+             SelectObject(hdc, g_textStyle->font);
              SetBkMode(hdc, TRANSPARENT);
 
              SIZE sz;
@@ -320,7 +320,7 @@ void ItemsView_DrawItem(ItemsView *self, HDC hdc, BOOL isSelected, RECT *rc, CHA
     COLORREF colorText;
     COLORREF colorBack;
 
-    SelectObject(hdc, font);
+    SelectObject(hdc, g_textStyle->font);
 
     if(isSelected) 
     {
@@ -963,8 +963,8 @@ void SearchView_ShowHelp(SearchView *self)
     SetWindowPos(self->helpHwnd, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
     SetWindowPos(self->helpHeaderHwnd, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
     SendMessage(self->hwnd, EM_SETREADONLY, (WPARAM)TRUE, (LPARAM)NULL);
-    SendMessage(self->helpHwnd, WM_SETFONT, (WPARAM)font, (LPARAM)TRUE);
-    SendMessage(self->helpHeaderHwnd, WM_SETFONT, (WPARAM)font, (LPARAM)TRUE);
+    SendMessage(self->helpHwnd, WM_SETFONT, (WPARAM)g_textStyle->font, (LPARAM)TRUE);
+    SendMessage(self->helpHeaderHwnd, WM_SETFONT, (WPARAM)g_textStyle->font, (LPARAM)TRUE);
 
     self->mode =  Help;
 }
@@ -1649,7 +1649,6 @@ void MenuView_CreateChildControls(MenuView *self)
     //This only partially works because COM is initialized with a multi threaded apartment.  Ctrl-Backspace doesn't work but Ctrl-arrows does (jumping words).
     SHAutoComplete(self->searchView->hwnd, SHACF_DEFAULT);
     SetWindowSubclass(self->searchView->hwnd, SearchView_MessageProcessor, 0, (DWORD_PTR)self->searchView);
-    SendMessage(self->searchView->hwnd, WM_SETFONT, (WPARAM)font, (LPARAM)TRUE);
 
     self->itemsView->headerHwnd = CreateWindowA(
             "STATIC", 
@@ -1663,7 +1662,6 @@ void MenuView_CreateChildControls(MenuView *self)
             (HMENU)IDC_STATIC_TEXT,
             hinstance,
             NULL);
-    SendMessageA(self->itemsView->headerHwnd, WM_SETFONT, (WPARAM)font, (LPARAM)TRUE);
 
     self->itemsView->summaryHwnd = CreateWindow(
             L"STATIC", 
@@ -1677,7 +1675,6 @@ void MenuView_CreateChildControls(MenuView *self)
             (HMENU)IDC_SUMMARY_TEXT,
             hinstance,
             NULL);
-    SendMessageA(self->itemsView->summaryHwnd, WM_SETFONT, (WPARAM)font, (LPARAM)TRUE);
     SetWindowSubclass(self->itemsView->summaryHwnd, Summary_MessageProcessor, 0, (DWORD_PTR)self->itemsView);
 
     self->itemsView->hwnd = CreateWindowA(
@@ -1692,7 +1689,6 @@ void MenuView_CreateChildControls(MenuView *self)
             (HMENU)IDC_LISTBOX_TEXT, 
             (HINSTANCE)GetWindowLongPtr(self->hwnd, GWLP_HINSTANCE),
             NULL);
-    SendMessageA(self->itemsView->hwnd, WM_SETFONT, (WPARAM)font, (LPARAM)TRUE);
     SetWindowSubclass(self->itemsView->hwnd, ItemsView_MessageProcessor, 0, (DWORD_PTR)self->itemsView);
 
     self->searchView->helpHeaderHwnd = CreateWindow(
@@ -1735,7 +1731,6 @@ void MenuView_CreateChildControls(MenuView *self)
             (HMENU)IDC_CMD_RESULT_TEXT, 
             (HINSTANCE)GetWindowLongPtr(self->hwnd, GWLP_HINSTANCE),
             NULL);
-    SendMessageA(self->itemsView->cmdResultHwnd, WM_SETFONT, (WPARAM)font, (LPARAM)TRUE);
 
     SetTimer(self->hwnd,
             IDT_LOADINGTIMER,
@@ -2170,6 +2165,17 @@ MenuView *menu_create(TCHAR *title)
     return menuView;
 }
 
+void menu_set_text_style(MenuView *self, TextStyle *textStyle)
+{
+    g_textStyle = textStyle;
+    SendMessage(self->searchView->hwnd, WM_SETFONT, (WPARAM)g_textStyle->font, (LPARAM)TRUE);
+    SendMessageA(self->itemsView->headerHwnd, WM_SETFONT, (WPARAM)g_textStyle->font, (LPARAM)TRUE);
+    SendMessageA(self->itemsView->cmdResultHwnd, WM_SETFONT, (WPARAM)g_textStyle->font, (LPARAM)TRUE);
+    SendMessageA(self->itemsView->summaryHwnd, WM_SETFONT, (WPARAM)g_textStyle->font, (LPARAM)TRUE);
+    SendMessage(self->searchView->hwnd, WM_SETFONT, (WPARAM)g_textStyle->font, (LPARAM)TRUE);
+    SendMessageA(self->itemsView->hwnd, WM_SETFONT, (WPARAM)g_textStyle->font, (LPARAM)TRUE);
+}
+
 MenuView *menu_create_with_size(int left, int top, int width, int height, TCHAR *title)
 {
     MenuView *menuView = calloc(1, sizeof(MenuView));
@@ -2218,7 +2224,6 @@ MenuView *menu_create_with_size(int left, int top, int width, int height, TCHAR 
     HDC hdc = GetDC(NULL);
     long lfHeight;
     lfHeight = -MulDiv(14, GetDeviceCaps(hdc, LOGPIXELSY), 72);
-    font = CreateFontW(lfHeight, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, TEXT("Hack Regular Nerd Font Complete"));
     DeleteDC(hdc);
 
     const TCHAR ClassName[] = L"SimpleMenuClass";
@@ -2325,8 +2330,10 @@ void menu_definition_set_load_command(MenuDefinition *self, NamedCommand *loadCo
     MenuDefinition_AddKeyBindingToNamedCommand(self, self->loadCommand, VK_CONTROL, VkKeyScanW('r'), TRUE);
 }
 
-void menu_run_definition(MenuView *self, MenuDefinition *menuDefinition)
+void menu_run_definition(MenuView *self, MenuDefinition *menuDefinition, TextStyle *textStyle)
 {
+    g_textStyle = textStyle;
+
     self->itemsView->hasHeader = menuDefinition->hasHeader;
     self->itemsView->hasLoadCommand = menuDefinition->hasLoadCommand;
     self->itemsView->loadCommand = menuDefinition->loadCommand;

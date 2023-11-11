@@ -1,3 +1,5 @@
+#include "CommonTypes.h"
+
 typedef struct Workspace Workspace;
 typedef struct WorkspaceFilterData WorkspaceFilterData;
 typedef struct Client Client;
@@ -73,22 +75,6 @@ enum WindowRoutingMode
     NotFilteredCurrentWorkspace = 0x4,
     FilteredRoutedNonFilteredCurrentWorkspace = 0x8
 };
-
-typedef struct TextStyle
-{
-    HFONT font;
-    HFONT iconFont;
-    COLORREF textColor;
-    COLORREF backgroundColor;
-    HBRUSH _backgroundBrush;
-    COLORREF disabledColor;
-    COLORREF focusBackgroundColor;
-    HBRUSH _focusBackgroundBrush;
-    COLORREF focusTextColor;
-    COLORREF extraFocusBackgroundColor;
-    HBRUSH _extraFocusBackgroundBrush;
-    COLORREF infoColor;
-} TextStyle;
 
 typedef struct BarSegmentHeader
 {

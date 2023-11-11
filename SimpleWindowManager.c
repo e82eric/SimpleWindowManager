@@ -3796,7 +3796,7 @@ void menu_run(MenuDefinition *definition)
     }
 
     definition->onEscape = menu_on_escape;
-    menu_run_definition(mView, definition);
+    menu_run_definition(mView, definition, selectedMonitor->bar->textStyle);
     menu_focus(mView);
 }
 
@@ -4582,7 +4582,7 @@ int get_memory_percent(void)
 void fill_is_connected_to_internet(TCHAR *toFill, int maxLen)
 {
     WCHAR internetUnknown = { 0xf128 };
-    WCHAR internetUp = { 0xeb79 };
+    WCHAR internetUp = { 0xea7a };
     WCHAR internetDown = { 0xf127 };
     WCHAR internetStatusChar = internetUnknown;
 
@@ -6272,6 +6272,8 @@ int run (void)
     configuration->textStyle->_backgroundBrush = CreateSolidBrush(configuration->textStyle->backgroundColor);
     configuration->textStyle->_extraFocusBackgroundBrush = CreateSolidBrush(configuration->textStyle->extraFocusBackgroundColor);
     configuration->textStyle->_focusBackgroundBrush = CreateSolidBrush(configuration->textStyle->focusBackgroundColor);
+
+    menu_set_text_style(mView, configuration->textStyle);
 
     floatWindowMovement = configuration->floatWindowMovement;
     borderForegroundPen = CreatePen(PS_SOLID, borderWidth, borderColor);
