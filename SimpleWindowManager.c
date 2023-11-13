@@ -178,10 +178,6 @@ static Monitor *secondaryMonitor;
 Bar **bars;
 int numberOfBars;
 
-HFONT font;
-
-HPEN borderForegroundPen;
-HPEN borderNotForegroundPen;
 HBRUSH dropTargetBrush;
 HWND borderWindowHwnd;
 HWND dropTargetHwnd;
@@ -263,57 +259,6 @@ size_t g_longestCommandName;
 enum WindowRoutingMode currentWindowRoutingMode;
 
 Configuration *configuration;
-
-typedef struct {
-    int width;
-    int height;
-    HBITMAP hBmp;
-} BorderWindowCacheEntry;
-
-#define BORDER_WINDOW_CACHE_CAPACITY 5
-BorderWindowCacheEntry g_borderWindowCache[BORDER_WINDOW_CACHE_CAPACITY];
-int g_borderWindowCacheHead = 0;
-int g_borderWindowCacheTail = 0;
-int g_borderWindowCacheLength = 0;
-
-void border_window_cache_add(int width, int height, HBITMAP bitMap)
-{
-    if(g_borderWindowCacheLength < BORDER_WINDOW_CACHE_CAPACITY)
-    {
-        g_borderWindowCache[g_borderWindowCacheTail].width = width;
-        g_borderWindowCache[g_borderWindowCacheTail].height = height;
-        g_borderWindowCache[g_borderWindowCacheTail].hBmp = bitMap;
-
-        g_borderWindowCacheTail++;
-        g_borderWindowCacheLength++;
-    }
-    else
-    {
-        DeleteObject(g_borderWindowCache[g_borderWindowCacheHead].hBmp);
-        g_borderWindowCache[g_borderWindowCacheHead].width = -1;
-        g_borderWindowCache[g_borderWindowCacheHead].height = -1;
-        g_borderWindowCache[g_borderWindowCacheHead].hBmp = 0;
-
-        g_borderWindowCacheHead = (g_borderWindowCacheHead + 1) % BORDER_WINDOW_CACHE_CAPACITY;
-        g_borderWindowCacheTail = (g_borderWindowCacheTail + 1) % BORDER_WINDOW_CACHE_CAPACITY;
-
-        g_borderWindowCache[g_borderWindowCacheTail].width = width;
-        g_borderWindowCache[g_borderWindowCacheTail].height = height;
-        g_borderWindowCache[g_borderWindowCacheTail].hBmp = bitMap;
-    }
-}
-
-HBITMAP border_window_cache_get(int width, int height)
-{
-    for (size_t i = 0; i < g_borderWindowCacheLength; i++)
-    {
-        if (g_borderWindowCache[(i + g_borderWindowCacheHead) % BORDER_WINDOW_CACHE_CAPACITY].width == width && g_borderWindowCache[(i + g_borderWindowCacheHead) % BORDER_WINDOW_CACHE_CAPACITY].height == height)
-        {
-            return g_borderWindowCache[(i + g_borderWindowCacheHead) % BORDER_WINDOW_CACHE_CAPACITY].hBmp;
-        }
-    }
-    return NULL;
-}
 
 void run_command_from_menu(char *stdOut)
 {
@@ -4777,7 +4722,6 @@ LRESULT CALLBACK button_message_loop(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM
             }
             SetTextColor(hdc, oldTextColor);
             SelectObject(hdc, oldFont);
-            SelectObject(hdc, font);
             EndPaint(hWnd, &ps);
             break;
         }
@@ -4871,103 +4815,6 @@ void border_window_update(void)
     EndDeferWindowPos(hdwp);
 }
 
-void border_window_paint(HWND hWnd)
-{
-    if(selectedMonitor->workspace->selected || selectedMonitor->scratchWindow || menuVisible)
-    {
-        PAINTSTRUCT ps;
-        HDC hDC = BeginPaint(hWnd, &ps);
-        HPEN hpenOld;
-
-        RECT rcClient;
-        GetClientRect(hWnd, &rcClient);
-
-        int width = rcClient.bottom - rcClient.top;
-        int height = rcClient.right - rcClient.left;
-        HBITMAP bitMap = border_window_cache_get(width, height);
-
-        HDC hMemDC = CreateCompatibleDC(hDC);
-        HBRUSH hbrushOld = (HBRUSH)(SelectObject(hMemDC, GetStockObject(NULL_BRUSH)));
-        if(isForegroundWindowSameAsSelectMonitorSelected || menuVisible)
-        {
-            hpenOld = SelectObject(hMemDC, borderForegroundPen);
-        }
-        else {
-            hpenOld = SelectObject(hMemDC, borderNotForegroundPen);
-        }
-
-        if(!bitMap)
-        {
-            BITMAPINFO bmi = { 0 };
-            bmi.bmiHeader.biSize = sizeof(bmi.bmiHeader);
-            bmi.bmiHeader.biBitCount = 32;
-            bmi.bmiHeader.biWidth = rcClient.right;
-            bmi.bmiHeader.biHeight = -rcClient.bottom;
-            bmi.bmiHeader.biPlanes = 1;
-
-            LPVOID pBits;
-            HBITMAP hBmp = CreateDIBSection(hDC, &bmi, DIB_RGB_COLORS, &pBits, NULL, 0);
-            assert(hBmp);
-            SelectObject(hMemDC, hBmp);
-
-            memset(pBits, 0, 4 * rcClient.right * rcClient.bottom);
-
-            Rectangle(hMemDC, rcClient.left, rcClient.top, rcClient.right, rcClient.bottom);
-
-            DWORD* pixels = (DWORD*)pBits;
-            int borderWidth = 6;
-            for (int y = rcClient.top; y < rcClient.bottom; y++)
-            {
-                for (int x = rcClient.left; x < rcClient.right; x++)
-                {
-                    DWORD* pixel = &pixels[y * rcClient.right + x];
-                    if (y < rcClient.top + borderWidth || y > rcClient.bottom - borderWidth ||
-                            x < rcClient.left + borderWidth || x > rcClient.right - borderWidth)
-                    {
-                        *pixel |= 0xFF000000;
-                    }
-                    else
-                    {
-                        *pixel = (*pixel & 0x00000000) | configuration->borderWindowBackgroundTransparency;
-                    }
-                }
-            }
-
-            border_window_cache_add(width, height, hBmp);
-            bitMap = hBmp;
-        }
-        else
-        {
-            (HBITMAP)SelectObject(hMemDC, bitMap);
-            BitBlt(hDC,
-                    0,
-                    0,
-                    width,
-                    height,
-                    hMemDC,
-                    0,
-                    0,
-                    SRCCOPY);
-        }
-
-        RECT rcWindow;
-        GetWindowRect(hWnd, &rcWindow);
-        POINT ptSrc = { 0, 0 };
-        POINT ptWinPos = { rcWindow.left, rcWindow.top };
-
-        SIZE sizeWin = { rcClient.right - rcClient.left, rcClient.bottom - rcClient.top };
-        BLENDFUNCTION blend = { AC_SRC_OVER, 0, 255, AC_SRC_ALPHA };
-
-        UpdateLayeredWindow(hWnd, hDC, &ptWinPos, &sizeWin, hMemDC, &ptSrc, 0, &blend, ULW_ALPHA);
-
-        DeleteDC(hMemDC);
-
-        SelectObject(hDC, hpenOld);
-        SelectObject(hDC, hbrushOld);
-        EndPaint(hWnd, &ps);
-    }
-}
-
 void drop_target_window_paint(HWND hWnd)
 {
     if(selectedMonitor->workspace->selected || selectedMonitor->scratchWindow || menuVisible)
@@ -5048,49 +4895,6 @@ static LRESULT dcomp_border_window_message_loop(HWND window, UINT message, WPARA
     return DefWindowProc(window, message, wparam, lparam);
 }
 
-static LRESULT border_window_message_loop(HWND h, UINT msg, WPARAM wp, LPARAM lp)
-{
-    switch(msg)
-    {
-        case WM_WINDOWPOSCHANGING:
-            {
-                WINDOWPOS* windowPos = (WINDOWPOS*)lp;
-                if(menuVisible)
-                {
-                    windowPos->hwndInsertAfter = mView->hwnd;
-                }
-                else if(!selectedMonitor->scratchWindow)
-                {
-                    if(selectedMonitor->workspace->selected)
-                    {
-                        windowPos->hwndInsertAfter = HWND_BOTTOM;
-                    }
-                }
-                else
-                {
-                    if(selectedMonitor->scratchWindow->client)
-                    {
-                        if(selectedMonitor->workspace->selected)
-                        {
-                            windowPos->hwndInsertAfter = selectedMonitor->scratchWindow->client->data->hwnd;
-                        }
-                    }
-                }
-                return 1;
-            }
-        case WM_PAINT:
-            {
-                border_window_paint(h);
-                return 1;
-            }
-        case WM_ERASEBKGND:
-            return 1;
-
-        default:
-            return DefWindowProc(h, msg, wp, lp);
-    }
-}
-
 static LRESULT drop_target_window_message_loop(HWND h, UINT msg, WPARAM wp, LPARAM lp)
 {
     switch(msg)
@@ -5105,28 +4909,6 @@ static LRESULT drop_target_window_message_loop(HWND h, UINT msg, WPARAM wp, LPAR
     }
 
     return 0;
-}
-
-WNDCLASSEX* border_window_register_class(void)
-{
-    WNDCLASSEX *wc    = malloc(sizeof(WNDCLASSEX));
-    assert(wc);
-    wc->cbSize        = sizeof(WNDCLASSEX);
-    wc->style         = CS_DBLCLKS | CS_OWNDC | CS_HREDRAW | CS_VREDRAW;
-    wc->lpfnWndProc   = border_window_message_loop;
-    wc->cbClsExtra    = 0;
-    wc->cbWndExtra    = 0;
-    wc->hIcon         = LoadIcon(NULL, IDI_APPLICATION);
-    wc->hInstance     = GetModuleHandle(0);
-    wc->hCursor       = LoadCursor(NULL, IDC_ARROW);
-    wc->hbrBackground = (HBRUSH)GetStockObject(BLACK_BRUSH);
-    wc->lpszMenuName  = NULL;
-    wc->lpszClassName = L"SimpleWindowBorderWindowClass";
-    wc->hIconSm       = LoadIcon(NULL, IDI_APPLICATION);
-
-    RegisterClassEx(wc);
-
-    return wc;
 }
 
 WNDCLASSEX* drop_target_window_register_class(void)
@@ -6266,8 +6048,6 @@ int run (void)
     menu_set_text_style(mView, configuration->textStyle);
 
     floatWindowMovement = configuration->floatWindowMovement;
-    borderForegroundPen = CreatePen(PS_SOLID, configuration->textStyle->borderWidth, configuration->textStyle->focusColor2);
-    borderNotForegroundPen = CreatePen(PS_SOLID, configuration->textStyle->borderWidth, configuration->textStyle->lostFocusColor);
 
     HINSTANCE moduleHandle = GetModuleHandle(NULL);
     dropTargetBrush = CreateSolidBrush(dropTargetColor);
@@ -6441,7 +6221,6 @@ int run (void)
     {
         bar_run(bars[i], barWindowClass);
         HDC barHdc = GetDC(bars[i]->hwnd);
-        SelectObject(barHdc, font);
         bar_add_segments_from_configuration(bars[i], barHdc, configuration);
         DeleteDC(barHdc);
     }
