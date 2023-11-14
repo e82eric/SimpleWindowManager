@@ -143,7 +143,7 @@ static void button_redraw(Button *button);
 static void bar_apply_workspace_change(Bar *bar, Workspace *previousWorkspace, Workspace *newWorkspace);
 static void bar_trigger_paint(Bar *bar);
 static void bar_trigger_selected_window_paint(Bar *self);
-static void bar_run(Bar *bar, WNDCLASSEX *barWindowClass);
+static void bar_run(Bar *bar, WNDCLASSEX *barWindowClass, int barHeight);
 static void border_window_update(void);
 static void border_window_update_with_defer(HDWP hdwp);
 static LRESULT CALLBACK button_message_loop( HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam, UINT_PTR uIdSubclass, DWORD_PTR dwRefData);
@@ -183,7 +183,6 @@ HWND borderWindowHwnd;
 HWND dropTargetHwnd;
 
 //defualts maybe there is a better way to do this
-long barHeight = 29;
 long gapWidth = 13;
 int scratchWindowsScreenPadding = 250;
 COLORREF dropTargetColor = RGB(0, 90, 90);
@@ -3013,7 +3012,7 @@ void tilelayout_move_client_previous(Client *client)
 void tilelayout_calulate_and_apply_client_sizes(Workspace *workspace)
 {
     int screenWidth = workspace->monitor->w;
-    int screenHeight = workspace->monitor->h;
+    int screenHeight = workspace->monitor->bottom - workspace->monitor->top;
 
     int numberOfClients = workspace_get_number_of_clients(workspace);
 
@@ -3035,7 +3034,7 @@ void tilelayout_calulate_and_apply_client_sizes(Workspace *workspace)
       allWidth = (screenWidth / 2) - gapWidth;
     }
 
-    int mainHeight = screenHeight - barHeight - (gapWidth * 2);
+    int mainHeight = screenHeight - (gapWidth * 2);
     int tileHeight = 0;
     if(numberOfClients < 3)
     {
@@ -3050,7 +3049,7 @@ void tilelayout_calulate_and_apply_client_sizes(Workspace *workspace)
         tileHeight = spaceForTiles / numberOfTiles;
     }
 
-    int mainY = barHeight + gapWidth;
+    int mainY = workspace->monitor->top + gapWidth;
     int tileX = workspace->monitor->xOffset + mainWidth + (gapWidth * 2);
 
     Client *c  = workspace->clients;
@@ -3250,8 +3249,8 @@ void deckLayout_move_client_previous(Client *client)
 
 void verticaldeckLayout_calcluate_rect(Monitor *monitor, int mainXOffset, int numberOfClients, RECT *mainToFill, RECT *secondaryToFill)
 {
-    int screenHeight = monitor->h;
-    int screenWidth = monitor -> w;
+    int screenHeight = monitor->bottom - monitor->top;
+    int screenWidth = monitor-> w;
     int monitorXOffset = monitor->xOffset;
 
     int mainX = monitorXOffset + gapWidth;
@@ -3269,8 +3268,8 @@ void verticaldeckLayout_calcluate_rect(Monitor *monitor, int mainXOffset, int nu
         secondaryWidth = (screenWidth / 2) - gapWidth - (gapWidth / 2) - mainXOffset;
     }
 
-    int allHeight = screenHeight - barHeight - (gapWidth * 2);
-    int allY = barHeight + gapWidth;
+    int allHeight = screenHeight - (gapWidth * 2);
+    int allY = monitor->top + gapWidth;
     int secondaryX = monitorXOffset + mainWidth + (gapWidth * 2);
 
     mainToFill->top = allY;
@@ -3286,15 +3285,15 @@ void verticaldeckLayout_calcluate_rect(Monitor *monitor, int mainXOffset, int nu
 
 void horizontaldeckLayout_calcluate_rect(Monitor *monitor, int mainXOffset, int numberOfClients, RECT *mainToFill, RECT *secondaryToFill)
 {
-    int screenHeight = monitor->h;
+    int screenHeight = monitor->bottom - monitor->top;
     int screenWidth = monitor -> w;
     int monitorXOffset = monitor->xOffset;
 
-    int mainY = barHeight + gapWidth;
+    int mainY = monitor->top + gapWidth;
 
     int mainHeight;
     int secondaryHeight;
-    int heightNoBarNoGaps = screenHeight - barHeight - (gapWidth * 2);
+    int heightNoBarNoGaps = screenHeight - (gapWidth * 2);
     if(numberOfClients == 1)
     {
         mainHeight = heightNoBarNoGaps;
@@ -3507,12 +3506,12 @@ void monacleLayout_calculate_and_apply_client_sizes(Workspace *workspace)
     }
 
     int screenWidth = workspace->monitor->w;
-    int screenHeight = workspace->monitor->h;
+    int screenHeight = workspace->monitor->bottom - workspace->monitor->top;
 
     int allX = workspace->monitor->xOffset + gapWidth;
     int allWidth = screenWidth - (gapWidth * 2);
-    int allHeight = screenHeight - barHeight - (gapWidth * 2);
-    int allY = barHeight + gapWidth;
+    int allHeight = screenHeight - (gapWidth * 2);
+    int allY = workspace->monitor->top + gapWidth;
 
     Client *c  = workspace->clients;
     int numberOfClients = 0;
@@ -4407,7 +4406,7 @@ WNDCLASSEX* bar_register_window_class(void)
     return wc;
 }
 
-void bar_run(Bar *bar, WNDCLASSEX *barWindowClass)
+void bar_run(Bar *bar, WNDCLASSEX *barWindowClass, int barHeight)
 {
     HWND hwnd = CreateWindowEx(
         WS_EX_TOOLWINDOW | WS_EX_CONTROLPARENT | WS_EX_COMPOSITED,
@@ -6028,6 +6027,7 @@ int run (void)
     configure(configuration);
     currentWindowRoutingMode = configuration->windowRoutingMode;
 
+    int barHeight = 29;
     if(configuration->barHeight)
     {
         barHeight = configuration->barHeight;
@@ -6220,13 +6220,12 @@ int run (void)
 
     for(int i = 0; i < numberOfBars; i++)
     {
-        bar_run(bars[i], barWindowClass);
+        bar_run(bars[i], barWindowClass, barHeight);
         HDC barHdc = GetDC(bars[i]->hwnd);
         bar_add_segments_from_configuration(bars[i], barHdc, configuration);
         DeleteDC(barHdc);
     }
 
-    /* WNDCLASSEX* borderWindowClass = border_window_register_class(); */
     WNDCLASSEX* dropTargetWindowClass = drop_target_window_register_class();
 
     EnumWindows(enum_windows_callback, 0);

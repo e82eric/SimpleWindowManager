@@ -413,5 +413,4 @@ BOOL should_use_old_move_logic(Client* client);
 BOOL is_float_window(Client *client, LONG_PTR styles, LONG_PTR exStyles);
 HFONT initalize_font();
 
-extern long barHeight;
 extern long gapWidth;
