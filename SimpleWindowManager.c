@@ -873,6 +873,7 @@ void monitor_calculate_height(Monitor *self, HWND taskbarHwnd)
     int screenHeight = GetSystemMetrics(SM_CYSCREEN);
     int taskBarHeight = taskbar_get_height(taskbarHwnd);
     self->h = screenHeight - taskBarHeight;
+    self->bottom = screenHeight - taskBarHeight;
 }
 
 void monitors_resize_for_taskbar(HWND taskbarHwnd)
@@ -1220,9 +1221,9 @@ void drag_drop_start_empty_workspace(Monitor *dropTargetMonitor, HWND hwnd)
             dropTargetHwnd,
             HWND_TOP,
             dropTargetMonitor->xOffset + gapWidth,
-            barHeight + gapWidth,
+            dropTargetMonitor->top + gapWidth,
             dropTargetMonitor->w - (gapWidth * 2),
-            dropTargetMonitor->h - barHeight - (gapWidth * 2),
+            (dropTargetMonitor->bottom - dropTargetMonitor->top) - (gapWidth * 2),
             SWP_SHOWWINDOW);
 }
 
@@ -6063,6 +6064,8 @@ int run (void)
     WNDCLASSEX *barWindowClass = bar_register_window_class();
     for(int i = 0; i < numberOfMonitors; i++)
     {
+        monitors[i]->top = barHeight;
+
         if(!monitors[i]->isHidden)
         {
             Bar *bar = calloc(1, sizeof(Bar));

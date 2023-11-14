@@ -198,6 +198,8 @@ struct ClientData
 struct Monitor
 {
     int id;
+    int top;
+    int bottom;
     int xOffset;
     int h;
     int w;
