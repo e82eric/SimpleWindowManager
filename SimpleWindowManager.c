@@ -5865,20 +5865,18 @@ void configuration_register_default_text_style(Configuration *self, TCHAR *fontN
     COLORREF focusColor2 = RGB(250, 189, 47);
     COLORREF lostFocusColor = RGB(142, 192, 124);
 
-    TextStyle *normalTextStyle = calloc(1, sizeof(TextStyle));
-    normalTextStyle->font = textFont;
-    normalTextStyle->iconFont = iconFont;
-    normalTextStyle->textColor = normalTextColor;
-    normalTextStyle->backgroundColor = backgroundColor;
-    normalTextStyle->disabledColor = disabledColor;
-    normalTextStyle->focusBackgroundColor = focusBackgroundColor;
-    normalTextStyle->extraFocusBackgroundColor = extraFocusBackgroundColor;
-    normalTextStyle->infoColor = infoColor;
-    normalTextStyle->focusTextColor = focusTextColor;
-    normalTextStyle->focusColor2 = focusColor2;
-    normalTextStyle->lostFocusColor = lostFocusColor;
-    normalTextStyle->borderWidth = 10;
-    self->textStyle = normalTextStyle;
+    self->textStyle->font = textFont;
+    self->textStyle->iconFont = iconFont;
+    self->textStyle->textColor = normalTextColor;
+    self->textStyle->backgroundColor = backgroundColor;
+    self->textStyle->disabledColor = disabledColor;
+    self->textStyle->focusBackgroundColor = focusBackgroundColor;
+    self->textStyle->extraFocusBackgroundColor = extraFocusBackgroundColor;
+    self->textStyle->infoColor = infoColor;
+    self->textStyle->focusTextColor = focusTextColor;
+    self->textStyle->focusColor2 = focusColor2;
+    self->textStyle->lostFocusColor = lostFocusColor;
+    self->textStyle->borderWidth = 10;
 }
 
 void configuration_add_bar_segment_with_header(
@@ -6008,11 +6006,13 @@ int run (void)
         }
     }
 
+    configuration = calloc(1, sizeof(Configuration));
+    configuration->textStyle = calloc(1, sizeof(TextStyle));
+
     TCHAR menuTitle[BUF_LEN] = L"nmenu";
-    mView = menu_create(menuTitle);
+    mView = menu_create(menuTitle, configuration->textStyle);
     ShowWindow(mView->hwnd, SW_HIDE);
 
-    configuration = calloc(1, sizeof(Configuration));
     configuration->monitors = monitors;
     configuration->workspaces = workspaces;
     configuration->windowRoutingMode = FilteredAndRoutedToWorkspace;
@@ -6044,8 +6044,6 @@ int run (void)
     configuration->textStyle->_extraFocusBackgroundBrush = CreateSolidBrush(configuration->textStyle->extraFocusBackgroundColor);
     configuration->textStyle->_focusBackgroundBrush = CreateSolidBrush(configuration->textStyle->focusBackgroundColor);
     configuration->textStyle->_focusPen2 = CreatePen(PS_SOLID, configuration->textStyle->borderWidth, configuration->textStyle->focusColor2);
-
-    menu_set_text_style(mView, configuration->textStyle);
 
     floatWindowMovement = configuration->floatWindowMovement;
 

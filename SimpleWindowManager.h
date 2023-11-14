@@ -102,7 +102,6 @@ struct Configuration
     long barHeight;
     long gapWidth;
     int scratchWindowsScreenPadding;
-    COLORREF barTextColor;
     BarSegmentConfiguration **barSegments;
     int numberOfBarSegments;
     Monitor **monitors;

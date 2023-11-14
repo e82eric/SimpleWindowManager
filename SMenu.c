@@ -2150,9 +2150,9 @@ NamedCommand* MenuDefinition_AddAction2NamedCommand(MenuDefinition *self, CHAR *
     return command;
 }
 
-MenuView *menu_create(TCHAR *title)
+MenuView *menu_create(TCHAR *title, TextStyle *textStyle)
 {
-    MenuView *menuView = menu_create_with_size(0, 0, 0, 0, title);
+    MenuView *menuView = menu_create_with_size(0, 0, 0, 0, title, textStyle);
     return menuView;
 }
 
@@ -2167,11 +2167,11 @@ void menu_set_text_style(MenuView *self, TextStyle *textStyle)
     SendMessageA(self->itemsView->hwnd, WM_SETFONT, (WPARAM)g_textStyle->font, (LPARAM)TRUE);
 
     highlightedBackgroundBrush = CreateSolidBrush(g_textStyle->focusBackgroundColor);
-
 }
 
-MenuView *menu_create_with_size(int left, int top, int width, int height, TCHAR *title)
+MenuView *menu_create_with_size(int left, int top, int width, int height, TCHAR *title, TextStyle *textStyle)
 {
+    g_textStyle = textStyle;
     MenuView *menuView = calloc(1, sizeof(MenuView));
     assert(menuView);
 
@@ -2250,7 +2250,6 @@ MenuView *menu_create_with_size(int left, int top, int width, int height, TCHAR 
             NULL,
             hInstance,
             menuView);
-
     return menuView;
 }
 
@@ -2330,6 +2329,7 @@ void menu_run_definition(MenuView *self, MenuDefinition *menuDefinition)
     self->searchView->onEscape = menuDefinition->onEscape;
     self->searchView->keyBindings = menuDefinition->keyBindings;
 
+    menu_set_text_style(self, g_textStyle);
     SetWindowTextA(self->searchView->hwnd, "");
 
     if(self->itemsView->hasLoadCommand)

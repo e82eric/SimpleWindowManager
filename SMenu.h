@@ -194,9 +194,8 @@ void MenuDefinition_ParseAndAddKeyBinding(MenuDefinition *self, char *argText, B
 NamedCommand *MenuDefinition_AddNamedCommand(MenuDefinition *self, char *argText, BOOL reloadAfter, BOOL quitAfter);
 void NamedCommand_SetTextRange(NamedCommand *self, int start, int end, BOOL trimEnd);
 NamedCommand* MenuDefinition_AddActionNamedCommand_WithTextRange(MenuDefinition *self, CHAR *nameBuff, void (*action)(CHAR *text), BOOL reloadAfter, BOOL quitAfter);
-MenuView *menu_create_with_size(int left, int top, int width, int height, TCHAR *title);
-MenuView *menu_create(TCHAR *title);
-void menu_set_text_style(MenuView *self, TextStyle *textStyle);
+MenuView *menu_create_with_size(int left, int top, int width, int height, TCHAR *title, TextStyle *textStyle);
+MenuView *menu_create(TCHAR *title, TextStyle *textStyle);
 void menu_set_border_pen(MenuView *self, HPEN pen);
 void menu_run_definition(MenuView *self, MenuDefinition *menuDefinition);
 void MenuDefinition_ParseAndAddLoadCommand(MenuDefinition *self, char *argText, BOOL isScrollable);
