@@ -58,15 +58,25 @@ struct LauncherProcess
     void (*onSuccess) (CHAR *stdOut);
 };
 
+typedef struct DragDropState
+{
+    bool inProgress;
+    HWND dragHwnd;
+    HWND dropTargetHwnd;
+} DragDropState;
+
+typedef struct EasyResizeState
+{
+    bool inProgress;
+    POINT startPoint;
+    int startOffset;
+} EasyResizeState;
+
+DragDropState g_dragDropState = {0};
+EasyResizeState g_easyResizeState = {0};
+
 HHOOK g_kb_hook = 0;
 HHOOK g_mouse_hook = 0;
-BOOL g_dragInProgress;
-BOOL g_resizeInProgress;
-HWND g_resizeHwnd;
-HWND g_dragHwnd;
-BOOL g_easyResizeInProgress;
-POINT g_easyResizeStartPoint;
-int g_easyResizeStartOffset;
 
 Workspace *g_lastWorkspace;
 
@@ -146,6 +156,7 @@ static void bar_trigger_selected_window_paint(Bar *self);
 static void bar_run(Bar *bar, WNDCLASSEX *barWindowClass, int barHeight);
 static void border_window_update(void);
 static void border_window_update_with_defer(HDWP hdwp);
+static void border_window_hide(HWND self);
 static LRESULT CALLBACK button_message_loop( HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam, UINT_PTR uIdSubclass, DWORD_PTR dwRefData);
 static void monitor_select(Monitor *monitor);
 static void monitor_set_layout(Layout *layout);
@@ -158,7 +169,7 @@ static int run (void);
 static BOOL hit_test_hwnd(HWND hwnd);
 static BOOL hit_test_monitor(Monitor *monitor);
 static BOOL hit_test_client(Client *client);
-static void drag_drop_cancel(void);
+static void drag_drop_cancel(DragDropState *self);
 
 static IAudioEndpointVolume *audioEndpointVolume;
 static INetworkListManager *networkListManager;
@@ -180,7 +191,6 @@ int numberOfBars;
 
 HBRUSH dropTargetBrush;
 HWND borderWindowHwnd;
-HWND dropTargetHwnd;
 
 //defualts maybe there is a better way to do this
 long gapWidth = 13;
@@ -246,7 +256,7 @@ IWbemServices *services = NULL;
 
 KeyBinding *headKeyBinding;
 ScratchWindow *scratchWindows;
-MenuView * mView;
+MenuView *mView;
 BOOL menuVisible;
 Command *commands[MAX_COMMANDS];
 int numberOfCommands = 0;
@@ -849,7 +859,7 @@ void arrange_clients_in_selected_workspace(void)
     selectedMonitor->workspace->mainOffset = 0;
     workspace_arrange_windows(selectedMonitor->workspace);
     workspace_focus_selected_window(selectedMonitor->workspace);
-    drag_drop_cancel();
+    /* drag_drop_cancel(); */
 }
 
 int taskbar_get_height(HWND taskbarHwnd)
@@ -1170,13 +1180,13 @@ Client* drop_target_find_client_from_mouse_location(Monitor *monitor, HWND focus
     return dropTargetClient;
 }
 
-void drag_drop_cancel(void)
+void drag_drop_cancel(DragDropState *self)
 {
-    g_dragInProgress = FALSE;
-    g_dragHwnd = NULL;
+    self->inProgress = FALSE;
+    self->dragHwnd = NULL;
 
     SetWindowPos(
-            dropTargetHwnd,
+            self->dropTargetHwnd,
             HWND_BOTTOM,
             0,
             0,
@@ -1185,24 +1195,13 @@ void drag_drop_cancel(void)
             SWP_HIDEWINDOW);
 }
 
-void resize_start(HWND hwnd)
+void drag_drop_start(DragDropState *self, HWND hwnd, Client *dropTargetClient)
 {
-    drag_drop_cancel();
-
-    g_resizeInProgress = TRUE;
-    g_resizeHwnd = hwnd;
-}
-
-void drag_drop_start(HWND hwnd, Client *dropTargetClient)
-{
-    g_resizeInProgress = FALSE;
-    g_resizeHwnd = NULL;
-
-    g_dragHwnd = hwnd;
-    g_dragInProgress = TRUE;
+    self->dragHwnd = hwnd;
+    self->inProgress = TRUE;
 
     SetWindowPos(
-            dropTargetHwnd,
+            self->dropTargetHwnd,
             HWND_TOPMOST,
             dropTargetClient->data->x,
             dropTargetClient->data->y,
@@ -1211,13 +1210,13 @@ void drag_drop_start(HWND hwnd, Client *dropTargetClient)
             SWP_SHOWWINDOW);
 }
 
-void drag_drop_start_empty_workspace(Monitor *dropTargetMonitor, HWND hwnd)
+void drag_drop_start_empty_workspace(DragDropState *self, Monitor *dropTargetMonitor, HWND hwnd)
 {
-    g_dragInProgress = TRUE;
-    g_dragHwnd = hwnd;
+    self->inProgress = TRUE;
+    self->dragHwnd = hwnd;
 
     SetWindowPos(
-            dropTargetHwnd,
+            self->dropTargetHwnd,
             HWND_TOP,
             dropTargetMonitor->xOffset + gapWidth,
             dropTargetMonitor->top + gapWidth,
@@ -1226,7 +1225,7 @@ void drag_drop_start_empty_workspace(Monitor *dropTargetMonitor, HWND hwnd)
             SWP_SHOWWINDOW);
 }
 
-BOOL handle_location_change_with_mouse_down(HWND hwnd, LONG_PTR styles, LONG_PTR exStyles)
+BOOL handle_location_change_with_mouse_down(HWND hwnd, LONG_PTR styles, LONG_PTR exStyles, DragDropState *dragDropState)
 {
     if(!hit_test_hwnd(hwnd))
     {
@@ -1253,10 +1252,9 @@ BOOL handle_location_change_with_mouse_down(HWND hwnd, LONG_PTR styles, LONG_PTR
                 BOOL isMoving = (leftIsChanged && rightIsChanged) || (topIsChanged && bottomIsChanged);
                 if(!isMoving)
                 {
-                    resize_start(hwnd);
                     return FALSE;
                 }
-                drag_drop_start(hwnd, dropTargetClient);
+                drag_drop_start(dragDropState, hwnd, dropTargetClient);
                 return TRUE;
             }
             else if(has_float_styles(styles, exStyles))
@@ -1267,7 +1265,7 @@ BOOL handle_location_change_with_mouse_down(HWND hwnd, LONG_PTR styles, LONG_PTR
             int modifiers = get_modifiers_pressed();
             if(modifiers == configuration->dragDropFloatModifier)
             {
-                drag_drop_start(hwnd, dropTargetClient);
+                drag_drop_start(dragDropState, hwnd, dropTargetClient);
                 return TRUE;
             }
 
@@ -1280,7 +1278,7 @@ BOOL handle_location_change_with_mouse_down(HWND hwnd, LONG_PTR styles, LONG_PTR
                 Client *client = windowManager_find_client_in_workspaces_by_hwnd(hwnd);
                 if(client)
                 {
-                    drag_drop_start_empty_workspace(dropTargetMonitor, hwnd);
+                    drag_drop_start_empty_workspace(dragDropState, dropTargetMonitor, hwnd);
                     return TRUE;
                 }
             }
@@ -1290,10 +1288,10 @@ BOOL handle_location_change_with_mouse_down(HWND hwnd, LONG_PTR styles, LONG_PTR
     return FALSE;
 }
 
-void drag_drop_complete(void)
+void drag_drop_complete(DragDropState *self)
 {
-    HWND dragHwnd = g_dragHwnd;
-    drag_drop_cancel();
+    HWND dragHwnd = self->dragHwnd;
+    drag_drop_cancel(self);
 
     Monitor *dropTargetMonitor = drop_target_find_monitor_from_mouse_location();
 
@@ -1388,18 +1386,6 @@ void drag_drop_complete(void)
     }
 }
 
-void resize_complete(void)
-{
-    g_resizeInProgress = FALSE;
-    Client *client = windowManager_find_client_in_workspaces_by_hwnd(g_resizeHwnd);
-    if(client)
-    {
-        Workspace *workspace = client->workspace;
-        workspace_arrange_windows(workspace);
-    }
-    g_resizeHwnd = NULL;
-}
-
 int get_modifiers_pressed(void)
 {
     int modifiersPressed = 0;
@@ -1450,36 +1436,32 @@ LRESULT CALLBACK handle_mouse(int code, WPARAM w, LPARAM l)
                 {
                     Workspace *workspace = monitor->workspace;
 
-                    if(!g_easyResizeInProgress)
+                    if(!g_easyResizeState.inProgress)
                     {
-                        g_easyResizeInProgress = TRUE;
-                        g_easyResizeStartPoint = p->pt;
-                        g_easyResizeStartOffset = workspace->mainOffset; 
+                        g_easyResizeState.inProgress = TRUE;
+                        g_easyResizeState.startPoint = p->pt;
+                        g_easyResizeState.startOffset = workspace->mainOffset; 
                     }
 
-                    int diff = p->pt.x - g_easyResizeStartPoint.x;
-                    workspace->mainOffset = g_easyResizeStartOffset + diff;
+                    int diff = p->pt.x - g_easyResizeState.startPoint.x;
+                    workspace->mainOffset = g_easyResizeState.startOffset + diff;
 
                     workspace_arrange_windows(workspace);
-                    border_window_update();
+                    border_window_hide(borderWindowHwnd);
                 }
                 return CallNextHookEx(g_mouse_hook, code, w, l);
             }
         }
         else if(w == WM_LBUTTONUP)
         {
-            if(g_easyResizeInProgress)
+            if(g_easyResizeState.inProgress)
             {
-                g_easyResizeInProgress = FALSE;
+                g_easyResizeState.inProgress = FALSE;
                 border_window_update();
             }
-            if (g_resizeInProgress)
+            else if (g_dragDropState.inProgress && g_dragDropState.dragHwnd)
             {
-                resize_complete();
-            }
-            else if (g_dragInProgress && g_dragHwnd)
-            {
-                drag_drop_complete();
+                drag_drop_complete(&g_dragDropState);
             }
         }
     }
@@ -1797,9 +1779,9 @@ void CALLBACK handle_windows_event(
                             return;
                         }
 
-                        if(GetAsyncKeyState(VK_LBUTTON) & 0x8000 && !(GetAsyncKeyState(VK_LSHIFT) & 0x8000) && !g_easyResizeInProgress)
+                        if(GetAsyncKeyState(VK_LBUTTON) & 0x8000 && !(GetAsyncKeyState(VK_LSHIFT) & 0x8000) && !g_easyResizeState.inProgress)
                         {
-                            handle_location_change_with_mouse_down(hwnd, styles, exStyles);
+                            handle_location_change_with_mouse_down(hwnd, styles, exStyles, &g_dragDropState);
                             return;
                         }
 
@@ -1809,9 +1791,9 @@ void CALLBACK handle_windows_event(
             }
             else
             {
-                if(GetAsyncKeyState(VK_LBUTTON) & 0x8000 && !(GetAsyncKeyState(VK_LSHIFT) & 0x8000) && !g_easyResizeInProgress)
+                if(GetAsyncKeyState(VK_LBUTTON) & 0x8000 && !(GetAsyncKeyState(VK_LSHIFT) & 0x8000) && !g_easyResizeState.inProgress)
                 {
-                    if(handle_location_change_with_mouse_down(hwnd, styles, exStyles))
+                    if(handle_location_change_with_mouse_down(hwnd, styles, exStyles, &g_dragDropState))
                     {
                         return;
                     }
@@ -2739,7 +2721,7 @@ void workspace_arrange_windows(Workspace *workspace)
 void workspace_arrange_windows_with_defer_handle(Workspace *workspace, HDWP hdwp)
 {
     workspace->layout->apply_to_workspace(workspace);
-    border_window_update_with_defer(hdwp);
+    /* border_window_update_with_defer(hdwp); */
     workspace_arrange_clients(workspace, hdwp);
 }
 
@@ -3927,6 +3909,18 @@ void monitor_calulate_coordinates(Monitor *monitor, int monitorNumber)
         HWND taskbarHwnd = FindWindow(TASKBAR_CLASS, NULL);
         monitor_calculate_height(monitor, taskbarHwnd);
     }
+
+    HWND taskBarHwnd;
+    if(monitorNumber == 0)
+    {
+        taskBarHwnd = FindWindow(TASKBAR_CLASS, NULL);
+    }
+    else
+    {
+        taskBarHwnd = FindWindow(TASKBAR2_CLASS, NULL);
+    }
+
+    monitor_calculate_height(monitor, taskBarHwnd);
 }
 
 void monitor_select_next(void)
@@ -4736,6 +4730,18 @@ LRESULT CALLBACK button_message_loop(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM
     return 0;
 }
 
+void border_window_hide(HWND self)
+{
+    SetWindowPos(
+            self,
+            HWND_BOTTOM,
+            0,
+            0,
+            0,
+            0,
+            SWP_HIDEWINDOW | SWP_NOSIZE);
+}
+
 void border_window_update_with_defer(HDWP hdwp)
 {
     if(selectedMonitor)
@@ -4762,11 +4768,7 @@ void border_window_update_with_defer(HDWP hdwp)
 
             DWORD positionFlags;
             positionFlags = SWP_SHOWWINDOW;
-            if(g_easyResizeInProgress)
-            {
-                positionFlags = SWP_HIDEWINDOW;
-            }
-            else if(currentHeight == targetHeight && currentWidth == targetWidth && isWindowVisible)
+            if(currentHeight == targetHeight && currentWidth == targetWidth && isWindowVisible)
             {
                 positionFlags = SWP_NOREDRAW;
             }
@@ -4994,7 +4996,7 @@ void drop_target_window_run(WNDCLASSEX *windowClass)
         GetModuleHandle(0),
         NULL);
     SetLayeredWindowAttributes(hwnd, RGB(255, 255, 255), (255 * 50) / 100, LWA_ALPHA);
-    dropTargetHwnd = hwnd;
+    g_dragDropState.dropTargetHwnd = hwnd;
 }
 
 void command_execute_no_arg(Command *self)
