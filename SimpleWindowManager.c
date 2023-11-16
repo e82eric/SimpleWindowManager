@@ -77,10 +77,9 @@ EasyResizeState g_easyResizeState = {0};
 
 HHOOK g_kb_hook = 0;
 HHOOK g_mouse_hook = 0;
+HWINEVENTHOOK g_win_hook;
 
 Workspace *g_lastWorkspace;
-
-HWINEVENTHOOK g_win_hook;
 
 static BOOL CALLBACK enum_windows_callback(HWND hWnd, LPARAM lparam);
 
@@ -154,8 +153,8 @@ static void bar_apply_workspace_change(Bar *bar, Workspace *previousWorkspace, W
 static void bar_trigger_paint(Bar *bar);
 static void bar_trigger_selected_window_paint(Bar *self);
 static void bar_run(Bar *bar, WNDCLASSEX *barWindowClass, int barHeight);
-static void border_window_update(void);
-static void border_window_update_with_defer(HDWP hdwp);
+static void border_window_update(HWND self);
+static void border_window_update_with_defer(HWND self, HDWP hdwp);
 static void border_window_hide(HWND self);
 static LRESULT CALLBACK button_message_loop( HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam, UINT_PTR uIdSubclass, DWORD_PTR dwRefData);
 static void monitor_select(Monitor *monitor);
@@ -190,7 +189,7 @@ Bar **bars;
 int numberOfBars;
 
 HBRUSH dropTargetBrush;
-HWND borderWindowHwnd;
+HWND g_borderWindowHwnd;
 
 //defualts maybe there is a better way to do this
 long gapWidth = 13;
@@ -1447,7 +1446,7 @@ LRESULT CALLBACK handle_mouse(int code, WPARAM w, LPARAM l)
                     workspace->mainOffset = g_easyResizeState.startOffset + diff;
 
                     workspace_arrange_windows(workspace);
-                    border_window_hide(borderWindowHwnd);
+                    border_window_hide(g_borderWindowHwnd);
                 }
                 return CallNextHookEx(g_mouse_hook, code, w, l);
             }
@@ -1457,7 +1456,7 @@ LRESULT CALLBACK handle_mouse(int code, WPARAM w, LPARAM l)
             if(g_easyResizeState.inProgress)
             {
                 g_easyResizeState.inProgress = FALSE;
-                border_window_update();
+                border_window_update(g_borderWindowHwnd);
             }
             else if (g_dragDropState.inProgress && g_dragDropState.dragHwnd)
             {
@@ -1851,7 +1850,7 @@ void CALLBACK handle_windows_event(
                 }
             }
             eventForegroundHwnd = hwnd;
-            border_window_update();
+            border_window_update(g_borderWindowHwnd);
             if(selectedMonitor)
             {
                 bar_trigger_selected_window_paint(selectedMonitor->bar);
@@ -2869,7 +2868,7 @@ void workspace_focus_selected_window(Workspace *workspace)
         bar_trigger_selected_window_paint(workspace->monitor->bar);
     }
 
-    border_window_update();
+    border_window_update(g_borderWindowHwnd);
 }
 
 void noop_swap_clients(Client *client1, Client *client2)
@@ -3530,7 +3529,7 @@ void menu_focus(MenuView *self)
     if(!menuVisible)
     {
         menuVisible = TRUE;
-        ShowWindow(borderWindowHwnd, SW_HIDE);
+        border_window_hide(g_borderWindowHwnd);
         ShowWindow(self->hwnd, SW_SHOW);
         SetForegroundWindow(self->hwnd);
         HDWP hdwp = BeginDeferWindowPos(1);
@@ -3557,7 +3556,7 @@ void scratch_window_focus(ScratchWindow *self)
     LONG lStyle = GetWindowLong(self->client->data->hwnd, GWL_STYLE);
     lStyle &= ~(WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_SYSMENU | WS_VSCROLL);
     SetWindowLong(self->client->data->hwnd, GWL_STYLE, lStyle);
-    ShowWindow(borderWindowHwnd, SW_HIDE);
+    border_window_hide(g_borderWindowHwnd);
     HDWP hdwp = BeginDeferWindowPos(2);
     DeferWindowPos(
             hdwp,
@@ -3570,7 +3569,7 @@ void scratch_window_focus(ScratchWindow *self)
             SWP_SHOWWINDOW);
     DeferWindowPos(
             hdwp,
-            borderWindowHwnd,
+            g_borderWindowHwnd,
             self->client->data->hwnd,
             self->client->data->x - 4,
             self->client->data->y - 4,
@@ -3579,7 +3578,7 @@ void scratch_window_focus(ScratchWindow *self)
             SWP_SHOWWINDOW);
     EndDeferWindowPos(hdwp);
     ShowWindow(self->client->data->hwnd, SW_RESTORE);
-    SetForegroundWindow(borderWindowHwnd);
+    SetForegroundWindow(g_borderWindowHwnd);
     SetForegroundWindow(self->client->data->hwnd);
 }
 
@@ -3702,14 +3701,14 @@ void menu_hide(void)
     menuVisible = FALSE;
     ShowWindow(mView->hwnd, SW_HIDE);
     bar_trigger_selected_window_paint(selectedMonitor->bar);
-    border_window_update();
+    border_window_update(g_borderWindowHwnd);
 }
 
 void menu_on_escape(void)
 {
     menu_hide();
     HWND foregroundHwnd = GetForegroundWindow();
-    if((foregroundHwnd == mView->hwnd || foregroundHwnd == borderWindowHwnd) && selectedMonitor->workspace)
+    if((foregroundHwnd == mView->hwnd || foregroundHwnd == g_borderWindowHwnd) && selectedMonitor->workspace)
     {
         workspace_focus_selected_window(selectedMonitor->workspace);
     }
@@ -4742,21 +4741,21 @@ void border_window_hide(HWND self)
             SWP_HIDEWINDOW | SWP_NOSIZE);
 }
 
-void border_window_update_with_defer(HDWP hdwp)
+void border_window_update_with_defer(HWND self, HDWP hdwp)
 {
     if(selectedMonitor)
     {
         if(selectedMonitor->scratchWindow || menuVisible)
         {
-            InvalidateRect(borderWindowHwnd, NULL, FALSE);
+            InvalidateRect(self, NULL, FALSE);
         }
         else if(selectedMonitor->workspace->selected)
         {
             ClientData *selectedClientData = selectedMonitor->workspace->selected->data;
-            BOOL isWindowVisible = IsWindowVisible(borderWindowHwnd);
+            BOOL isWindowVisible = IsWindowVisible(self);
 
             RECT currentPosition;
-            GetWindowRect(borderWindowHwnd, &currentPosition);
+            GetWindowRect(self, &currentPosition);
 
             int targetLeft = selectedClientData->x - 4;
             int targetTop = selectedClientData->y - 4;
@@ -4777,7 +4776,7 @@ void border_window_update_with_defer(HDWP hdwp)
             {
                 DeferWindowPos(
                         hdwp,
-                        borderWindowHwnd,
+                        self,
                         HWND_BOTTOM,
                         targetLeft,
                         targetTop,
@@ -4786,34 +4785,34 @@ void border_window_update_with_defer(HDWP hdwp)
                         positionFlags);
                 if(positionFlags == SWP_SHOWWINDOW || !isWindowVisible)
                 {
-                    InvalidateRect(borderWindowHwnd, NULL, FALSE);
+                    InvalidateRect(self, NULL, FALSE);
                 }
             }
             else
             {
-                InvalidateRect(borderWindowHwnd, NULL, FALSE);
+                InvalidateRect(self, NULL, FALSE);
             }
         }
         else
         {
             DeferWindowPos(
                 hdwp,
-                borderWindowHwnd,
+                self,
                 HWND_BOTTOM,
                 0,
                 0,
                 0,
                 0,
                 SWP_HIDEWINDOW);
-            RedrawWindow(borderWindowHwnd, NULL, NULL, RDW_ERASE | RDW_INVALIDATE);
+            RedrawWindow(self, NULL, NULL, RDW_ERASE | RDW_INVALIDATE);
         }
     }
 }
 
-void border_window_update(void)
+void border_window_update(HWND self)
 {
     HDWP hdwp = BeginDeferWindowPos(1);
-    border_window_update_with_defer(hdwp);
+    border_window_update_with_defer(self, hdwp);
     EndDeferWindowPos(hdwp);
 }
 
@@ -4945,7 +4944,7 @@ void dcomp_border_run(HINSTANCE module, TextStyle *textStyle)
     wc.lpfnWndProc = dcomp_border_window_message_loop;
     RegisterClass(&wc);
 
-    borderWindowHwnd = CreateWindowEx(
+    g_borderWindowHwnd = CreateWindowEx(
             WS_EX_NOREDIRECTIONBITMAP | WS_EX_NOACTIVATE,
             wc.lpszClassName,
             L"nwm_dcomp_border",
@@ -4958,7 +4957,7 @@ void dcomp_border_run(HINSTANCE module, TextStyle *textStyle)
             NULL,
             module,
             textStyle);
-    SetWindowLong(borderWindowHwnd, GWL_STYLE, 0);
+    SetWindowLong(g_borderWindowHwnd, GWL_STYLE, 0);
 }
 
 void border_window_run(WNDCLASSEX *windowClass)
@@ -4977,7 +4976,7 @@ void border_window_run(WNDCLASSEX *windowClass)
         GetModuleHandle(0),
         NULL);
 
-    borderWindowHwnd = hwnd;
+    g_borderWindowHwnd = hwnd;
 }
 
 void drop_target_window_run(WNDCLASSEX *windowClass)
@@ -5751,7 +5750,7 @@ void process_with_stdout_start(CHAR *cmdArgs, void (*onSuccess) (CHAR *))
 void open_program_scratch_callback(char *stdOut)
 {
     menu_hide();
-    ShowWindow(borderWindowHwnd, SW_HIDE);
+    border_window_hide(g_borderWindowHwnd);
     char str[1024];
 
     sprintf_s(str, 1024, "/c start \"\" \"%s\"", stdOut);
@@ -5761,7 +5760,7 @@ void open_program_scratch_callback(char *stdOut)
 void open_program_scratch_callback_not_elevated(char *stdOut)
 {
     menu_hide();
-    ShowWindow(borderWindowHwnd, SW_HIDE);
+    border_window_hide(g_borderWindowHwnd);
     char str[1024];
 
     sprintf_s(str, 1024, "/c start \"\" \"%s\"", stdOut);
