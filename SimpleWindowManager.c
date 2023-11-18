@@ -65,15 +65,17 @@ typedef struct DragDropState
     HWND dropTargetHwnd;
 } DragDropState;
 
-typedef struct EasyResizeState
+typedef struct ResizeState
 {
-    bool inProgress;
-    POINT startPoint;
-    int startOffset;
-} EasyResizeState;
+    bool easyResizeInProgress;
+    POINT easyResizeStartPoint;
+    int easyResizeStartOffset;
+    bool regularResizeInProgress;
+    Client *regularResizeClient;
+} ResizeState;
 
 DragDropState g_dragDropState = {0};
-EasyResizeState g_easyResizeState = {0};
+ResizeState g_resizeState = {0};
 
 HHOOK g_kb_hook = 0;
 HHOOK g_mouse_hook = 0;
@@ -255,8 +257,8 @@ IWbemServices *services = NULL;
 
 KeyBinding *headKeyBinding;
 ScratchWindow *scratchWindows;
-MenuView *mView;
-BOOL menuVisible;
+MenuView *g_mView;
+BOOL g_menuVisible;
 Command *commands[MAX_COMMANDS];
 int numberOfCommands = 0;
 BOOL isForegroundWindowSameAsSelectMonitorSelected;
@@ -1251,6 +1253,8 @@ BOOL handle_location_change_with_mouse_down(HWND hwnd, LONG_PTR styles, LONG_PTR
                 BOOL isMoving = (leftIsChanged && rightIsChanged) || (topIsChanged && bottomIsChanged);
                 if(!isMoving)
                 {
+                    g_resizeState.regularResizeInProgress = TRUE;
+                    g_resizeState.regularResizeClient = client;
                     return FALSE;
                 }
                 drag_drop_start(dragDropState, hwnd, dropTargetClient);
@@ -1435,15 +1439,15 @@ LRESULT CALLBACK handle_mouse(int code, WPARAM w, LPARAM l)
                 {
                     Workspace *workspace = monitor->workspace;
 
-                    if(!g_easyResizeState.inProgress)
+                    if(!g_resizeState.easyResizeInProgress)
                     {
-                        g_easyResizeState.inProgress = TRUE;
-                        g_easyResizeState.startPoint = p->pt;
-                        g_easyResizeState.startOffset = workspace->mainOffset; 
+                        g_resizeState.easyResizeInProgress = TRUE;
+                        g_resizeState.easyResizeStartPoint = p->pt;
+                        g_resizeState.easyResizeStartOffset = workspace->mainOffset; 
                     }
 
-                    int diff = p->pt.x - g_easyResizeState.startPoint.x;
-                    workspace->mainOffset = g_easyResizeState.startOffset + diff;
+                    int diff = p->pt.x - g_resizeState.easyResizeStartPoint.x;
+                    workspace->mainOffset = g_resizeState.easyResizeStartOffset + diff;
 
                     workspace_arrange_windows(workspace);
                     border_window_hide(g_borderWindowHwnd);
@@ -1453,14 +1457,20 @@ LRESULT CALLBACK handle_mouse(int code, WPARAM w, LPARAM l)
         }
         else if(w == WM_LBUTTONUP)
         {
-            if(g_easyResizeState.inProgress)
+            if(g_resizeState.easyResizeInProgress)
             {
-                g_easyResizeState.inProgress = FALSE;
+                g_resizeState.easyResizeInProgress = FALSE;
                 border_window_update(g_borderWindowHwnd);
             }
             else if (g_dragDropState.inProgress && g_dragDropState.dragHwnd)
             {
                 drag_drop_complete(&g_dragDropState);
+            }
+            else if (g_resizeState.regularResizeInProgress)
+            {
+                g_resizeState.regularResizeInProgress = FALSE;
+                workspace_arrange_windows(g_resizeState.regularResizeClient->workspace);
+                g_resizeState.regularResizeClient = NULL;
             }
         }
     }
@@ -1606,7 +1616,7 @@ void CALLBACK handle_windows_event(
             return;
         }
 
-        if(hwnd == mView->hwnd)
+        if(hwnd == g_mView->hwnd)
         {
             return;
         }
@@ -1778,7 +1788,7 @@ void CALLBACK handle_windows_event(
                             return;
                         }
 
-                        if(GetAsyncKeyState(VK_LBUTTON) & 0x8000 && !(GetAsyncKeyState(VK_LSHIFT) & 0x8000) && !g_easyResizeState.inProgress)
+                        if(GetAsyncKeyState(VK_LBUTTON) & 0x8000 && !(GetAsyncKeyState(VK_LSHIFT) & 0x8000) && !g_resizeState.easyResizeInProgress)
                         {
                             handle_location_change_with_mouse_down(hwnd, styles, exStyles, &g_dragDropState);
                             return;
@@ -1790,7 +1800,7 @@ void CALLBACK handle_windows_event(
             }
             else
             {
-                if(GetAsyncKeyState(VK_LBUTTON) & 0x8000 && !(GetAsyncKeyState(VK_LSHIFT) & 0x8000) && !g_easyResizeState.inProgress)
+                if(GetAsyncKeyState(VK_LBUTTON) & 0x8000 && !(GetAsyncKeyState(VK_LSHIFT) & 0x8000) && !g_resizeState.easyResizeInProgress)
                 {
                     if(handle_location_change_with_mouse_down(hwnd, styles, exStyles, &g_dragDropState))
                     {
@@ -1839,7 +1849,7 @@ void CALLBACK handle_windows_event(
             {
                 if(selectedMonitor->workspace->selected)
                 {
-                    if(selectedMonitor->workspace->selected->data->hwnd != hwnd && !selectedMonitor->scratchWindow && !menuVisible)
+                    if(selectedMonitor->workspace->selected->data->hwnd != hwnd && !selectedMonitor->scratchWindow && !g_menuVisible)
                     {
                         isForegroundWindowSameAsSelectMonitorSelected = FALSE;
                     }
@@ -2062,7 +2072,7 @@ void windowManager_move_workspace_to_monitor(Monitor *monitor, Workspace *worksp
         scratch_window_hide(monitor->scratchWindow);
     }
 
-    if(menuVisible)
+    if(g_menuVisible)
     {
         menu_hide();
     }
@@ -2847,9 +2857,9 @@ void workspace_focus_selected_window(Workspace *workspace)
         return;
     }
 
-    if(menuVisible)
+    if(g_menuVisible)
     {
-        SetForegroundWindow(mView->hwnd);
+        SetForegroundWindow(g_mView->hwnd);
         return;
     }
 
@@ -3526,9 +3536,9 @@ void menu_focus(MenuView *self)
     int w = selectedMonitor->w - (scratchWindowsScreenPadding * 2);
     int h = selectedMonitor->h - (scratchWindowsScreenPadding * 2);
 
-    if(!menuVisible)
+    if(!g_menuVisible)
     {
-        menuVisible = TRUE;
+        g_menuVisible = TRUE;
         border_window_hide(g_borderWindowHwnd);
         ShowWindow(self->hwnd, SW_SHOW);
         SetForegroundWindow(self->hwnd);
@@ -3692,14 +3702,14 @@ void scratch_windows_add_to_end(ScratchWindow *scratchWindow)
 
 MenuDefinition* menu_create_and_register(void)
 {
-    MenuDefinition *result = menu_definition_create(mView);
+    MenuDefinition *result = menu_definition_create(g_mView);
     return result;
 }
 
 void menu_hide(void)
 {
-    menuVisible = FALSE;
-    ShowWindow(mView->hwnd, SW_HIDE);
+    g_menuVisible = FALSE;
+    ShowWindow(g_mView->hwnd, SW_HIDE);
     bar_trigger_selected_window_paint(selectedMonitor->bar);
     border_window_update(g_borderWindowHwnd);
 }
@@ -3708,7 +3718,7 @@ void menu_on_escape(void)
 {
     menu_hide();
     HWND foregroundHwnd = GetForegroundWindow();
-    if((foregroundHwnd == mView->hwnd || foregroundHwnd == g_borderWindowHwnd) && selectedMonitor->workspace)
+    if((foregroundHwnd == g_mView->hwnd || foregroundHwnd == g_borderWindowHwnd) && selectedMonitor->workspace)
     {
         workspace_focus_selected_window(selectedMonitor->workspace);
     }
@@ -3722,8 +3732,8 @@ void menu_run(MenuDefinition *definition)
     }
 
     definition->onEscape = menu_on_escape;
-    menu_run_definition(mView, definition);
-    menu_focus(mView);
+    menu_run_definition(g_mView, definition);
+    menu_focus(g_mView);
 }
 
 BOOL terminal_with_uniqueStr_filter(ScratchWindow *self, Client *client)
@@ -3769,7 +3779,7 @@ ScratchWindow *register_scratch_with_unique_string(TCHAR *processImageName, CHAR
 
 void scratch_window_show(ScratchWindow *self)
 {
-    if(menuVisible)
+    if(g_menuVisible)
     {
         menu_hide();
     }
@@ -4745,7 +4755,7 @@ void border_window_update_with_defer(HWND self, HDWP hdwp)
 {
     if(selectedMonitor)
     {
-        if(selectedMonitor->scratchWindow || menuVisible)
+        if(selectedMonitor->scratchWindow || g_menuVisible)
         {
             InvalidateRect(self, NULL, FALSE);
         }
@@ -4818,7 +4828,7 @@ void border_window_update(HWND self)
 
 void drop_target_window_paint(HWND hWnd)
 {
-    if(selectedMonitor->workspace->selected || selectedMonitor->scratchWindow || menuVisible)
+    if(selectedMonitor->workspace->selected || selectedMonitor->scratchWindow || g_menuVisible)
     {
         PAINTSTRUCT ps;
         HDC hDC = BeginPaint(hWnd, &ps);
@@ -4844,9 +4854,9 @@ static LRESULT dcomp_border_window_message_loop(HWND window, UINT message, WPARA
         case WM_WINDOWPOSCHANGING:
             {
                 WINDOWPOS* windowPos = (WINDOWPOS*)lparam;
-                if(menuVisible)
+                if(g_menuVisible)
                 {
-                    windowPos->hwndInsertAfter = mView->hwnd;
+                    windowPos->hwndInsertAfter = g_mView->hwnd;
                 }
                 else if(!selectedMonitor->scratchWindow)
                 {
@@ -6011,8 +6021,8 @@ int run (void)
     configuration->textStyle = calloc(1, sizeof(TextStyle));
 
     TCHAR menuTitle[BUF_LEN] = L"nmenu";
-    mView = menu_create(menuTitle, configuration->textStyle);
-    ShowWindow(mView->hwnd, SW_HIDE);
+    g_mView = menu_create(menuTitle, configuration->textStyle);
+    ShowWindow(g_mView->hwnd, SW_HIDE);
 
     configuration->monitors = monitors;
     configuration->workspaces = workspaces;
@@ -6129,7 +6139,7 @@ int run (void)
     int menuTop = scratchWindowsScreenPadding;
     int menuWidth = selectedMonitor->w - (scratchWindowsScreenPadding * 2);
     int menuHeight = selectedMonitor->h - (scratchWindowsScreenPadding * 2);
-    SetWindowPos(mView->hwnd, HWND_TOPMOST, menuLeft, menuTop, menuWidth, menuHeight, SWP_HIDEWINDOW);
+    SetWindowPos(g_mView->hwnd, HWND_TOPMOST, menuLeft, menuTop, menuWidth, menuHeight, SWP_HIDEWINDOW);
 
     IWbemLocator *locator  = NULL;
 
