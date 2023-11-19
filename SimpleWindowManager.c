@@ -172,30 +172,30 @@ static BOOL hit_test_monitor(Monitor *monitor);
 static BOOL hit_test_client(Client *client);
 static void drag_drop_cancel(DragDropState *self);
 
-static IAudioEndpointVolume *audioEndpointVolume;
-static INetworkListManager *networkListManager;
+static IAudioEndpointVolume *g_audioEndpointVolume;
+static INetworkListManager *g_networkListManager;
 
-static Monitor *selectedMonitor = NULL;
-static Monitor *hiddenWindowMonitor = NULL;
+static Monitor *g_selectedMonitor = NULL;
+static Monitor *g_hiddenWindowMonitor = NULL;
 
-int numberOfWorkspaces;
-static Workspace **workspaces;
+int g_numberOfWorkspaces;
+static Workspace **g_workspaces;
 
-int numberOfMonitors;
-static Monitor **monitors;
-int numberOfDisplayMonitors;
-static Monitor *primaryMonitor;
-static Monitor *secondaryMonitor;
+int g_numberOfMonitors;
+static Monitor **g_monitors;
+int g_numberOfDisplayMonitors;
+static Monitor *g_primaryMonitor;
+static Monitor *g_secondaryMonitor;
 
-Bar **bars;
-int numberOfBars;
+Bar **g_bars;
+int g_numberOfBars;
 
 HBRUSH dropTargetBrush;
 HWND g_borderWindowHwnd;
 
 //defualts maybe there is a better way to do this
-long gapWidth = 13;
-int scratchWindowsScreenPadding = 250;
+long g_gapWidth = 13;
+int g_scratchWindowsScreenPadding = 250;
 COLORREF dropTargetColor = RGB(0, 90, 90);
 
 Layout deckLayout = {
@@ -485,7 +485,7 @@ void mimimize_focused_window(void)
 {
     HWND foregroundHwnd = GetForegroundWindow();
     ShowWindow(foregroundHwnd, SW_SHOWMINIMIZED);
-    workspace_focus_selected_window(selectedMonitor->workspace);
+    workspace_focus_selected_window(g_selectedMonitor->workspace);
 }
 
 void move_focused_client_next(void)
@@ -512,29 +512,29 @@ void move_focused_window_to_workspace(Workspace *workspace)
 {
     HWND foregroundHwnd = GetForegroundWindow();
     windowManager_move_window_to_workspace_and_arrange(foregroundHwnd, workspace);
-    workspace_focus_selected_window(selectedMonitor->workspace);
+    workspace_focus_selected_window(g_selectedMonitor->workspace);
 }
 
 void move_focused_window_to_selected_monitor_workspace(void)
 {
-    Workspace *workspace = selectedMonitor->workspace;
+    Workspace *workspace = g_selectedMonitor->workspace;
     move_focused_window_to_workspace(workspace);
 }
 
 void move_workspace_to_secondary_monitor_without_focus(Workspace *workspace)
 {
-    windowManager_move_workspace_to_monitor(secondaryMonitor, workspace);
-    if(primaryMonitor->workspace)
+    windowManager_move_workspace_to_monitor(g_secondaryMonitor, workspace);
+    if(g_primaryMonitor->workspace)
     {
-        workspace_focus_selected_window(primaryMonitor->workspace);
+        workspace_focus_selected_window(g_primaryMonitor->workspace);
     }
 }
 
 void move_focused_window_to_main(void)
 {
-    if(selectedMonitor->workspace)
+    if(g_selectedMonitor->workspace)
     {
-        Client *client = selectedMonitor->workspace->selected;
+        Client *client = g_selectedMonitor->workspace->selected;
         if(client)
         {
             if(client == client->workspace->clients)
@@ -553,9 +553,9 @@ void move_focused_window_to_main(void)
 
 void move_secondary_monitor_focused_window_to_main(void)
 {
-    if(secondaryMonitor->workspace)
+    if(g_secondaryMonitor->workspace)
     {
-        Client *client = secondaryMonitor->workspace->selected;
+        Client *client = g_secondaryMonitor->workspace->selected;
         if(client)
         {
             if(client == client->workspace->clients)
@@ -581,11 +581,11 @@ void toggle_create_window_in_current_workspace(void)
     {
         currentWindowRoutingMode = FilteredAndRoutedToWorkspace;
     }
-    for(int i = 0; i < numberOfMonitors; i++)
+    for(int i = 0; i < g_numberOfMonitors; i++)
     {
-        if(!monitors[i]->isHidden)
+        if(!g_monitors[i]->isHidden)
         {
-            bar_trigger_selected_window_paint(monitors[i]->bar);
+            bar_trigger_selected_window_paint(g_monitors[i]->bar);
         }
     }
 }
@@ -600,11 +600,11 @@ void toggle_ignore_workspace_filters(void)
     {
         currentWindowRoutingMode = FilteredAndRoutedToWorkspace;
     }
-    for(int i = 0; i < numberOfMonitors; i++)
+    for(int i = 0; i < g_numberOfMonitors; i++)
     {
-        if(!monitors[i]->isHidden)
+        if(!g_monitors[i]->isHidden)
         {
-            bar_trigger_selected_window_paint(monitors[i]->bar);
+            bar_trigger_selected_window_paint(g_monitors[i]->bar);
         }
     }
 }
@@ -619,18 +619,18 @@ void toggle_non_filtered_windows_assigned_to_current_workspace(void)
     {
         currentWindowRoutingMode = FilteredAndRoutedToWorkspace;
     }
-    for(int i = 0; i < numberOfMonitors; i++)
+    for(int i = 0; i < g_numberOfMonitors; i++)
     {
-        if(!monitors[i]->isHidden)
+        if(!g_monitors[i]->isHidden)
         {
-            bar_trigger_selected_window_paint(monitors[i]->bar);
+            bar_trigger_selected_window_paint(g_monitors[i]->bar);
         }
     }
 }
 
 void swap_selected_monitor_to(Workspace *workspace)
 {
-    windowManager_move_workspace_to_monitor(selectedMonitor, workspace);
+    windowManager_move_workspace_to_monitor(g_selectedMonitor, workspace);
     workspace_focus_selected_window(workspace);
 }
 
@@ -639,7 +639,7 @@ void goto_last_workspace(void)
     Workspace *workspace = g_lastWorkspace;
     if(workspace)
     {
-        windowManager_move_workspace_to_monitor(selectedMonitor, workspace);
+        windowManager_move_workspace_to_monitor(g_selectedMonitor, workspace);
         workspace_focus_selected_window(workspace);
     }
 }
@@ -712,7 +712,7 @@ void redraw_focused_window(void)
 
 void move_focused_window_right(void)
 {
-    if(selectedMonitor->scratchWindow)
+    if(g_selectedMonitor->scratchWindow)
     {
         return;
     }
@@ -730,7 +730,7 @@ void move_focused_window_right(void)
 
 void move_focused_window_left(void)
 {
-    if(selectedMonitor->scratchWindow)
+    if(g_selectedMonitor->scratchWindow)
     {
         return;
     }
@@ -748,7 +748,7 @@ void move_focused_window_left(void)
 
 void move_focused_window_up(void)
 {
-    if(selectedMonitor->scratchWindow)
+    if(g_selectedMonitor->scratchWindow)
     {
         return;
     }
@@ -783,7 +783,7 @@ void move_focused_window_to_monitor(Monitor *monitor)
 
 void move_focused_window_down(void)
 {
-    if(selectedMonitor->scratchWindow)
+    if(g_selectedMonitor->scratchWindow)
     {
         return;
     }
@@ -797,10 +797,10 @@ void move_focused_window_down(void)
 
 void select_next_window(void)
 {
-    Workspace *workspace = selectedMonitor->workspace;
-    if(selectedMonitor->scratchWindow)
+    Workspace *workspace = g_selectedMonitor->workspace;
+    if(g_selectedMonitor->scratchWindow)
     {
-        scratch_window_hide(selectedMonitor->scratchWindow);
+        scratch_window_hide(g_selectedMonitor->scratchWindow);
         workspace_focus_selected_window(workspace);
         return;
     }
@@ -810,10 +810,10 @@ void select_next_window(void)
 
 void select_previous_window(void)
 {
-    Workspace *workspace = selectedMonitor->workspace;
-    if(selectedMonitor->scratchWindow)
+    Workspace *workspace = g_selectedMonitor->workspace;
+    if(g_selectedMonitor->scratchWindow)
     {
-        scratch_window_hide(selectedMonitor->scratchWindow);
+        scratch_window_hide(g_selectedMonitor->scratchWindow);
         workspace_focus_selected_window(workspace);
         return;
     }
@@ -823,7 +823,7 @@ void select_previous_window(void)
 
 void toggle_selected_monitor_layout(void)
 {
-    Workspace *workspace = selectedMonitor->workspace;
+    Workspace *workspace = g_selectedMonitor->workspace;
     if(workspace->layout->next)
     {
         workspace->selected = workspace->clients;
@@ -857,9 +857,9 @@ void swap_selected_monitor_to_tile_layout(void)
 
 void arrange_clients_in_selected_workspace(void)
 {
-    selectedMonitor->workspace->mainOffset = 0;
-    workspace_arrange_windows(selectedMonitor->workspace);
-    workspace_focus_selected_window(selectedMonitor->workspace);
+    g_selectedMonitor->workspace->mainOffset = 0;
+    workspace_arrange_windows(g_selectedMonitor->workspace);
+    workspace_focus_selected_window(g_selectedMonitor->workspace);
     /* drag_drop_cancel(); */
 }
 
@@ -888,15 +888,15 @@ void monitor_calculate_height(Monitor *self, HWND taskbarHwnd)
 
 void monitors_resize_for_taskbar(HWND taskbarHwnd)
 {
-    for(int i = 0; i < numberOfMonitors; i++)
+    for(int i = 0; i < g_numberOfMonitors; i++)
     {
-        monitor_calculate_height(monitors[i], taskbarHwnd);
-        if(monitors[i]->workspace)
+        monitor_calculate_height(g_monitors[i], taskbarHwnd);
+        if(g_monitors[i]->workspace)
         {
-            workspace_arrange_windows(monitors[i]->workspace);
-            if(monitors[i] == selectedMonitor)
+            workspace_arrange_windows(g_monitors[i]->workspace);
+            if(g_monitors[i] == g_selectedMonitor)
             {
-                workspace_focus_selected_window(monitors[i]->workspace);
+                workspace_focus_selected_window(g_monitors[i]->workspace);
             }
         }
     }
@@ -1139,9 +1139,9 @@ BOOL is_root_window(HWND hwnd, LONG styles, LONG exStyles)
 Monitor* drop_target_find_monitor_from_mouse_location(void)
 {
     Monitor *result = NULL;
-    for(int i = 0; i < numberOfDisplayMonitors; i++)
+    for(int i = 0; i < g_numberOfDisplayMonitors; i++)
     {
-        Monitor *monitor = monitors[i];
+        Monitor *monitor = g_monitors[i];
         if(hit_test_monitor(monitor))
         {
             result = monitor;
@@ -1219,10 +1219,10 @@ void drag_drop_start_empty_workspace(DragDropState *self, Monitor *dropTargetMon
     SetWindowPos(
             self->dropTargetHwnd,
             HWND_TOP,
-            dropTargetMonitor->xOffset + gapWidth,
-            dropTargetMonitor->top + gapWidth,
-            dropTargetMonitor->w - (gapWidth * 2),
-            (dropTargetMonitor->bottom - dropTargetMonitor->top) - (gapWidth * 2),
+            dropTargetMonitor->xOffset + g_gapWidth,
+            dropTargetMonitor->top + g_gapWidth,
+            dropTargetMonitor->w - (g_gapWidth * 2),
+            (dropTargetMonitor->bottom - dropTargetMonitor->top) - (g_gapWidth * 2),
             SWP_SHOWWINDOW);
 }
 
@@ -1736,16 +1736,16 @@ void CALLBACK handle_windows_event(
             if(scratchWindow)
             {
                 BOOL isMinimized = IsIconic(hwnd);
-                if(!selectedMonitor->scratchWindow && !isMinimized)
+                if(!g_selectedMonitor->scratchWindow && !isMinimized)
                 {
                     scratch_window_show(scratchWindow);
                     return;
                 }
                 else
                 {
-                    if(selectedMonitor->scratchWindow != scratchWindow && !isMinimized)
+                    if(g_selectedMonitor->scratchWindow != scratchWindow && !isMinimized)
                     {
-                        scratch_window_hide(selectedMonitor->scratchWindow);
+                        scratch_window_hide(g_selectedMonitor->scratchWindow);
                         scratch_window_show(scratchWindow);
                         return;
                     }
@@ -1807,14 +1807,14 @@ void CALLBACK handle_windows_event(
                         return;
                     }
                 }
-                if(selectedMonitor->scratchWindow)
+                if(g_selectedMonitor->scratchWindow)
                 {
-                    if(selectedMonitor->scratchWindow->client)
+                    if(g_selectedMonitor->scratchWindow->client)
                     {
-                        if(!selectedMonitor->scratchWindow->client->data->isMinimized)
+                        if(!g_selectedMonitor->scratchWindow->client->data->isMinimized)
                         {
                             HDWP hdwp = BeginDeferWindowPos(1);
-                            client_move_to_location_on_screen(selectedMonitor->scratchWindow->client, hdwp, TRUE);
+                            client_move_to_location_on_screen(g_selectedMonitor->scratchWindow->client, hdwp, TRUE);
                             EndDeferWindowPos(hdwp);
                         }
                         return;
@@ -1828,15 +1828,15 @@ void CALLBACK handle_windows_event(
         }
         else if(event == EVENT_SYSTEM_FOREGROUND)
         {
-            if(selectedMonitor)
+            if(g_selectedMonitor)
             {
-                bar_trigger_selected_window_paint(selectedMonitor->bar);
+                bar_trigger_selected_window_paint(g_selectedMonitor->bar);
                 if(hit_test_hwnd(hwnd))
                 {
                     Client* client = windowManager_find_client_in_workspaces_by_hwnd(hwnd);
                     if(client)
                     {
-                        if(selectedMonitor->workspace->selected != client)
+                        if(g_selectedMonitor->workspace->selected != client)
                         {
                             client->workspace->selected = client;
                             monitor_select(client->workspace->monitor);
@@ -1845,11 +1845,11 @@ void CALLBACK handle_windows_event(
                 }
             }
 
-            if(selectedMonitor)
+            if(g_selectedMonitor)
             {
-                if(selectedMonitor->workspace->selected)
+                if(g_selectedMonitor->workspace->selected)
                 {
-                    if(selectedMonitor->workspace->selected->data->hwnd != hwnd && !selectedMonitor->scratchWindow && !g_menuVisible)
+                    if(g_selectedMonitor->workspace->selected->data->hwnd != hwnd && !g_selectedMonitor->scratchWindow && !g_menuVisible)
                     {
                         g_isForegroundWindowSameAsSelectMonitorSelected = FALSE;
                     }
@@ -1861,9 +1861,9 @@ void CALLBACK handle_windows_event(
             }
             g_eventForegroundHwnd = hwnd;
             border_window_update(g_borderWindowHwnd);
-            if(selectedMonitor)
+            if(g_selectedMonitor)
             {
-                bar_trigger_selected_window_paint(selectedMonitor->bar);
+                bar_trigger_selected_window_paint(g_selectedMonitor->bar);
             }
         }
     }
@@ -1883,7 +1883,7 @@ void windowManager_remove_client_if_found_by_hwnd(HWND hwnd)
         if(sWindow)
         {
             scratch_window_remove(sWindow);
-            workspace_focus_selected_window(selectedMonitor->workspace);
+            workspace_focus_selected_window(g_selectedMonitor->workspace);
         }
     }
     if(client)
@@ -1918,9 +1918,9 @@ void windowManager_move_window_to_workspace_and_arrange(HWND hwnd, Workspace *wo
     {
         client = scratchWindow->client;
         client->data->isScratchWindowBoundToWorkspace = TRUE;
-        if(selectedMonitor->scratchWindow == scratchWindow)
+        if(g_selectedMonitor->scratchWindow == scratchWindow)
         {
-            selectedMonitor->scratchWindow = NULL;
+            g_selectedMonitor->scratchWindow = NULL;
         }
         scratchWindow->client = NULL;
         SetWindowPos(client->data->hwnd, HWND_NOTOPMOST, 0, 0, 0, 0,  SWP_NOSIZE | SWP_NOMOVE);
@@ -1935,9 +1935,9 @@ void windowManager_move_window_to_workspace_and_arrange(HWND hwnd, Workspace *wo
 
 Client* windowManager_find_client_in_workspaces_by_hwnd(HWND hwnd)
 {
-    for(int i = 0; i < numberOfWorkspaces; i++)
+    for(int i = 0; i < g_numberOfWorkspaces; i++)
     {
-        Client *c = workspace_find_client_by_hwnd(workspaces[i], hwnd);
+        Client *c = workspace_find_client_by_hwnd(g_workspaces[i], hwnd);
         if(c)
         {
             return c;
@@ -2010,13 +2010,13 @@ Workspace* windowManager_find_client_workspace_using_filters(Client *client)
     }
     else if(currentWindowRoutingMode == NotFilteredCurrentWorkspace)
     {
-        workspaceFoundByFilter = selectedMonitor->workspace;
+        workspaceFoundByFilter = g_selectedMonitor->workspace;
     }
     else
     {
-        for(int i = 0; i < numberOfWorkspaces; i++)
+        for(int i = 0; i < g_numberOfWorkspaces; i++)
         {
-            Workspace *currentWorkspace = workspaces[i];
+            Workspace *currentWorkspace = g_workspaces[i];
             BOOL filterResult = FALSE;
             if(currentWorkspace->filterData)
             {
@@ -2031,7 +2031,7 @@ Workspace* windowManager_find_client_workspace_using_filters(Client *client)
             {
                 if(currentWindowRoutingMode == FilteredCurrentWorkspace)
                 {
-                    workspaceFoundByFilter = selectedMonitor->workspace;
+                    workspaceFoundByFilter = g_selectedMonitor->workspace;
                 }
                 else
                 {
@@ -2050,7 +2050,7 @@ Workspace* windowManager_find_client_workspace_using_filters(Client *client)
     {
         if(currentWindowRoutingMode == FilteredRoutedNonFilteredCurrentWorkspace && !alwaysExclude)
         {
-            result = selectedMonitor->workspace;
+            result = g_selectedMonitor->workspace;
         }
     }
 
@@ -2062,7 +2062,7 @@ void windowManager_move_workspace_to_monitor(Monitor *monitor, Workspace *worksp
     Monitor *currentMonitor = workspace->monitor;
 
     Workspace *selectedMonitorCurrentWorkspace = monitor->workspace;
-    if(monitor == selectedMonitor)
+    if(monitor == g_selectedMonitor)
     {
         g_lastWorkspace = selectedMonitorCurrentWorkspace;
     }
@@ -2269,7 +2269,7 @@ void client_move_to_location_on_screen(Client *client, HDWP hdwp, BOOL setZOrder
 
     if(!client->isVisible)
     {
-        targetLeft = hiddenWindowMonitor->xOffset;
+        targetLeft = g_hiddenWindowMonitor->xOffset;
     }
 
     if( targetTop == wrect.top &&
@@ -2370,7 +2370,7 @@ void client_set_screen_coordinates(Client *client, int w, int h, int x, int y)
 
 void client_stop_managing(void)
 {
-    Client *client = selectedMonitor->workspace->selected;
+    Client *client = g_selectedMonitor->workspace->selected;
     if(client)
     {
         HWND hwnd = client->data->hwnd;
@@ -2383,10 +2383,10 @@ void client_stop_managing(void)
         SetWindowPos(
             hwnd,
             HWND_TOP,
-            selectedMonitor->xOffset + scratchWindowsScreenPadding,
-            scratchWindowsScreenPadding,
-            selectedMonitor->w - (scratchWindowsScreenPadding * 2),
-            selectedMonitor->h - (scratchWindowsScreenPadding * 2),
+            g_selectedMonitor->xOffset + g_scratchWindowsScreenPadding,
+            g_scratchWindowsScreenPadding,
+            g_selectedMonitor->w - (g_scratchWindowsScreenPadding * 2),
+            g_selectedMonitor->h - (g_scratchWindowsScreenPadding * 2),
             SWP_SHOWWINDOW);
 
         SetForegroundWindow(hwnd);
@@ -2632,7 +2632,7 @@ void workspace_increase_main_width_selected_monitor(void)
     }
     else
     {
-        workspace_increase_main_width(selectedMonitor->workspace);
+        workspace_increase_main_width(g_selectedMonitor->workspace);
     }
 }
 
@@ -2660,7 +2660,7 @@ void workspace_decrease_main_width_selected_monitor(void)
     }
     else
     {
-        workspace_decrease_main_width(selectedMonitor->workspace);
+        workspace_decrease_main_width(g_selectedMonitor->workspace);
     }
 }
 
@@ -2832,10 +2832,10 @@ Workspace* workspace_register(TCHAR *name, WCHAR* tag, bool isIcon, Layout *layo
 
 Workspace* workspace_register_with_window_filter(TCHAR *name, WindowFilter windowFilter, WCHAR* tag, bool isIcon, Layout *layout)
 {
-    if(numberOfWorkspaces < MAX_WORKSPACES)
+    if(g_numberOfWorkspaces < MAX_WORKSPACES)
     {
-        Button ** buttons = (Button **) calloc(numberOfBars, sizeof(Button *));
-        Workspace *workspace = workspaces[numberOfWorkspaces];
+        Button ** buttons = (Button **) calloc(g_numberOfBars, sizeof(Button *));
+        Workspace *workspace = g_workspaces[g_numberOfWorkspaces];
         workspace->name = _wcsdup(name);
         workspace->windowFilter = windowFilter;
         workspace->buttons = buttons;
@@ -2843,7 +2843,7 @@ Workspace* workspace_register_with_window_filter(TCHAR *name, WindowFilter windo
         workspace->isIcon = isIcon;
         workspace->layout = layout;
         workspace->filterData = calloc(1, sizeof(WorkspaceFilterData));
-        numberOfWorkspaces++;
+        g_numberOfWorkspaces++;
         return workspace;
     }
 
@@ -3007,25 +3007,25 @@ void tilelayout_calulate_and_apply_client_sizes(Workspace *workspace)
 
     int numberOfClients = workspace_get_number_of_clients(workspace);
 
-    int mainX = workspace->monitor->xOffset + gapWidth;
+    int mainX = workspace->monitor->xOffset + g_gapWidth;
     int allWidth = 0;
 
     int mainWidth;
     int tileWidth;
     if(numberOfClients == 1)
     {
-      mainWidth = screenWidth - (gapWidth * 2);
+      mainWidth = screenWidth - (g_gapWidth * 2);
       tileWidth = 0;
-      allWidth = screenWidth - (gapWidth * 2);
+      allWidth = screenWidth - (g_gapWidth * 2);
     }
     else
     {
-      mainWidth = (screenWidth / 2) - gapWidth - (gapWidth / 2) + workspace->mainOffset;
-      tileWidth = (screenWidth / 2) - gapWidth - (gapWidth / 2) - workspace->mainOffset;
-      allWidth = (screenWidth / 2) - gapWidth;
+      mainWidth = (screenWidth / 2) - g_gapWidth - (g_gapWidth / 2) + workspace->mainOffset;
+      tileWidth = (screenWidth / 2) - g_gapWidth - (g_gapWidth / 2) - workspace->mainOffset;
+      allWidth = (screenWidth / 2) - g_gapWidth;
     }
 
-    int mainHeight = screenHeight - (gapWidth * 2);
+    int mainHeight = screenHeight - (g_gapWidth * 2);
     int tileHeight = 0;
     if(numberOfClients < 3)
     {
@@ -3035,13 +3035,13 @@ void tilelayout_calulate_and_apply_client_sizes(Workspace *workspace)
     {
         long numberOfTiles = numberOfClients - 1;
         long numberOfGaps = numberOfTiles - 1;
-        long spaceForGaps = numberOfGaps * gapWidth;
+        long spaceForGaps = numberOfGaps * g_gapWidth;
         long spaceForTiles = mainHeight - spaceForGaps;
         tileHeight = spaceForTiles / numberOfTiles;
     }
 
-    int mainY = workspace->monitor->top + gapWidth;
-    int tileX = workspace->monitor->xOffset + mainWidth + (gapWidth * 2);
+    int mainY = workspace->monitor->top + g_gapWidth;
+    int tileX = workspace->monitor->xOffset + mainWidth + (g_gapWidth * 2);
 
     Client *c  = workspace->clients;
     int NumberOfClients2 = 0;
@@ -3056,7 +3056,7 @@ void tilelayout_calulate_and_apply_client_sizes(Workspace *workspace)
         else
         {
             client_set_screen_coordinates(c, tileWidth, tileHeight, tileX, tileY);
-            tileY = tileY + tileHeight + gapWidth;
+            tileY = tileY + tileHeight + g_gapWidth;
         }
 
         NumberOfClients2++;
@@ -3244,24 +3244,24 @@ void verticaldeckLayout_calcluate_rect(Monitor *monitor, int mainXOffset, int nu
     int screenWidth = monitor-> w;
     int monitorXOffset = monitor->xOffset;
 
-    int mainX = monitorXOffset + gapWidth;
+    int mainX = monitorXOffset + g_gapWidth;
 
     int mainWidth;
     int secondaryWidth;
     if(numberOfClients == 1)
     {
-        mainWidth = screenWidth - (gapWidth * 2);
+        mainWidth = screenWidth - (g_gapWidth * 2);
         secondaryWidth = 0;
     }
     else
     {
-        mainWidth = (screenWidth / 2) - gapWidth - (gapWidth / 2) + mainXOffset;
-        secondaryWidth = (screenWidth / 2) - gapWidth - (gapWidth / 2) - mainXOffset;
+        mainWidth = (screenWidth / 2) - g_gapWidth - (g_gapWidth / 2) + mainXOffset;
+        secondaryWidth = (screenWidth / 2) - g_gapWidth - (g_gapWidth / 2) - mainXOffset;
     }
 
-    int allHeight = screenHeight - (gapWidth * 2);
-    int allY = monitor->top + gapWidth;
-    int secondaryX = monitorXOffset + mainWidth + (gapWidth * 2);
+    int allHeight = screenHeight - (g_gapWidth * 2);
+    int allY = monitor->top + g_gapWidth;
+    int secondaryX = monitorXOffset + mainWidth + (g_gapWidth * 2);
 
     mainToFill->top = allY;
     mainToFill->bottom = allY + allHeight;
@@ -3280,11 +3280,11 @@ void horizontaldeckLayout_calcluate_rect(Monitor *monitor, int mainXOffset, int 
     int screenWidth = monitor -> w;
     int monitorXOffset = monitor->xOffset;
 
-    int mainY = monitor->top + gapWidth;
+    int mainY = monitor->top + g_gapWidth;
 
     int mainHeight;
     int secondaryHeight;
-    int heightNoBarNoGaps = screenHeight - (gapWidth * 2);
+    int heightNoBarNoGaps = screenHeight - (g_gapWidth * 2);
     if(numberOfClients == 1)
     {
         mainHeight = heightNoBarNoGaps;
@@ -3292,13 +3292,13 @@ void horizontaldeckLayout_calcluate_rect(Monitor *monitor, int mainXOffset, int 
     }
     else
     {
-        mainHeight = (heightNoBarNoGaps / 2) - (gapWidth / 2) + mainXOffset;
-        secondaryHeight = (heightNoBarNoGaps / 2) - (gapWidth / 2) - mainXOffset;
+        mainHeight = (heightNoBarNoGaps / 2) - (g_gapWidth / 2) + mainXOffset;
+        secondaryHeight = (heightNoBarNoGaps / 2) - (g_gapWidth / 2) - mainXOffset;
     }
 
-    int allWidth = screenWidth - (gapWidth * 2);
-    int allX = monitorXOffset + gapWidth;
-    int secondaryY = mainY + mainHeight + gapWidth;
+    int allWidth = screenWidth - (g_gapWidth * 2);
+    int allX = monitorXOffset + g_gapWidth;
+    int secondaryY = mainY + mainHeight + g_gapWidth;
 
     mainToFill->top = mainY;
     mainToFill->bottom = mainY + mainHeight;
@@ -3499,10 +3499,10 @@ void monacleLayout_calculate_and_apply_client_sizes(Workspace *workspace)
     int screenWidth = workspace->monitor->w;
     int screenHeight = workspace->monitor->bottom - workspace->monitor->top;
 
-    int allX = workspace->monitor->xOffset + gapWidth;
-    int allWidth = screenWidth - (gapWidth * 2);
-    int allHeight = screenHeight - (gapWidth * 2);
-    int allY = workspace->monitor->top + gapWidth;
+    int allX = workspace->monitor->xOffset + g_gapWidth;
+    int allWidth = screenWidth - (g_gapWidth * 2);
+    int allHeight = screenHeight - (g_gapWidth * 2);
+    int allY = workspace->monitor->top + g_gapWidth;
 
     Client *c  = workspace->clients;
     int numberOfClients = 0;
@@ -3531,10 +3531,10 @@ void menu_focus(MenuView *self)
 
     SendInput(ARRAYSIZE(inputs), inputs, sizeof(INPUT));
 
-    int x = selectedMonitor->xOffset + scratchWindowsScreenPadding;
-    int y = scratchWindowsScreenPadding;
-    int w = selectedMonitor->w - (scratchWindowsScreenPadding * 2);
-    int h = selectedMonitor->h - (scratchWindowsScreenPadding * 2);
+    int x = g_selectedMonitor->xOffset + g_scratchWindowsScreenPadding;
+    int y = g_scratchWindowsScreenPadding;
+    int w = g_selectedMonitor->w - (g_scratchWindowsScreenPadding * 2);
+    int h = g_selectedMonitor->h - (g_scratchWindowsScreenPadding * 2);
 
     if(!g_menuVisible)
     {
@@ -3558,10 +3558,10 @@ void menu_focus(MenuView *self)
 
 void scratch_window_focus(ScratchWindow *self)
 {
-    self->client->data->x = selectedMonitor->xOffset + scratchWindowsScreenPadding;
-    self->client->data->y = scratchWindowsScreenPadding;
-    self->client->data->w = selectedMonitor->w - (scratchWindowsScreenPadding * 2);
-    self->client->data->h = selectedMonitor->h - (scratchWindowsScreenPadding * 2);
+    self->client->data->x = g_selectedMonitor->xOffset + g_scratchWindowsScreenPadding;
+    self->client->data->y = g_scratchWindowsScreenPadding;
+    self->client->data->w = g_selectedMonitor->w - (g_scratchWindowsScreenPadding * 2);
+    self->client->data->h = g_selectedMonitor->h - (g_scratchWindowsScreenPadding * 2);
 
     LONG lStyle = GetWindowLong(self->client->data->hwnd, GWL_STYLE);
     lStyle &= ~(WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_SYSMENU | WS_VSCROLL);
@@ -3601,10 +3601,10 @@ void scratch_window_add(ScratchWindow *self)
     self->client->isVisible = TRUE;
     self->client->data->isScratchWindow = TRUE;
     self->client->data->isMinimized = TRUE;
-    self->client->data->x = selectedMonitor->xOffset + scratchWindowsScreenPadding;
-    self->client->data->y = scratchWindowsScreenPadding;
-    self->client->data->w = selectedMonitor->w - (scratchWindowsScreenPadding * 2);
-    self->client->data->h = selectedMonitor->h - (scratchWindowsScreenPadding * 2);
+    self->client->data->x = g_selectedMonitor->xOffset + g_scratchWindowsScreenPadding;
+    self->client->data->y = g_scratchWindowsScreenPadding;
+    self->client->data->w = g_selectedMonitor->w - (g_scratchWindowsScreenPadding * 2);
+    self->client->data->h = g_selectedMonitor->h - (g_scratchWindowsScreenPadding * 2);
 }
 
 ScratchWindow* scratch_windows_find_from_hwnd(HWND hwnd)
@@ -3710,7 +3710,7 @@ void menu_hide(void)
 {
     g_menuVisible = FALSE;
     ShowWindow(g_mView->hwnd, SW_HIDE);
-    bar_trigger_selected_window_paint(selectedMonitor->bar);
+    bar_trigger_selected_window_paint(g_selectedMonitor->bar);
     border_window_update(g_borderWindowHwnd);
 }
 
@@ -3718,17 +3718,17 @@ void menu_on_escape(void)
 {
     menu_hide();
     HWND foregroundHwnd = GetForegroundWindow();
-    if((foregroundHwnd == g_mView->hwnd || foregroundHwnd == g_borderWindowHwnd) && selectedMonitor->workspace)
+    if((foregroundHwnd == g_mView->hwnd || foregroundHwnd == g_borderWindowHwnd) && g_selectedMonitor->workspace)
     {
-        workspace_focus_selected_window(selectedMonitor->workspace);
+        workspace_focus_selected_window(g_selectedMonitor->workspace);
     }
 }
 
 void menu_run(MenuDefinition *definition)
 {
-    if(selectedMonitor->scratchWindow)
+    if(g_selectedMonitor->scratchWindow)
     {
-        scratch_window_hide(selectedMonitor->scratchWindow);
+        scratch_window_hide(g_selectedMonitor->scratchWindow);
     }
 
     definition->onEscape = menu_on_escape;
@@ -3785,16 +3785,16 @@ void scratch_window_show(ScratchWindow *self)
     }
 
     self->client->data->isMinimized = FALSE;
-    selectedMonitor->scratchWindow = self;
+    g_selectedMonitor->scratchWindow = self;
     scratch_window_focus(self);
 }
 
 void scratch_window_hide(ScratchWindow *self)
 {
-    selectedMonitor->scratchWindow = NULL;
+    g_selectedMonitor->scratchWindow = NULL;
     self->client->data->isMinimized = TRUE;
     ShowWindow(self->client->data->hwnd, SW_MINIMIZE);
-    workspace_focus_selected_window(selectedMonitor->workspace);
+    workspace_focus_selected_window(g_selectedMonitor->workspace);
 }
 
 unsigned __int64 ConvertFileTimeToInt64(FILETIME *fileTime)
@@ -3817,24 +3817,24 @@ void scratch_window_toggle(ScratchWindow *self)
         }
         else
         {
-            if(selectedMonitor->scratchWindow == self)
+            if(g_selectedMonitor->scratchWindow == self)
             {
                 return;
             }
-            else if(selectedMonitor->scratchWindow)
+            else if(g_selectedMonitor->scratchWindow)
             {
-                scratch_window_hide(selectedMonitor->scratchWindow);
+                scratch_window_hide(g_selectedMonitor->scratchWindow);
             }
             scratch_window_show(self);
         }
     }
     else
     {
-        if(selectedMonitor->scratchWindow)
+        if(g_selectedMonitor->scratchWindow)
         {
-            if(selectedMonitor->scratchWindow != self)
+            if(g_selectedMonitor->scratchWindow != self)
             {
-                scratch_window_hide(selectedMonitor->scratchWindow);
+                scratch_window_hide(g_selectedMonitor->scratchWindow);
             }
         }
 
@@ -3847,7 +3847,7 @@ void scratch_window_toggle(ScratchWindow *self)
             self->timeout = nowLong + 50000000;
             if(self->runFunc)
             {
-                self->runFunc(self, selectedMonitor, scratchWindowsScreenPadding);
+                self->runFunc(self, g_selectedMonitor, g_scratchWindowsScreenPadding);
                 return;
             }
             if(self->stdOutCallback)
@@ -3864,9 +3864,9 @@ void scratch_window_toggle(ScratchWindow *self)
 
 void scratch_window_remove(ScratchWindow *self)
 {
-    if(selectedMonitor->scratchWindow == self)
+    if(g_selectedMonitor->scratchWindow == self)
     {
-        selectedMonitor->scratchWindow = NULL;
+        g_selectedMonitor->scratchWindow = NULL;
     }
 
     free_client(self->client);
@@ -3908,7 +3908,7 @@ void monitor_calulate_coordinates(Monitor *monitor, int monitorNumber)
     monitor->xOffset = monitorNumber * screenWidth - screenWidth;
     monitor->w = screenWidth;
     monitor->h = screenHeight;
-    if(monitorNumber > numberOfDisplayMonitors)
+    if(monitorNumber > g_numberOfDisplayMonitors)
     {
         monitor->isHidden = TRUE;
     }
@@ -3934,13 +3934,13 @@ void monitor_calulate_coordinates(Monitor *monitor, int monitorNumber)
 
 void monitor_select_next(void)
 {
-    if(selectedMonitor->next)
+    if(g_selectedMonitor->next)
     {
-        monitor_select(selectedMonitor->next);
+        monitor_select(g_selectedMonitor->next);
     }
     else
     {
-        monitor_select(monitors[0]);
+        monitor_select(g_monitors[0]);
     }
 }
 
@@ -3950,24 +3950,24 @@ void monitor_select(Monitor *monitor)
     {
         return;
     }
-    for(int i = 0; i < numberOfMonitors; i++)
+    for(int i = 0; i < g_numberOfMonitors; i++)
     {
-        if(monitors[i]-> selected == TRUE && monitor != monitors[i])
+        if(g_monitors[i]-> selected == TRUE && monitor != g_monitors[i])
         {
-            monitors[i]->selected = FALSE;
+            g_monitors[i]->selected = FALSE;
         }
     }
     monitor->selected = TRUE;
-    Monitor* previousSelectedMonitor = selectedMonitor;
-    selectedMonitor = monitor;
+    Monitor* previousSelectedMonitor = g_selectedMonitor;
+    g_selectedMonitor = monitor;
 
-    if(selectedMonitor->scratchWindow)
+    if(g_selectedMonitor->scratchWindow)
     {
-        scratch_window_focus(selectedMonitor->scratchWindow);
+        scratch_window_focus(g_selectedMonitor->scratchWindow);
     }
     else
     {
-        workspace_focus_selected_window(selectedMonitor->workspace);
+        workspace_focus_selected_window(g_selectedMonitor->workspace);
     }
     bar_trigger_selected_window_paint(monitor->bar);
     if(previousSelectedMonitor)
@@ -3978,7 +3978,7 @@ void monitor_select(Monitor *monitor)
 
 void monitor_set_layout(Layout *layout)
 {
-    Workspace *workspace = selectedMonitor->workspace;
+    Workspace *workspace = g_selectedMonitor->workspace;
     workspace->layout = layout;
     workspace_arrange_windows(workspace);
     if(workspace->monitor->bar)
@@ -4454,11 +4454,11 @@ void fill_volume_percent(TCHAR *toFill, int maxLen)
 {
     float currentVol = -1.0f;
     IAudioEndpointVolume_GetMasterVolumeLevelScalar(
-            audioEndpointVolume,
+            g_audioEndpointVolume,
             &currentVol);
 
     BOOL isVolumeMuted;
-    IAudioEndpointVolume_GetMute(audioEndpointVolume, &isVolumeMuted);
+    IAudioEndpointVolume_GetMute(g_audioEndpointVolume, &isVolumeMuted);
 
     if(isVolumeMuted)
     {
@@ -4534,12 +4534,12 @@ void fill_is_connected_to_internet(TCHAR *toFill, int maxLen)
     WCHAR internetDown = { 0xf127 };
     WCHAR internetStatusChar = internetUnknown;
 
-    if(networkListManager)
+    if(g_networkListManager)
     {
         VARIANT_BOOL isInternetConnected;
 
         HRESULT hr;
-        hr = INetworkListManager_get_IsConnectedToInternet(networkListManager, &isInternetConnected);
+        hr = INetworkListManager_get_IsConnectedToInternet(g_networkListManager, &isInternetConnected);
         if(FAILED(hr))
         {
             /* internetStatusChar = internetUnknown; */
@@ -4753,15 +4753,15 @@ void border_window_hide(HWND self)
 
 void border_window_update_with_defer(HWND self, HDWP hdwp)
 {
-    if(selectedMonitor)
+    if(g_selectedMonitor)
     {
-        if(selectedMonitor->scratchWindow || g_menuVisible)
+        if(g_selectedMonitor->scratchWindow || g_menuVisible)
         {
             InvalidateRect(self, NULL, FALSE);
         }
-        else if(selectedMonitor->workspace->selected)
+        else if(g_selectedMonitor->workspace->selected)
         {
-            ClientData *selectedClientData = selectedMonitor->workspace->selected->data;
+            ClientData *selectedClientData = g_selectedMonitor->workspace->selected->data;
             BOOL isWindowVisible = IsWindowVisible(self);
 
             RECT currentPosition;
@@ -4828,7 +4828,7 @@ void border_window_update(HWND self)
 
 void drop_target_window_paint(HWND hWnd)
 {
-    if(selectedMonitor->workspace->selected || selectedMonitor->scratchWindow || g_menuVisible)
+    if(g_selectedMonitor->workspace->selected || g_selectedMonitor->scratchWindow || g_menuVisible)
     {
         PAINTSTRUCT ps;
         HDC hDC = BeginPaint(hWnd, &ps);
@@ -4858,20 +4858,20 @@ static LRESULT dcomp_border_window_message_loop(HWND window, UINT message, WPARA
                 {
                     windowPos->hwndInsertAfter = g_mView->hwnd;
                 }
-                else if(!selectedMonitor->scratchWindow)
+                else if(!g_selectedMonitor->scratchWindow)
                 {
-                    if(selectedMonitor->workspace->selected)
+                    if(g_selectedMonitor->workspace->selected)
                     {
                         windowPos->hwndInsertAfter = HWND_BOTTOM;
                     }
                 }
                 else
                 {
-                    if(selectedMonitor->scratchWindow->client)
+                    if(g_selectedMonitor->scratchWindow->client)
                     {
-                        if(selectedMonitor->workspace->selected)
+                        if(g_selectedMonitor->workspace->selected)
                         {
-                            windowPos->hwndInsertAfter = selectedMonitor->scratchWindow->client->data->hwnd;
+                            windowPos->hwndInsertAfter = g_selectedMonitor->scratchWindow->client->data->hwnd;
                         }
                     }
                 }
@@ -5331,29 +5331,29 @@ void keybindings_register_defaults_with_modifiers(int modifiers)
     keybinding_create_with_no_arg("move_focused_window_to_main", modifiers, VK_RETURN, move_focused_window_to_main);
     keybinding_create_with_no_arg("mimimize_focused_window", LShift | modifiers, VK_DOWN, mimimize_focused_window);
 
-    keybinding_create_with_workspace_arg("swap_selected_monitor_to[1]", modifiers, VK_1, swap_selected_monitor_to, workspaces[0]);
-    keybinding_create_with_workspace_arg("swap_selected_monitor_to[2]", modifiers, VK_2, swap_selected_monitor_to, workspaces[1]);
-    keybinding_create_with_workspace_arg("swap_selected_monitor_to[3]", modifiers, VK_3, swap_selected_monitor_to, workspaces[2]);
-    keybinding_create_with_workspace_arg("swap_selected_monitor_to[4]", modifiers, VK_4, swap_selected_monitor_to, workspaces[3]);
-    keybinding_create_with_workspace_arg("swap_selected_monitor_to[5]", modifiers, VK_5, swap_selected_monitor_to, workspaces[4]);
-    keybinding_create_with_workspace_arg("swap_selected_monitor_to[6]", modifiers, VK_6, swap_selected_monitor_to, workspaces[5]);
-    keybinding_create_with_workspace_arg("swap_selected_monitor_to[7]", modifiers, VK_7, swap_selected_monitor_to, workspaces[6]);
-    keybinding_create_with_workspace_arg("swap_selected_monitor_to[8]", modifiers, VK_8, swap_selected_monitor_to, workspaces[7]);
-    keybinding_create_with_workspace_arg("swap_selected_monitor_to[9]", modifiers, VK_9, swap_selected_monitor_to, workspaces[8]);
-    keybinding_create_with_workspace_arg("swap_selected_monitor_to[0]", modifiers, VK_0, swap_selected_monitor_to, workspaces[9]);
+    keybinding_create_with_workspace_arg("swap_selected_monitor_to[1]", modifiers, VK_1, swap_selected_monitor_to, g_workspaces[0]);
+    keybinding_create_with_workspace_arg("swap_selected_monitor_to[2]", modifiers, VK_2, swap_selected_monitor_to, g_workspaces[1]);
+    keybinding_create_with_workspace_arg("swap_selected_monitor_to[3]", modifiers, VK_3, swap_selected_monitor_to, g_workspaces[2]);
+    keybinding_create_with_workspace_arg("swap_selected_monitor_to[4]", modifiers, VK_4, swap_selected_monitor_to, g_workspaces[3]);
+    keybinding_create_with_workspace_arg("swap_selected_monitor_to[5]", modifiers, VK_5, swap_selected_monitor_to, g_workspaces[4]);
+    keybinding_create_with_workspace_arg("swap_selected_monitor_to[6]", modifiers, VK_6, swap_selected_monitor_to, g_workspaces[5]);
+    keybinding_create_with_workspace_arg("swap_selected_monitor_to[7]", modifiers, VK_7, swap_selected_monitor_to, g_workspaces[6]);
+    keybinding_create_with_workspace_arg("swap_selected_monitor_to[8]", modifiers, VK_8, swap_selected_monitor_to, g_workspaces[7]);
+    keybinding_create_with_workspace_arg("swap_selected_monitor_to[9]", modifiers, VK_9, swap_selected_monitor_to, g_workspaces[8]);
+    keybinding_create_with_workspace_arg("swap_selected_monitor_to[0]", modifiers, VK_0, swap_selected_monitor_to, g_workspaces[9]);
 
     keybinding_create_with_no_arg("move_focused_client_next", LShift | modifiers, VK_J, move_focused_client_next);
     keybinding_create_with_no_arg("move_focused_client_previous", LShift | modifiers, VK_K, move_focused_client_previous);
 
-    keybinding_create_with_workspace_arg("move_focused_window_to_workspace[1]", LShift | modifiers, VK_1, move_focused_window_to_workspace, workspaces[0]);
-    keybinding_create_with_workspace_arg("move_focused_window_to_workspace[2]", LShift | modifiers, VK_2, move_focused_window_to_workspace, workspaces[1]);
-    keybinding_create_with_workspace_arg("move_focused_window_to_workspace[3]", LShift | modifiers, VK_3, move_focused_window_to_workspace, workspaces[2]);
-    keybinding_create_with_workspace_arg("move_focused_window_to_workspace[4]", LShift | modifiers, VK_4, move_focused_window_to_workspace, workspaces[3]);
-    keybinding_create_with_workspace_arg("move_focused_window_to_workspace[5]", LShift | modifiers, VK_5, move_focused_window_to_workspace, workspaces[4]);
-    keybinding_create_with_workspace_arg("move_focused_window_to_workspace[6]", LShift | modifiers, VK_6, move_focused_window_to_workspace, workspaces[5]);
-    keybinding_create_with_workspace_arg("move_focused_window_to_workspace[7]", LShift | modifiers, VK_7, move_focused_window_to_workspace, workspaces[6]);
-    keybinding_create_with_workspace_arg("move_focused_window_to_workspace[8]", LShift | modifiers, VK_8, move_focused_window_to_workspace, workspaces[7]);
-    keybinding_create_with_workspace_arg("move_focused_window_to_workspace[9]", LShift | modifiers, VK_9, move_focused_window_to_workspace, workspaces[8]);
+    keybinding_create_with_workspace_arg("move_focused_window_to_workspace[1]", LShift | modifiers, VK_1, move_focused_window_to_workspace, g_workspaces[0]);
+    keybinding_create_with_workspace_arg("move_focused_window_to_workspace[2]", LShift | modifiers, VK_2, move_focused_window_to_workspace, g_workspaces[1]);
+    keybinding_create_with_workspace_arg("move_focused_window_to_workspace[3]", LShift | modifiers, VK_3, move_focused_window_to_workspace, g_workspaces[2]);
+    keybinding_create_with_workspace_arg("move_focused_window_to_workspace[4]", LShift | modifiers, VK_4, move_focused_window_to_workspace, g_workspaces[3]);
+    keybinding_create_with_workspace_arg("move_focused_window_to_workspace[5]", LShift | modifiers, VK_5, move_focused_window_to_workspace, g_workspaces[4]);
+    keybinding_create_with_workspace_arg("move_focused_window_to_workspace[6]", LShift | modifiers, VK_6, move_focused_window_to_workspace, g_workspaces[5]);
+    keybinding_create_with_workspace_arg("move_focused_window_to_workspace[7]", LShift | modifiers, VK_7, move_focused_window_to_workspace, g_workspaces[6]);
+    keybinding_create_with_workspace_arg("move_focused_window_to_workspace[8]", LShift | modifiers, VK_8, move_focused_window_to_workspace, g_workspaces[7]);
+    keybinding_create_with_workspace_arg("move_focused_window_to_workspace[9]", LShift | modifiers, VK_9, move_focused_window_to_workspace, g_workspaces[8]);
     keybinding_create_with_no_arg("move_focused_window_to_selected_monitor_workspace", LShift | modifiers, VK_0, move_focused_window_to_selected_monitor_workspace);
 
     keybinding_create_with_no_arg("goto_last_workspace", modifiers, VK_O, goto_last_workspace);
@@ -5388,8 +5388,8 @@ void register_secondary_monitor_default_bindings(Monitor *pMonitor, Monitor *sMo
 
 void register_secondary_monitor_default_bindings_with_modifiers(int modifiers, Monitor *pMonitor, Monitor *sMonitor, Workspace **spaces)
 {
-    primaryMonitor = pMonitor;
-    secondaryMonitor = sMonitor;
+    g_primaryMonitor = pMonitor;
+    g_secondaryMonitor = sMonitor;
 
     keybinding_create_with_workspace_arg("move_workspace_to_secondary_monitor_without_focus[1]", modifiers, VK_F1, move_workspace_to_secondary_monitor_without_focus, spaces[0]);
     keybinding_create_with_workspace_arg("move_workspace_to_secondary_monitor_without_focus[2]", modifiers, VK_F2, move_workspace_to_secondary_monitor_without_focus, spaces[1]);
@@ -5411,9 +5411,9 @@ void keybindings_register_float_window_movements(int modifiers)
     keybinding_create_with_no_arg("move_focused_window_up", modifiers, VK_UP, move_focused_window_up);
     keybinding_create_with_no_arg("move_focused_window_down", modifiers, VK_DOWN, move_focused_window_down);
 
-    for(int i = 0; i < numberOfDisplayMonitors; i++)
+    for(int i = 0; i < g_numberOfDisplayMonitors; i++)
     {
-        keybinding_create_with_monitor_arg("move_focused_window_to_monitor", modifiers, VK_1 + i, move_focused_window_to_monitor, monitors[i]);
+        keybinding_create_with_monitor_arg("move_focused_window_to_monitor", modifiers, VK_1 + i, move_focused_window_to_monitor, g_monitors[i]);
     }
 }
 
@@ -5677,7 +5677,7 @@ void process_with_stdin_start(TCHAR *cmdArgs, CHAR **lines, int numberOfLines, v
 
 void process_with_stdout_start(CHAR *cmdArgs, void (*onSuccess) (CHAR *))
 {
-    if(selectedMonitor->scratchWindow)
+    if(g_selectedMonitor->scratchWindow)
     {
         return;
     }
@@ -5801,9 +5801,9 @@ void open_windows_scratch_exit_callback(char *stdOut)
         client->workspace->layout->move_client_to_main(client);
         client->workspace->selected = client->workspace->clients;
 
-        if(selectedMonitor->workspace != client->workspace)
+        if(g_selectedMonitor->workspace != client->workspace)
         {
-            windowManager_move_workspace_to_monitor(selectedMonitor, client->workspace);
+            windowManager_move_workspace_to_monitor(g_selectedMonitor, client->workspace);
             workspace_arrange_windows(client->workspace);
             workspace_focus_selected_window(client->workspace);
         }
@@ -5821,12 +5821,12 @@ void open_windows_scratch_exit_callback(char *stdOut)
         RECT focusedRect;
         GetWindowRect(hwnd, &focusedRect);
         
-        if(focusedRect.left > selectedMonitor->xOffset + selectedMonitor->w ||
-                focusedRect.left < selectedMonitor->xOffset)
+        if(focusedRect.left > g_selectedMonitor->xOffset + g_selectedMonitor->w ||
+                focusedRect.left < g_selectedMonitor->xOffset)
         {
             MoveWindow(
                     hwnd,
-                    selectedMonitor->xOffset + (configuration->gapWidth * 2),
+                    g_selectedMonitor->xOffset + (configuration->gapWidth * 2),
                     focusedRect.top,
                     focusedRect.right - focusedRect.left,
                     focusedRect.bottom - focusedRect.top,
@@ -5969,7 +5969,7 @@ BOOL CALLBACK enum_display_monitors_callback(HMONITOR hMonitor, HDC hdcMonitor, 
     UNREFERENCED_PARAMETER(hdcMonitor);
     UNREFERENCED_PARAMETER(lprcMonitor);
     UNREFERENCED_PARAMETER(dwData);
-    numberOfDisplayMonitors++;
+    g_numberOfDisplayMonitors++;
     return TRUE;
 }
 
@@ -5995,25 +5995,25 @@ int run (void)
     }
 
     discover_monitors();
-    numberOfBars = numberOfDisplayMonitors;
+    g_numberOfBars = g_numberOfDisplayMonitors;
 
-    workspaces = calloc(MAX_WORKSPACES, sizeof(Workspace*));
+    g_workspaces = calloc(MAX_WORKSPACES, sizeof(Workspace*));
     for(int i = 0; i < MAX_WORKSPACES; i++)
     {
-        workspaces[i] = calloc(1, sizeof(Workspace));
+        g_workspaces[i] = calloc(1, sizeof(Workspace));
     }
 
-    numberOfMonitors = MAX_WORKSPACES;
-    monitors = calloc(numberOfMonitors, sizeof(Monitor*));
-    for(int i = 0; i < numberOfMonitors; i++)
+    g_numberOfMonitors = MAX_WORKSPACES;
+    g_monitors = calloc(g_numberOfMonitors, sizeof(Monitor*));
+    for(int i = 0; i < g_numberOfMonitors; i++)
     {
         Monitor *monitor = calloc(1, sizeof(Monitor));
         monitor->id = i + 1;
-        monitors[i] = monitor;
+        g_monitors[i] = monitor;
         monitor_calulate_coordinates(monitor, i + 1);
-        if(i > 0 && !monitors[i]->isHidden)
+        if(i > 0 && !g_monitors[i]->isHidden)
         {
-            monitors[i - 1]->next = monitors[i];
+            g_monitors[i - 1]->next = g_monitors[i];
         }
     }
 
@@ -6024,8 +6024,8 @@ int run (void)
     g_mView = menu_create(menuTitle, configuration->textStyle);
     ShowWindow(g_mView->hwnd, SW_HIDE);
 
-    configuration->monitors = monitors;
-    configuration->workspaces = workspaces;
+    configuration->monitors = g_monitors;
+    configuration->workspaces = g_workspaces;
     configuration->windowRoutingMode = FilteredAndRoutedToWorkspace;
     configuration->alwaysRedraw = FALSE;
     configuration->scratchWindowsScreenPadding = 0;
@@ -6045,11 +6045,11 @@ int run (void)
     }
     if(configuration->gapWidth)
     {
-        gapWidth = configuration->gapWidth;
+        g_gapWidth = configuration->gapWidth;
     }
     if(configuration->scratchWindowsScreenPadding != 0)
     {
-        scratchWindowsScreenPadding = configuration->scratchWindowsScreenPadding;
+        g_scratchWindowsScreenPadding = configuration->scratchWindowsScreenPadding;
     }
 
     configuration->textStyle->_backgroundBrush = CreateSolidBrush(configuration->textStyle->backgroundColor);
@@ -6062,37 +6062,37 @@ int run (void)
     HINSTANCE moduleHandle = GetModuleHandle(NULL);
     dropTargetBrush = CreateSolidBrush(dropTargetColor);
 
-    hiddenWindowMonitor = calloc(1, sizeof(Monitor));
-    monitor_calulate_coordinates(hiddenWindowMonitor, numberOfMonitors);
+    g_hiddenWindowMonitor = calloc(1, sizeof(Monitor));
+    monitor_calulate_coordinates(g_hiddenWindowMonitor, g_numberOfMonitors);
 
     int barTop = 0;
     int barBottom = barHeight;
     int buttonWidth = 30;
 
-    bars = calloc(numberOfBars, sizeof(Bar*));
-    assert(bars);
+    g_bars = calloc(g_numberOfBars, sizeof(Bar*));
+    assert(g_bars);
 
     WNDCLASSEX *barWindowClass = bar_register_window_class();
-    for(int i = 0; i < numberOfMonitors; i++)
+    for(int i = 0; i < g_numberOfMonitors; i++)
     {
-        monitors[i]->top = barHeight;
+        g_monitors[i]->top = barHeight;
 
-        if(!monitors[i]->isHidden)
+        if(!g_monitors[i]->isHidden)
         {
             Bar *bar = calloc(1, sizeof(Bar));
             bar->textStyle = configuration->textStyle;
-            bar->numberOfButtons = numberOfWorkspaces;
+            bar->numberOfButtons = g_numberOfWorkspaces;
             bar->buttons = calloc(bar->numberOfButtons, sizeof(Button*));
-            for(int j = 0; j < numberOfWorkspaces; j++)
+            for(int j = 0; j < g_numberOfWorkspaces; j++)
             {
                 RECT *buttonRect = malloc(sizeof(RECT));
-                buttonRect->left = monitors[i]->xOffset + (j * buttonWidth);
-                buttonRect->right = monitors[i]->xOffset + (j * buttonWidth) + buttonWidth;
+                buttonRect->left = g_monitors[i]->xOffset + (j * buttonWidth);
+                buttonRect->right = g_monitors[i]->xOffset + (j * buttonWidth) + buttonWidth;
                 buttonRect->top = barTop;
                 buttonRect->bottom = barBottom;
 
                 Button *button = malloc(sizeof(Button));
-                button->workspace = workspaces[j];
+                button->workspace = g_workspaces[j];
                 button->bar = bar;
                 button->rect = buttonRect;
                 button_set_has_clients(button, FALSE);
@@ -6106,18 +6106,18 @@ int run (void)
                 }
                 bar->buttons[j] = button;
 
-                workspaces[j]->buttons[i] = button;
-                workspaces[j]->numberOfButtons = i + 1;
+                g_workspaces[j]->buttons[i] = button;
+                g_workspaces[j]->numberOfButtons = i + 1;
             }
 
-            bars[i] = bar;
-            bar->monitor = monitors[i];
-            monitors[i]->bar = bar;
+            g_bars[i] = bar;
+            bar->monitor = g_monitors[i];
+            g_monitors[i]->bar = bar;
 
-            int selectWindowLeft = (buttonWidth * numberOfWorkspaces);
+            int selectWindowLeft = (buttonWidth * g_numberOfWorkspaces);
             RECT *timesRect = malloc(sizeof(RECT));
-            timesRect->left = (monitors[i]->w / 2);
-            timesRect->right = monitors[i]->w - 10;
+            timesRect->left = (g_monitors[i]->w / 2);
+            timesRect->right = g_monitors[i]->w - 10;
             timesRect->top = barTop;
             timesRect->bottom = barBottom;
 
@@ -6127,18 +6127,18 @@ int run (void)
             selectedWindowDescRect->top = barTop;
             selectedWindowDescRect->bottom = barBottom;
 
-            bars[i]->selectedWindowDescRect = selectedWindowDescRect;
-            bars[i]->timesRect = timesRect;
+            g_bars[i]->selectedWindowDescRect = selectedWindowDescRect;
+            g_bars[i]->timesRect = timesRect;
         }
-        monitor_set_workspace(workspaces[i], monitors[i]);
+        monitor_set_workspace(g_workspaces[i], g_monitors[i]);
     }
 
-    monitor_select(monitors[0]);
+    monitor_select(g_monitors[0]);
 
-    int menuLeft = selectedMonitor->xOffset + scratchWindowsScreenPadding;
-    int menuTop = scratchWindowsScreenPadding;
-    int menuWidth = selectedMonitor->w - (scratchWindowsScreenPadding * 2);
-    int menuHeight = selectedMonitor->h - (scratchWindowsScreenPadding * 2);
+    int menuLeft = g_selectedMonitor->xOffset + g_scratchWindowsScreenPadding;
+    int menuTop = g_scratchWindowsScreenPadding;
+    int menuWidth = g_selectedMonitor->w - (g_scratchWindowsScreenPadding * 2);
+    int menuHeight = g_selectedMonitor->h - (g_scratchWindowsScreenPadding * 2);
     SetWindowPos(g_mView->hwnd, HWND_TOPMOST, menuLeft, menuTop, menuWidth, menuHeight, SWP_HIDEWINDOW);
 
     IWbemLocator *locator  = NULL;
@@ -6182,13 +6182,13 @@ int run (void)
             NULL,
             &services);
 
-    networkListManager = NULL;
+    g_networkListManager = NULL;
     hr = CoCreateInstance(
             &CLSID_NetworkListManager,
             NULL,
             CLSCTX_ALL,
             &IID_INetworkListManager,
-            &networkListManager);
+            &g_networkListManager);
     if (FAILED(hr))
     {
         return 1;
@@ -6221,7 +6221,7 @@ int run (void)
       &IID_IAudioEndpointVolume,
       CLSCTX_ALL,
       NULL,
-      (void**)&audioEndpointVolume);
+      (void**)&g_audioEndpointVolume);
     if (FAILED(hr)) {
       IMMDeviceEnumerator_Release(mmdevice);
       IMMDevice_Release(mmdevice);
@@ -6229,11 +6229,11 @@ int run (void)
       return 1;
     }
 
-    for(int i = 0; i < numberOfBars; i++)
+    for(int i = 0; i < g_numberOfBars; i++)
     {
-        bar_run(bars[i], barWindowClass, barHeight);
-        HDC barHdc = GetDC(bars[i]->hwnd);
-        bar_add_segments_from_configuration(bars[i], barHdc, configuration);
+        bar_run(g_bars[i], barWindowClass, barHeight);
+        HDC barHdc = GetDC(g_bars[i]->hwnd);
+        bar_add_segments_from_configuration(g_bars[i], barHdc, configuration);
         DeleteDC(barHdc);
     }
 
@@ -6241,11 +6241,11 @@ int run (void)
 
     EnumWindows(enum_windows_callback, 0);
 
-    for(int i = 0; i < numberOfMonitors; i++)
+    for(int i = 0; i < g_numberOfMonitors; i++)
     {
-        int workspaceNumberOfClients = workspace_get_number_of_clients(monitors[i]->workspace);
+        int workspaceNumberOfClients = workspace_get_number_of_clients(g_monitors[i]->workspace);
         HDWP hdwp = BeginDeferWindowPos(workspaceNumberOfClients);
-        monitor_set_workspace_and_arrange(monitors[i]->workspace, monitors[i], hdwp);
+        monitor_set_workspace_and_arrange(g_monitors[i]->workspace, g_monitors[i], hdwp);
         EndDeferWindowPos(hdwp);
     }
 
@@ -6308,7 +6308,7 @@ int run (void)
         0,
         WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
 
-    workspace_focus_selected_window(selectedMonitor->workspace);
+    workspace_focus_selected_window(g_selectedMonitor->workspace);
 
     MSG msg;
     while (GetMessage(&msg, NULL, 0, 0))
@@ -6322,7 +6322,7 @@ int run (void)
 
     IMMDeviceEnumerator_Release(mmdevice);
     IMMDevice_Release(mmdevice);
-    IAudioEndpointVolume_Release(audioEndpointVolume);
+    IAudioEndpointVolume_Release(g_audioEndpointVolume);
     CoUninitialize();
 
     UnhookWindowsHookEx(g_kb_hook);
