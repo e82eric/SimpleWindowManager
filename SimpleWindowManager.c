@@ -255,15 +255,15 @@ static CHAR *cmdLineExe = "C:\\Windows\\System32\\cmd.exe";
 
 IWbemServices *services = NULL;
 
-KeyBinding *headKeyBinding;
-ScratchWindow *scratchWindows;
+KeyBinding *g_headKeyBinding;
+ScratchWindow *g_scratchWindows;
 MenuView *g_mView;
 BOOL g_menuVisible;
-Command *commands[MAX_COMMANDS];
-int numberOfCommands = 0;
-BOOL isForegroundWindowSameAsSelectMonitorSelected;
-HWND eventForegroundHwnd;
-int floatWindowMovement;
+Command *g_commands[MAX_COMMANDS];
+int g_numberOfCommands = 0;
+BOOL g_isForegroundWindowSameAsSelectMonitorSelected;
+HWND g_eventForegroundHwnd;
+int g_floatWindowMovement;
 size_t g_longestCommandName;
 
 enum WindowRoutingMode currentWindowRoutingMode;
@@ -276,11 +276,11 @@ void run_command_from_menu(char *stdOut)
     char *next_token = NULL;
     char* name = strtok_s(stdOut, deli, &next_token);
 
-    for(int i = 0; i < numberOfCommands; i++)
+    for(int i = 0; i < g_numberOfCommands; i++)
     {
-        if(strcmp(name, commands[i]->name) == 0)
+        if(strcmp(name, g_commands[i]->name) == 0)
         {
-            commands[i]->execute(commands[i]);
+            g_commands[i]->execute(g_commands[i]);
             return;
         }
     }
@@ -308,9 +308,9 @@ int commands_list(int maxItems, CHAR **lines)
 
     int numberOfBindings = 1;
 
-    for(int i = 0; i < numberOfCommands && numberOfCommands < maxItems; i++)
+    for(int i = 0; i < g_numberOfCommands && g_numberOfCommands < maxItems; i++)
     {
-        Command *command = commands[i];
+        Command *command = g_commands[i];
         CHAR keyBindingStr[MAX_PATH];
         keyBindingStr[0] = '\0';
 
@@ -655,7 +655,7 @@ void float_window_move_up(HWND hwnd)
     RECT currentRect;
     GetWindowRect(hwnd, &currentRect);
     int targetLeft = currentRect.left;
-    int targetTop = currentRect.top - floatWindowMovement;
+    int targetTop = currentRect.top - g_floatWindowMovement;
     int targetWidth = currentRect.right - currentRect.left;
     int targetHeight = currentRect.bottom - currentRect.top;
     MoveWindow(hwnd, targetLeft, targetTop, targetWidth, targetHeight, FALSE);
@@ -666,7 +666,7 @@ void float_window_move_down(HWND hwnd)
     RECT currentRect;
     GetWindowRect(hwnd, &currentRect);
     int targetLeft = currentRect.left;
-    int targetTop = currentRect.top + floatWindowMovement;
+    int targetTop = currentRect.top + g_floatWindowMovement;
     int targetWidth = currentRect.right - currentRect.left;
     int targetHeight = currentRect.bottom - currentRect.top;
     MoveWindow(hwnd, targetLeft, targetTop, targetWidth, targetHeight, FALSE);
@@ -676,7 +676,7 @@ void float_window_move_right(HWND hwnd)
 {
     RECT currentRect;
     GetWindowRect(hwnd, &currentRect);
-    int targetLeft = currentRect.left + floatWindowMovement;
+    int targetLeft = currentRect.left + g_floatWindowMovement;
     int targetTop = currentRect.top;
     int targetWidth = currentRect.right - currentRect.left;
     int targetHeight = currentRect.bottom - currentRect.top;
@@ -687,7 +687,7 @@ void float_window_move_left(HWND hwnd)
 {
     RECT currentRect;
     GetWindowRect(hwnd, &currentRect);
-    int targetLeft = currentRect.left - floatWindowMovement;
+    int targetLeft = currentRect.left - g_floatWindowMovement;
     int targetTop = currentRect.top;
     int targetWidth = currentRect.right - currentRect.left;
     int targetHeight = currentRect.bottom - currentRect.top;
@@ -1483,7 +1483,7 @@ LRESULT CALLBACK handle_key_press(int code, WPARAM w, LPARAM l)
     PKBDLLHOOKSTRUCT p = (PKBDLLHOOKSTRUCT)l;
     if (code == 0 && (w == WM_KEYDOWN || w == WM_SYSKEYDOWN))
     {
-        KeyBinding *keyBinding = headKeyBinding;
+        KeyBinding *keyBinding = g_headKeyBinding;
         while(keyBinding)
         {
             if(p->vkCode == keyBinding->key)
@@ -1851,15 +1851,15 @@ void CALLBACK handle_windows_event(
                 {
                     if(selectedMonitor->workspace->selected->data->hwnd != hwnd && !selectedMonitor->scratchWindow && !g_menuVisible)
                     {
-                        isForegroundWindowSameAsSelectMonitorSelected = FALSE;
+                        g_isForegroundWindowSameAsSelectMonitorSelected = FALSE;
                     }
                     else
                     {
-                        isForegroundWindowSameAsSelectMonitorSelected = TRUE;
+                        g_isForegroundWindowSameAsSelectMonitorSelected = TRUE;
                     }
                 }
             }
-            eventForegroundHwnd = hwnd;
+            g_eventForegroundHwnd = hwnd;
             border_window_update(g_borderWindowHwnd);
             if(selectedMonitor)
             {
@@ -2871,7 +2871,7 @@ void workspace_focus_selected_window(Workspace *workspace)
             keybd_event(0, 0, 0, 0);
             SetForegroundWindow(workspace->selected->data->hwnd);
         }
-        isForegroundWindowSameAsSelectMonitorSelected = TRUE;
+        g_isForegroundWindowSameAsSelectMonitorSelected = TRUE;
     }
     if(workspace->monitor->bar)
     {
@@ -3619,7 +3619,7 @@ ScratchWindow* scratch_windows_find_from_hwnd(HWND hwnd)
         } 
     }
 
-    ScratchWindow *current = scratchWindows;
+    ScratchWindow *current = g_scratchWindows;
     while(current)
     {
         if(current->client)
@@ -3643,7 +3643,7 @@ ScratchWindow* scratch_windows_find_from_client(Client *client)
         return NULL;
     }
 
-    ScratchWindow *current = scratchWindows;
+    ScratchWindow *current = g_scratchWindows;
     while(current)
     {
         if(current->scratchFilter)
@@ -3680,13 +3680,13 @@ ScratchWindow* scratch_windows_find_from_client(Client *client)
 
 void scratch_windows_add_to_end(ScratchWindow *scratchWindow)
 {
-    if(scratchWindows == NULL)
+    if(g_scratchWindows == NULL)
     {
-        scratchWindows = scratchWindow;
+        g_scratchWindows = scratchWindow;
     }
     else
     {
-        ScratchWindow *current = scratchWindows;
+        ScratchWindow *current = g_scratchWindows;
         while(current)
         {
             if(!current->next)
@@ -4024,14 +4024,14 @@ void bar_render_selected_window_description(Bar *bar, HDC hdc)
             break;
     }
 
-    HWND foregroundHwnd = eventForegroundHwnd;
+    HWND foregroundHwnd = g_eventForegroundHwnd;
     Client* focusedClient = windowManager_find_client_in_workspaces_by_hwnd(foregroundHwnd);
     Client* clientToRender;
 
     TCHAR *isManagedIndicator = L"\0";
     if(focusedClient)
     {
-        if(isForegroundWindowSameAsSelectMonitorSelected)
+        if(g_isForegroundWindowSameAsSelectMonitorSelected)
         {
             isManagedIndicator = L"";
         }
@@ -4881,7 +4881,7 @@ static LRESULT dcomp_border_window_message_loop(HWND window, UINT message, WPARA
             {
                 UINT width = LOWORD(lparam);
                 UINT height = HIWORD(lparam);
-                dcomp_border_window_draw(width, height, !isForegroundWindowSameAsSelectMonitorSelected);
+                dcomp_border_window_draw(width, height, !g_isForegroundWindowSameAsSelectMonitorSelected);
             }
             break;
         case WM_PAINT:
@@ -4891,7 +4891,7 @@ static LRESULT dcomp_border_window_message_loop(HWND window, UINT message, WPARA
 
                 UINT width = rcWindow.right - rcWindow.left;
                 UINT height = rcWindow.bottom - rcWindow.top;
-                dcomp_border_window_draw(width, height, !isForegroundWindowSameAsSelectMonitorSelected);
+                dcomp_border_window_draw(width, height, !g_isForegroundWindowSameAsSelectMonitorSelected);
             }
             break;
         case WM_ERASEBKGND:
@@ -5119,13 +5119,13 @@ void command_shell_arg_get_description(Command *self, int maxLen, CHAR *toFill)
 
 void command_register(Command *self)
 {
-    commands[numberOfCommands] = self;
-    numberOfCommands++;
+    g_commands[g_numberOfCommands] = self;
+    g_numberOfCommands++;
 }
 
 Command *command_create(CHAR *name)
 {
-    if(numberOfCommands < MAX_COMMANDS)
+    if(g_numberOfCommands < MAX_COMMANDS)
     {
         size_t nameLen = strlen(name);
         if(nameLen > g_longestCommandName)
@@ -5281,13 +5281,13 @@ void keybinding_create_with_menu_arg(CHAR *name, int modifiers, unsigned int key
 
 void keybinding_add_to_list(KeyBinding *binding)
 {
-    if(!headKeyBinding)
+    if(!g_headKeyBinding)
     {
-        headKeyBinding = binding;
+        g_headKeyBinding = binding;
     }
     else
     {
-        KeyBinding *current = headKeyBinding;
+        KeyBinding *current = g_headKeyBinding;
         while(current->next)
         {
             current = current->next;
@@ -5298,7 +5298,7 @@ void keybinding_add_to_list(KeyBinding *binding)
 
 KeyBinding* keybindings_find_existing_or_create(CHAR* name, int modifiers, unsigned int key)
 {
-    KeyBinding *current = headKeyBinding;
+    KeyBinding *current = g_headKeyBinding;
     while(current)
     {
         if(current->modifiers == modifiers && current->key == key)
@@ -6057,7 +6057,7 @@ int run (void)
     configuration->textStyle->_focusBackgroundBrush = CreateSolidBrush(configuration->textStyle->focusBackgroundColor);
     configuration->textStyle->_focusPen2 = CreatePen(PS_SOLID, configuration->textStyle->borderWidth, configuration->textStyle->focusColor2);
 
-    floatWindowMovement = configuration->floatWindowMovement;
+    g_floatWindowMovement = configuration->floatWindowMovement;
 
     HINSTANCE moduleHandle = GetModuleHandle(NULL);
     dropTargetBrush = CreateSolidBrush(dropTargetColor);
