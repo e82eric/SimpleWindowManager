@@ -190,13 +190,7 @@ static Monitor *g_secondaryMonitor;
 Bar **g_bars;
 int g_numberOfBars;
 
-HBRUSH dropTargetBrush;
 HWND g_borderWindowHwnd;
-
-//defualts maybe there is a better way to do this
-long g_gapWidth = 13;
-int g_scratchWindowsScreenPadding = 250;
-COLORREF dropTargetColor = RGB(0, 90, 90);
 
 Layout deckLayout = {
     .select_next_window = deckLayout_select_next_window,
@@ -1219,10 +1213,10 @@ void drag_drop_start_empty_workspace(DragDropState *self, Monitor *dropTargetMon
     SetWindowPos(
             self->dropTargetHwnd,
             HWND_TOP,
-            dropTargetMonitor->xOffset + g_gapWidth,
-            dropTargetMonitor->top + g_gapWidth,
-            dropTargetMonitor->w - (g_gapWidth * 2),
-            (dropTargetMonitor->bottom - dropTargetMonitor->top) - (g_gapWidth * 2),
+            dropTargetMonitor->xOffset + dropTargetMonitor->workspaceStyle->gapWidth,
+            dropTargetMonitor->top + dropTargetMonitor->workspaceStyle->gapWidth,
+            dropTargetMonitor->w - (dropTargetMonitor->workspaceStyle->gapWidth * 2),
+            (dropTargetMonitor->bottom - dropTargetMonitor->top) - (dropTargetMonitor->workspaceStyle->gapWidth * 2),
             SWP_SHOWWINDOW);
 }
 
@@ -2383,10 +2377,10 @@ void client_stop_managing(void)
         SetWindowPos(
             hwnd,
             HWND_TOP,
-            g_selectedMonitor->xOffset + g_scratchWindowsScreenPadding,
-            g_scratchWindowsScreenPadding,
-            g_selectedMonitor->w - (g_scratchWindowsScreenPadding * 2),
-            g_selectedMonitor->h - (g_scratchWindowsScreenPadding * 2),
+            g_selectedMonitor->xOffset + g_selectedMonitor->workspaceStyle->scratchWindowsScreenPadding,
+            g_selectedMonitor->workspaceStyle->scratchWindowsScreenPadding,
+            g_selectedMonitor->w - (g_selectedMonitor->workspaceStyle->scratchWindowsScreenPadding * 2),
+            g_selectedMonitor->h - (g_selectedMonitor->workspaceStyle->scratchWindowsScreenPadding * 2),
             SWP_SHOWWINDOW);
 
         SetForegroundWindow(hwnd);
@@ -3002,30 +2996,32 @@ void tilelayout_move_client_previous(Client *client)
 
 void tilelayout_calulate_and_apply_client_sizes(Workspace *workspace)
 {
+    int gapWidth = workspace->monitor->workspaceStyle->gapWidth;
+
     int screenWidth = workspace->monitor->w;
     int screenHeight = workspace->monitor->bottom - workspace->monitor->top;
 
     int numberOfClients = workspace_get_number_of_clients(workspace);
 
-    int mainX = workspace->monitor->xOffset + g_gapWidth;
+    int mainX = workspace->monitor->xOffset + gapWidth;
     int allWidth = 0;
 
     int mainWidth;
     int tileWidth;
     if(numberOfClients == 1)
     {
-      mainWidth = screenWidth - (g_gapWidth * 2);
+      mainWidth = screenWidth - (gapWidth * 2);
       tileWidth = 0;
-      allWidth = screenWidth - (g_gapWidth * 2);
+      allWidth = screenWidth - (gapWidth * 2);
     }
     else
     {
-      mainWidth = (screenWidth / 2) - g_gapWidth - (g_gapWidth / 2) + workspace->mainOffset;
-      tileWidth = (screenWidth / 2) - g_gapWidth - (g_gapWidth / 2) - workspace->mainOffset;
-      allWidth = (screenWidth / 2) - g_gapWidth;
+      mainWidth = (screenWidth / 2) - gapWidth - (gapWidth / 2) + workspace->mainOffset;
+      tileWidth = (screenWidth / 2) - gapWidth - (gapWidth / 2) - workspace->mainOffset;
+      allWidth = (screenWidth / 2) - gapWidth;
     }
 
-    int mainHeight = screenHeight - (g_gapWidth * 2);
+    int mainHeight = screenHeight - (gapWidth * 2);
     int tileHeight = 0;
     if(numberOfClients < 3)
     {
@@ -3035,13 +3031,13 @@ void tilelayout_calulate_and_apply_client_sizes(Workspace *workspace)
     {
         long numberOfTiles = numberOfClients - 1;
         long numberOfGaps = numberOfTiles - 1;
-        long spaceForGaps = numberOfGaps * g_gapWidth;
+        long spaceForGaps = numberOfGaps * gapWidth;
         long spaceForTiles = mainHeight - spaceForGaps;
         tileHeight = spaceForTiles / numberOfTiles;
     }
 
-    int mainY = workspace->monitor->top + g_gapWidth;
-    int tileX = workspace->monitor->xOffset + mainWidth + (g_gapWidth * 2);
+    int mainY = workspace->monitor->top + gapWidth;
+    int tileX = workspace->monitor->xOffset + mainWidth + (gapWidth * 2);
 
     Client *c  = workspace->clients;
     int NumberOfClients2 = 0;
@@ -3056,7 +3052,7 @@ void tilelayout_calulate_and_apply_client_sizes(Workspace *workspace)
         else
         {
             client_set_screen_coordinates(c, tileWidth, tileHeight, tileX, tileY);
-            tileY = tileY + tileHeight + g_gapWidth;
+            tileY = tileY + tileHeight + gapWidth;
         }
 
         NumberOfClients2++;
@@ -3240,28 +3236,30 @@ void deckLayout_move_client_previous(Client *client)
 
 void verticaldeckLayout_calcluate_rect(Monitor *monitor, int mainXOffset, int numberOfClients, RECT *mainToFill, RECT *secondaryToFill)
 {
+    int gapWidth = monitor->workspaceStyle->gapWidth;
+
     int screenHeight = monitor->bottom - monitor->top;
     int screenWidth = monitor-> w;
     int monitorXOffset = monitor->xOffset;
 
-    int mainX = monitorXOffset + g_gapWidth;
+    int mainX = monitorXOffset + gapWidth;
 
     int mainWidth;
     int secondaryWidth;
     if(numberOfClients == 1)
     {
-        mainWidth = screenWidth - (g_gapWidth * 2);
+        mainWidth = screenWidth - (gapWidth * 2);
         secondaryWidth = 0;
     }
     else
     {
-        mainWidth = (screenWidth / 2) - g_gapWidth - (g_gapWidth / 2) + mainXOffset;
-        secondaryWidth = (screenWidth / 2) - g_gapWidth - (g_gapWidth / 2) - mainXOffset;
+        mainWidth = (screenWidth / 2) - gapWidth - (gapWidth / 2) + mainXOffset;
+        secondaryWidth = (screenWidth / 2) - gapWidth - (gapWidth / 2) - mainXOffset;
     }
 
-    int allHeight = screenHeight - (g_gapWidth * 2);
-    int allY = monitor->top + g_gapWidth;
-    int secondaryX = monitorXOffset + mainWidth + (g_gapWidth * 2);
+    int allHeight = screenHeight - (gapWidth * 2);
+    int allY = monitor->top + gapWidth;
+    int secondaryX = monitorXOffset + mainWidth + (gapWidth * 2);
 
     mainToFill->top = allY;
     mainToFill->bottom = allY + allHeight;
@@ -3276,15 +3274,17 @@ void verticaldeckLayout_calcluate_rect(Monitor *monitor, int mainXOffset, int nu
 
 void horizontaldeckLayout_calcluate_rect(Monitor *monitor, int mainXOffset, int numberOfClients, RECT *mainToFill, RECT *secondaryToFill)
 {
+    int gapWidth = monitor->workspaceStyle->gapWidth;
+
     int screenHeight = monitor->bottom - monitor->top;
     int screenWidth = monitor -> w;
     int monitorXOffset = monitor->xOffset;
 
-    int mainY = monitor->top + g_gapWidth;
+    int mainY = monitor->top + gapWidth;
 
     int mainHeight;
     int secondaryHeight;
-    int heightNoBarNoGaps = screenHeight - (g_gapWidth * 2);
+    int heightNoBarNoGaps = screenHeight - (gapWidth * 2);
     if(numberOfClients == 1)
     {
         mainHeight = heightNoBarNoGaps;
@@ -3292,13 +3292,13 @@ void horizontaldeckLayout_calcluate_rect(Monitor *monitor, int mainXOffset, int 
     }
     else
     {
-        mainHeight = (heightNoBarNoGaps / 2) - (g_gapWidth / 2) + mainXOffset;
-        secondaryHeight = (heightNoBarNoGaps / 2) - (g_gapWidth / 2) - mainXOffset;
+        mainHeight = (heightNoBarNoGaps / 2) - (gapWidth / 2) + mainXOffset;
+        secondaryHeight = (heightNoBarNoGaps / 2) - (gapWidth / 2) - mainXOffset;
     }
 
-    int allWidth = screenWidth - (g_gapWidth * 2);
-    int allX = monitorXOffset + g_gapWidth;
-    int secondaryY = mainY + mainHeight + g_gapWidth;
+    int allWidth = screenWidth - (gapWidth * 2);
+    int allX = monitorXOffset + gapWidth;
+    int secondaryY = mainY + mainHeight + gapWidth;
 
     mainToFill->top = mainY;
     mainToFill->bottom = mainY + mainHeight;
@@ -3487,6 +3487,7 @@ void monacleLayout_select_previous_client(Workspace *workspace)
 
 void monacleLayout_calculate_and_apply_client_sizes(Workspace *workspace)
 {
+    int gapWidth = workspace->monitor->workspaceStyle->gapWidth;
     //if we are switching to this layout we want to make sure that the selected window is the top of the stack
     if(workspace->selected)
     {
@@ -3499,10 +3500,10 @@ void monacleLayout_calculate_and_apply_client_sizes(Workspace *workspace)
     int screenWidth = workspace->monitor->w;
     int screenHeight = workspace->monitor->bottom - workspace->monitor->top;
 
-    int allX = workspace->monitor->xOffset + g_gapWidth;
-    int allWidth = screenWidth - (g_gapWidth * 2);
-    int allHeight = screenHeight - (g_gapWidth * 2);
-    int allY = workspace->monitor->top + g_gapWidth;
+    int allX = workspace->monitor->xOffset + gapWidth;
+    int allWidth = screenWidth - (gapWidth * 2);
+    int allHeight = screenHeight - (gapWidth * 2);
+    int allY = workspace->monitor->top + gapWidth;
 
     Client *c  = workspace->clients;
     int numberOfClients = 0;
@@ -3531,10 +3532,10 @@ void menu_focus(MenuView *self)
 
     SendInput(ARRAYSIZE(inputs), inputs, sizeof(INPUT));
 
-    int x = g_selectedMonitor->xOffset + g_scratchWindowsScreenPadding;
-    int y = g_scratchWindowsScreenPadding;
-    int w = g_selectedMonitor->w - (g_scratchWindowsScreenPadding * 2);
-    int h = g_selectedMonitor->h - (g_scratchWindowsScreenPadding * 2);
+    int x = g_selectedMonitor->xOffset + g_selectedMonitor->workspaceStyle->scratchWindowsScreenPadding;
+    int y = g_selectedMonitor->workspaceStyle->scratchWindowsScreenPadding;
+    int w = g_selectedMonitor->w - (g_selectedMonitor->workspaceStyle->scratchWindowsScreenPadding * 2);
+    int h = g_selectedMonitor->h - (g_selectedMonitor->workspaceStyle->scratchWindowsScreenPadding * 2);
 
     if(!g_menuVisible)
     {
@@ -3558,10 +3559,10 @@ void menu_focus(MenuView *self)
 
 void scratch_window_focus(ScratchWindow *self)
 {
-    self->client->data->x = g_selectedMonitor->xOffset + g_scratchWindowsScreenPadding;
-    self->client->data->y = g_scratchWindowsScreenPadding;
-    self->client->data->w = g_selectedMonitor->w - (g_scratchWindowsScreenPadding * 2);
-    self->client->data->h = g_selectedMonitor->h - (g_scratchWindowsScreenPadding * 2);
+    self->client->data->x = g_selectedMonitor->xOffset + g_selectedMonitor->workspaceStyle->scratchWindowsScreenPadding;
+    self->client->data->y = g_selectedMonitor->workspaceStyle->scratchWindowsScreenPadding;
+    self->client->data->w = g_selectedMonitor->w - (g_selectedMonitor->workspaceStyle->scratchWindowsScreenPadding * 2);
+    self->client->data->h = g_selectedMonitor->h - (g_selectedMonitor->workspaceStyle->scratchWindowsScreenPadding * 2);
 
     LONG lStyle = GetWindowLong(self->client->data->hwnd, GWL_STYLE);
     lStyle &= ~(WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_SYSMENU | WS_VSCROLL);
@@ -3601,10 +3602,10 @@ void scratch_window_add(ScratchWindow *self)
     self->client->isVisible = TRUE;
     self->client->data->isScratchWindow = TRUE;
     self->client->data->isMinimized = TRUE;
-    self->client->data->x = g_selectedMonitor->xOffset + g_scratchWindowsScreenPadding;
-    self->client->data->y = g_scratchWindowsScreenPadding;
-    self->client->data->w = g_selectedMonitor->w - (g_scratchWindowsScreenPadding * 2);
-    self->client->data->h = g_selectedMonitor->h - (g_scratchWindowsScreenPadding * 2);
+    self->client->data->x = g_selectedMonitor->xOffset + g_selectedMonitor->workspaceStyle->scratchWindowsScreenPadding;
+    self->client->data->y = g_selectedMonitor->workspaceStyle->scratchWindowsScreenPadding;
+    self->client->data->w = g_selectedMonitor->w - (g_selectedMonitor->workspaceStyle->scratchWindowsScreenPadding * 2);
+    self->client->data->h = g_selectedMonitor->h - (g_selectedMonitor->workspaceStyle->scratchWindowsScreenPadding * 2);
 }
 
 ScratchWindow* scratch_windows_find_from_hwnd(HWND hwnd)
@@ -3847,7 +3848,7 @@ void scratch_window_toggle(ScratchWindow *self)
             self->timeout = nowLong + 50000000;
             if(self->runFunc)
             {
-                self->runFunc(self, g_selectedMonitor, g_scratchWindowsScreenPadding);
+                self->runFunc(self, g_selectedMonitor, g_selectedMonitor->workspaceStyle->scratchWindowsScreenPadding);
                 return;
             }
             if(self->stdOutCallback)
@@ -4836,7 +4837,7 @@ void drop_target_window_paint(HWND hWnd)
         RECT rcWindow;
         GetClientRect(hWnd, &rcWindow);
 
-        FillRect(hDC, &rcWindow, dropTargetBrush);
+        FillRect(hDC, &rcWindow, g_selectedMonitor->workspaceStyle->_dropTargetBrush);
 
         EndPaint(hWnd, &ps);
     }
@@ -5826,7 +5827,7 @@ void open_windows_scratch_exit_callback(char *stdOut)
         {
             MoveWindow(
                     hwnd,
-                    g_selectedMonitor->xOffset + (configuration->gapWidth * 2),
+                    g_selectedMonitor->xOffset + (g_selectedMonitor->workspaceStyle->gapWidth * 2),
                     focusedRect.top,
                     focusedRect.right - focusedRect.left,
                     focusedRect.bottom - focusedRect.top,
@@ -6018,7 +6019,15 @@ int run (void)
     }
 
     configuration = calloc(1, sizeof(Configuration));
+    assert(configuration);
     configuration->textStyle = calloc(1, sizeof(TextStyle));
+    assert(configuration->textStyle);
+
+    WorkspaceStyle *workspaceStyle = calloc(1, sizeof(WorkspaceStyle));
+    assert(workspaceStyle);
+    workspaceStyle->gapWidth = 13;
+    workspaceStyle->scratchWindowsScreenPadding = 250;
+    workspaceStyle->dropTargetColor = RGB(0, 90, 90);
 
     TCHAR menuTitle[BUF_LEN] = L"nmenu";
     g_mView = menu_create(menuTitle, configuration->textStyle);
@@ -6028,13 +6037,13 @@ int run (void)
     configuration->workspaces = g_workspaces;
     configuration->windowRoutingMode = FilteredAndRoutedToWorkspace;
     configuration->alwaysRedraw = FALSE;
-    configuration->scratchWindowsScreenPadding = 0;
     configuration->nonFloatWindowHeightMinimum = 500;
     configuration->floatUwpWindows = TRUE;
     configuration->easyResizeModifiers = LWin | LCtl | LAlt;
     configuration->dragDropFloatModifier = LAlt;
     configuration->floatWindowMovement = 75;
     configuration->borderWindowBackgroundTransparency = (128 << 24);
+    configuration->workspaceStyle = workspaceStyle;
     configure(configuration);
     currentWindowRoutingMode = configuration->windowRoutingMode;
 
@@ -6042,14 +6051,6 @@ int run (void)
     if(configuration->barHeight)
     {
         barHeight = configuration->barHeight;
-    }
-    if(configuration->gapWidth)
-    {
-        g_gapWidth = configuration->gapWidth;
-    }
-    if(configuration->scratchWindowsScreenPadding != 0)
-    {
-        g_scratchWindowsScreenPadding = configuration->scratchWindowsScreenPadding;
     }
 
     configuration->textStyle->_backgroundBrush = CreateSolidBrush(configuration->textStyle->backgroundColor);
@@ -6060,7 +6061,7 @@ int run (void)
     g_floatWindowMovement = configuration->floatWindowMovement;
 
     HINSTANCE moduleHandle = GetModuleHandle(NULL);
-    dropTargetBrush = CreateSolidBrush(dropTargetColor);
+    workspaceStyle->_dropTargetBrush = CreateSolidBrush(workspaceStyle->dropTargetColor);
 
     g_hiddenWindowMonitor = calloc(1, sizeof(Monitor));
     monitor_calulate_coordinates(g_hiddenWindowMonitor, g_numberOfMonitors);
@@ -6076,22 +6077,27 @@ int run (void)
     for(int i = 0; i < g_numberOfMonitors; i++)
     {
         g_monitors[i]->top = barHeight;
+        g_monitors[i]->workspaceStyle = workspaceStyle;
 
         if(!g_monitors[i]->isHidden)
         {
             Bar *bar = calloc(1, sizeof(Bar));
+            assert(bar);
             bar->textStyle = configuration->textStyle;
             bar->numberOfButtons = g_numberOfWorkspaces;
             bar->buttons = calloc(bar->numberOfButtons, sizeof(Button*));
+            assert(bar->buttons);
             for(int j = 0; j < g_numberOfWorkspaces; j++)
             {
                 RECT *buttonRect = malloc(sizeof(RECT));
+                assert(buttonRect);
                 buttonRect->left = g_monitors[i]->xOffset + (j * buttonWidth);
                 buttonRect->right = g_monitors[i]->xOffset + (j * buttonWidth) + buttonWidth;
                 buttonRect->top = barTop;
                 buttonRect->bottom = barBottom;
 
                 Button *button = malloc(sizeof(Button));
+                assert(button);
                 button->workspace = g_workspaces[j];
                 button->bar = bar;
                 button->rect = buttonRect;
@@ -6116,12 +6122,14 @@ int run (void)
 
             int selectWindowLeft = (buttonWidth * g_numberOfWorkspaces);
             RECT *timesRect = malloc(sizeof(RECT));
+            assert(timesRect);
             timesRect->left = (g_monitors[i]->w / 2);
             timesRect->right = g_monitors[i]->w - 10;
             timesRect->top = barTop;
             timesRect->bottom = barBottom;
 
             RECT *selectedWindowDescRect = malloc(sizeof(RECT));
+            assert(selectedWindowDescRect);
             selectedWindowDescRect->left = selectWindowLeft;
             selectedWindowDescRect->right = timesRect->left;
             selectedWindowDescRect->top = barTop;
@@ -6135,10 +6143,10 @@ int run (void)
 
     monitor_select(g_monitors[0]);
 
-    int menuLeft = g_selectedMonitor->xOffset + g_scratchWindowsScreenPadding;
-    int menuTop = g_scratchWindowsScreenPadding;
-    int menuWidth = g_selectedMonitor->w - (g_scratchWindowsScreenPadding * 2);
-    int menuHeight = g_selectedMonitor->h - (g_scratchWindowsScreenPadding * 2);
+    int menuLeft = g_selectedMonitor->xOffset + g_selectedMonitor->workspaceStyle->scratchWindowsScreenPadding;
+    int menuTop = g_selectedMonitor->workspaceStyle->scratchWindowsScreenPadding;
+    int menuWidth = g_selectedMonitor->w - (g_selectedMonitor->workspaceStyle->scratchWindowsScreenPadding * 2);
+    int menuHeight = g_selectedMonitor->h - (g_selectedMonitor->workspaceStyle->scratchWindowsScreenPadding * 2);
     SetWindowPos(g_mView->hwnd, HWND_TOPMOST, menuLeft, menuTop, menuWidth, menuHeight, SWP_HIDEWINDOW);
 
     IWbemLocator *locator  = NULL;

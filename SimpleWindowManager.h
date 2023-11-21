@@ -84,6 +84,14 @@ typedef struct BarSegmentHeader
     RECT rect;
 } BarSegmentHeader;
 
+typedef struct WorkspaceStyle
+{
+    int gapWidth;
+    int scratchWindowsScreenPadding;
+    COLORREF dropTargetColor;
+    HBRUSH _dropTargetBrush;
+} WorkspaceStyle;
+
 struct BarSegmentConfiguration
 {
     BarSegmentHeader *header;
@@ -100,8 +108,6 @@ struct Configuration
     BOOL (*useOldMoveLogicFunc) (Client *client);
     BOOL (*clientShouldUseMinimizeToHide) (Client *client);
     long barHeight;
-    long gapWidth;
-    int scratchWindowsScreenPadding;
     BarSegmentConfiguration **barSegments;
     int numberOfBarSegments;
     Monitor **monitors;
@@ -115,6 +121,7 @@ struct Configuration
     int floatWindowMovement;
     int borderWindowBackgroundTransparency;
     TextStyle *textStyle;
+    WorkspaceStyle *workspaceStyle;
 };
 
 struct WorkspaceFilterData
@@ -210,6 +217,7 @@ struct Monitor
     BOOL selected;
     Bar *bar;
     Monitor *next;
+    WorkspaceStyle *workspaceStyle;
 };
 
 struct Layout
@@ -412,5 +420,3 @@ void register_secondary_monitor_default_bindings_with_modifiers(int modifiers, M
 BOOL should_use_old_move_logic(Client* client);
 BOOL is_float_window(Client *client, LONG_PTR styles, LONG_PTR exStyles);
 HFONT initalize_font();
-
-extern long gapWidth;
