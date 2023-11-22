@@ -187,9 +187,6 @@ int g_numberOfDisplayMonitors;
 static Monitor *g_primaryMonitor;
 static Monitor *g_secondaryMonitor;
 
-Bar **g_bars;
-int g_numberOfBars;
-
 HWND g_borderWindowHwnd;
 
 Layout deckLayout = {
@@ -2828,7 +2825,7 @@ Workspace* workspace_register_with_window_filter(TCHAR *name, WindowFilter windo
 {
     if(g_numberOfWorkspaces < MAX_WORKSPACES)
     {
-        Button ** buttons = (Button **) calloc(g_numberOfBars, sizeof(Button *));
+        Button ** buttons = (Button **) calloc(g_numberOfDisplayMonitors, sizeof(Button *));
         Workspace *workspace = g_workspaces[g_numberOfWorkspaces];
         workspace->name = _wcsdup(name);
         workspace->windowFilter = windowFilter;
@@ -5996,7 +5993,6 @@ int run (void)
     }
 
     discover_monitors();
-    g_numberOfBars = g_numberOfDisplayMonitors;
 
     g_workspaces = calloc(MAX_WORKSPACES, sizeof(Workspace*));
     for(int i = 0; i < MAX_WORKSPACES; i++)
@@ -6070,9 +6066,6 @@ int run (void)
     int barBottom = barHeight;
     int buttonWidth = 30;
 
-    g_bars = calloc(g_numberOfBars, sizeof(Bar*));
-    assert(g_bars);
-
     WNDCLASSEX *barWindowClass = bar_register_window_class();
     for(int i = 0; i < g_numberOfMonitors; i++)
     {
@@ -6116,7 +6109,6 @@ int run (void)
                 g_workspaces[j]->numberOfButtons = i + 1;
             }
 
-            g_bars[i] = bar;
             bar->monitor = g_monitors[i];
             g_monitors[i]->bar = bar;
 
@@ -6135,8 +6127,8 @@ int run (void)
             selectedWindowDescRect->top = barTop;
             selectedWindowDescRect->bottom = barBottom;
 
-            g_bars[i]->selectedWindowDescRect = selectedWindowDescRect;
-            g_bars[i]->timesRect = timesRect;
+            bar->selectedWindowDescRect = selectedWindowDescRect;
+            bar->timesRect = timesRect;
         }
         monitor_set_workspace(g_workspaces[i], g_monitors[i]);
     }
@@ -6237,11 +6229,11 @@ int run (void)
       return 1;
     }
 
-    for(int i = 0; i < g_numberOfBars; i++)
+    for(int i = 0; i < g_numberOfDisplayMonitors; i++)
     {
-        bar_run(g_bars[i], barWindowClass, barHeight);
-        HDC barHdc = GetDC(g_bars[i]->hwnd);
-        bar_add_segments_from_configuration(g_bars[i], barHdc, configuration);
+        bar_run(g_monitors[i]->bar, barWindowClass, barHeight);
+        HDC barHdc = GetDC(g_monitors[i]->bar->hwnd);
+        bar_add_segments_from_configuration(g_monitors[i]->bar, barHdc, configuration);
         DeleteDC(barHdc);
     }
 
