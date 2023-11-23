@@ -297,13 +297,13 @@ typedef struct WindowManagerState
 {
     Monitor *primaryMonitor;
     Monitor *secondaryMonitor;
+    Monitor *hiddenWindowMonitor;
+    Monitor *selectedMonitor;
 } WindowManagerState;
 
 extern Layout deckLayout;
 extern Layout monacleLayout;
 extern Layout tileLayout;
-
-extern int numberOfBars;
 
 extern TCHAR *scratchWindowTitle;
 
