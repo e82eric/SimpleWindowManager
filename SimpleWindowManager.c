@@ -184,8 +184,8 @@ static Workspace **g_workspaces;
 int g_numberOfMonitors;
 static Monitor **g_monitors;
 int g_numberOfDisplayMonitors;
-static Monitor *g_primaryMonitor;
-static Monitor *g_secondaryMonitor;
+
+WindowManagerState g_windowManagerState;
 
 HWND g_borderWindowHwnd;
 
@@ -514,10 +514,10 @@ void move_focused_window_to_selected_monitor_workspace(void)
 
 void move_workspace_to_secondary_monitor_without_focus(Workspace *workspace)
 {
-    windowManager_move_workspace_to_monitor(g_secondaryMonitor, workspace);
-    if(g_primaryMonitor->workspace)
+    windowManager_move_workspace_to_monitor(g_windowManagerState.secondaryMonitor, workspace);
+    if(g_windowManagerState.primaryMonitor->workspace)
     {
-        workspace_focus_selected_window(g_primaryMonitor->workspace);
+        workspace_focus_selected_window(g_windowManagerState.primaryMonitor->workspace);
     }
 }
 
@@ -544,9 +544,9 @@ void move_focused_window_to_main(void)
 
 void move_secondary_monitor_focused_window_to_main(void)
 {
-    if(g_secondaryMonitor->workspace)
+    if(g_windowManagerState.secondaryMonitor->workspace)
     {
-        Client *client = g_secondaryMonitor->workspace->selected;
+        Client *client = g_windowManagerState.secondaryMonitor->workspace->selected;
         if(client)
         {
             if(client == client->workspace->clients)
@@ -5386,8 +5386,8 @@ void register_secondary_monitor_default_bindings(Monitor *pMonitor, Monitor *sMo
 
 void register_secondary_monitor_default_bindings_with_modifiers(int modifiers, Monitor *pMonitor, Monitor *sMonitor, Workspace **spaces)
 {
-    g_primaryMonitor = pMonitor;
-    g_secondaryMonitor = sMonitor;
+    g_windowManagerState.primaryMonitor = pMonitor;
+    g_windowManagerState.secondaryMonitor = sMonitor;
 
     keybinding_create_with_workspace_arg("move_workspace_to_secondary_monitor_without_focus[1]", modifiers, VK_F1, move_workspace_to_secondary_monitor_without_focus, spaces[0]);
     keybinding_create_with_workspace_arg("move_workspace_to_secondary_monitor_without_focus[2]", modifiers, VK_F2, move_workspace_to_secondary_monitor_without_focus, spaces[1]);

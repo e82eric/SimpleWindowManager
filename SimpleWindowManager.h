@@ -293,6 +293,12 @@ struct KeyBinding
     KeyBinding *next;
 };
 
+typedef struct WindowManagerState
+{
+    Monitor *primaryMonitor;
+    Monitor *secondaryMonitor;
+} WindowManagerState;
+
 extern Layout deckLayout;
 extern Layout monacleLayout;
 extern Layout tileLayout;
