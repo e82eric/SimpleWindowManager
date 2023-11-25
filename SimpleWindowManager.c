@@ -58,30 +58,9 @@ struct LauncherProcess
     void (*onSuccess) (CHAR *stdOut);
 };
 
-typedef struct DragDropState
-{
-    bool inProgress;
-    HWND dragHwnd;
-    HWND dropTargetHwnd;
-} DragDropState;
-
-typedef struct ResizeState
-{
-    bool easyResizeInProgress;
-    POINT easyResizeStartPoint;
-    int easyResizeStartOffset;
-    bool regularResizeInProgress;
-    Client *regularResizeClient;
-} ResizeState;
-
-DragDropState g_dragDropState = {0};
-ResizeState g_resizeState = {0};
-
 HHOOK g_kb_hook = 0;
 HHOOK g_mouse_hook = 0;
 HWINEVENTHOOK g_win_hook;
-
-Workspace *g_lastWorkspace;
 
 static BOOL CALLBACK enum_windows_callback(HWND hWnd, LPARAM lparam);
 
@@ -175,16 +154,7 @@ static void drag_drop_cancel(DragDropState *self);
 static IAudioEndpointVolume *g_audioEndpointVolume;
 static INetworkListManager *g_networkListManager;
 
-int g_numberOfWorkspaces;
-static Workspace **g_workspaces;
-
-int g_numberOfMonitors;
-static Monitor **g_monitors;
-int g_numberOfDisplayMonitors;
-
-WindowManagerState g_windowManagerState;
-
-HWND g_borderWindowHwnd;
+static WindowManagerState g_windowManagerState;
 
 Layout deckLayout = {
     .select_next_window = deckLayout_select_next_window,
@@ -569,11 +539,11 @@ void toggle_create_window_in_current_workspace(void)
     {
         currentWindowRoutingMode = FilteredAndRoutedToWorkspace;
     }
-    for(int i = 0; i < g_numberOfMonitors; i++)
+    for(int i = 0; i < g_windowManagerState.numberOfMonitors; i++)
     {
-        if(!g_monitors[i]->isHidden)
+        if(!g_windowManagerState.monitors[i]->isHidden)
         {
-            bar_trigger_selected_window_paint(g_monitors[i]->bar);
+            bar_trigger_selected_window_paint(g_windowManagerState.monitors[i]->bar);
         }
     }
 }
@@ -588,11 +558,11 @@ void toggle_ignore_workspace_filters(void)
     {
         currentWindowRoutingMode = FilteredAndRoutedToWorkspace;
     }
-    for(int i = 0; i < g_numberOfMonitors; i++)
+    for(int i = 0; i < g_windowManagerState.numberOfMonitors; i++)
     {
-        if(!g_monitors[i]->isHidden)
+        if(!g_windowManagerState.monitors[i]->isHidden)
         {
-            bar_trigger_selected_window_paint(g_monitors[i]->bar);
+            bar_trigger_selected_window_paint(g_windowManagerState.monitors[i]->bar);
         }
     }
 }
@@ -607,11 +577,11 @@ void toggle_non_filtered_windows_assigned_to_current_workspace(void)
     {
         currentWindowRoutingMode = FilteredAndRoutedToWorkspace;
     }
-    for(int i = 0; i < g_numberOfMonitors; i++)
+    for(int i = 0; i < g_windowManagerState.numberOfMonitors; i++)
     {
-        if(!g_monitors[i]->isHidden)
+        if(!g_windowManagerState.monitors[i]->isHidden)
         {
-            bar_trigger_selected_window_paint(g_monitors[i]->bar);
+            bar_trigger_selected_window_paint(g_windowManagerState.monitors[i]->bar);
         }
     }
 }
@@ -624,7 +594,7 @@ void swap_selected_monitor_to(Workspace *workspace)
 
 void goto_last_workspace(void)
 {
-    Workspace *workspace = g_lastWorkspace;
+    Workspace *workspace = g_windowManagerState.lastWorkspace;
     if(workspace)
     {
         windowManager_move_workspace_to_monitor(g_windowManagerState.selectedMonitor, workspace);
@@ -876,15 +846,15 @@ void monitor_calculate_height(Monitor *self, HWND taskbarHwnd)
 
 void monitors_resize_for_taskbar(HWND taskbarHwnd)
 {
-    for(int i = 0; i < g_numberOfMonitors; i++)
+    for(int i = 0; i < g_windowManagerState.numberOfMonitors; i++)
     {
-        monitor_calculate_height(g_monitors[i], taskbarHwnd);
-        if(g_monitors[i]->workspace)
+        monitor_calculate_height(g_windowManagerState.monitors[i], taskbarHwnd);
+        if(g_windowManagerState.monitors[i]->workspace)
         {
-            workspace_arrange_windows(g_monitors[i]->workspace);
-            if(g_monitors[i] == g_windowManagerState.selectedMonitor)
+            workspace_arrange_windows(g_windowManagerState.monitors[i]->workspace);
+            if(g_windowManagerState.monitors[i] == g_windowManagerState.selectedMonitor)
             {
-                workspace_focus_selected_window(g_monitors[i]->workspace);
+                workspace_focus_selected_window(g_windowManagerState.monitors[i]->workspace);
             }
         }
     }
@@ -1127,9 +1097,9 @@ BOOL is_root_window(HWND hwnd, LONG styles, LONG exStyles)
 Monitor* drop_target_find_monitor_from_mouse_location(void)
 {
     Monitor *result = NULL;
-    for(int i = 0; i < g_numberOfDisplayMonitors; i++)
+    for(int i = 0; i < g_windowManagerState.numberOfDisplayMonitors; i++)
     {
-        Monitor *monitor = g_monitors[i];
+        Monitor *monitor = g_windowManagerState.monitors[i];
         if(hit_test_monitor(monitor))
         {
             result = monitor;
@@ -1241,8 +1211,8 @@ BOOL handle_location_change_with_mouse_down(HWND hwnd, LONG_PTR styles, LONG_PTR
                 BOOL isMoving = (leftIsChanged && rightIsChanged) || (topIsChanged && bottomIsChanged);
                 if(!isMoving)
                 {
-                    g_resizeState.regularResizeInProgress = TRUE;
-                    g_resizeState.regularResizeClient = client;
+                    g_windowManagerState.resizeState.regularResizeInProgress = TRUE;
+                    g_windowManagerState.resizeState.regularResizeClient = client;
                     return FALSE;
                 }
                 drag_drop_start(dragDropState, hwnd, dropTargetClient);
@@ -1427,38 +1397,38 @@ LRESULT CALLBACK handle_mouse(int code, WPARAM w, LPARAM l)
                 {
                     Workspace *workspace = monitor->workspace;
 
-                    if(!g_resizeState.easyResizeInProgress)
+                    if(!g_windowManagerState.resizeState.easyResizeInProgress)
                     {
-                        g_resizeState.easyResizeInProgress = TRUE;
-                        g_resizeState.easyResizeStartPoint = p->pt;
-                        g_resizeState.easyResizeStartOffset = workspace->mainOffset; 
+                        g_windowManagerState.resizeState.easyResizeInProgress = TRUE;
+                        g_windowManagerState.resizeState.easyResizeStartPoint = p->pt;
+                        g_windowManagerState.resizeState.easyResizeStartOffset = workspace->mainOffset; 
                     }
 
-                    int diff = p->pt.x - g_resizeState.easyResizeStartPoint.x;
-                    workspace->mainOffset = g_resizeState.easyResizeStartOffset + diff;
+                    int diff = p->pt.x - g_windowManagerState.resizeState.easyResizeStartPoint.x;
+                    workspace->mainOffset = g_windowManagerState.resizeState.easyResizeStartOffset + diff;
 
                     workspace_arrange_windows(workspace);
-                    border_window_hide(g_borderWindowHwnd);
+                    border_window_hide(g_windowManagerState.borderWindowHwnd);
                 }
                 return CallNextHookEx(g_mouse_hook, code, w, l);
             }
         }
         else if(w == WM_LBUTTONUP)
         {
-            if(g_resizeState.easyResizeInProgress)
+            if(g_windowManagerState.resizeState.easyResizeInProgress)
             {
-                g_resizeState.easyResizeInProgress = FALSE;
-                border_window_update(g_borderWindowHwnd);
+                g_windowManagerState.resizeState.easyResizeInProgress = FALSE;
+                border_window_update(g_windowManagerState.borderWindowHwnd);
             }
-            else if (g_dragDropState.inProgress && g_dragDropState.dragHwnd)
+            else if (g_windowManagerState.dragDropState.inProgress && g_windowManagerState.dragDropState.dragHwnd)
             {
-                drag_drop_complete(&g_dragDropState);
+                drag_drop_complete(&g_windowManagerState.dragDropState);
             }
-            else if (g_resizeState.regularResizeInProgress)
+            else if (g_windowManagerState.resizeState.regularResizeInProgress)
             {
-                g_resizeState.regularResizeInProgress = FALSE;
-                workspace_arrange_windows(g_resizeState.regularResizeClient->workspace);
-                g_resizeState.regularResizeClient = NULL;
+                g_windowManagerState.resizeState.regularResizeInProgress = FALSE;
+                workspace_arrange_windows(g_windowManagerState.resizeState.regularResizeClient->workspace);
+                g_windowManagerState.resizeState.regularResizeClient = NULL;
             }
         }
     }
@@ -1776,9 +1746,9 @@ void CALLBACK handle_windows_event(
                             return;
                         }
 
-                        if(GetAsyncKeyState(VK_LBUTTON) & 0x8000 && !(GetAsyncKeyState(VK_LSHIFT) & 0x8000) && !g_resizeState.easyResizeInProgress)
+                        if(GetAsyncKeyState(VK_LBUTTON) & 0x8000 && !(GetAsyncKeyState(VK_LSHIFT) & 0x8000) && !g_windowManagerState.resizeState.easyResizeInProgress)
                         {
-                            handle_location_change_with_mouse_down(hwnd, styles, exStyles, &g_dragDropState);
+                            handle_location_change_with_mouse_down(hwnd, styles, exStyles, &g_windowManagerState.dragDropState);
                             return;
                         }
 
@@ -1788,9 +1758,9 @@ void CALLBACK handle_windows_event(
             }
             else
             {
-                if(GetAsyncKeyState(VK_LBUTTON) & 0x8000 && !(GetAsyncKeyState(VK_LSHIFT) & 0x8000) && !g_resizeState.easyResizeInProgress)
+                if(GetAsyncKeyState(VK_LBUTTON) & 0x8000 && !(GetAsyncKeyState(VK_LSHIFT) & 0x8000) && !g_windowManagerState.resizeState.easyResizeInProgress)
                 {
-                    if(handle_location_change_with_mouse_down(hwnd, styles, exStyles, &g_dragDropState))
+                    if(handle_location_change_with_mouse_down(hwnd, styles, exStyles, &g_windowManagerState.dragDropState))
                     {
                         return;
                     }
@@ -1848,7 +1818,7 @@ void CALLBACK handle_windows_event(
                 }
             }
             g_eventForegroundHwnd = hwnd;
-            border_window_update(g_borderWindowHwnd);
+            border_window_update(g_windowManagerState.borderWindowHwnd);
             if(g_windowManagerState.selectedMonitor)
             {
                 bar_trigger_selected_window_paint(g_windowManagerState.selectedMonitor->bar);
@@ -1923,9 +1893,9 @@ void windowManager_move_window_to_workspace_and_arrange(HWND hwnd, Workspace *wo
 
 Client* windowManager_find_client_in_workspaces_by_hwnd(HWND hwnd)
 {
-    for(int i = 0; i < g_numberOfWorkspaces; i++)
+    for(int i = 0; i < g_windowManagerState.numberOfWorkspaces; i++)
     {
-        Client *c = workspace_find_client_by_hwnd(g_workspaces[i], hwnd);
+        Client *c = workspace_find_client_by_hwnd(g_windowManagerState.workspaces[i], hwnd);
         if(c)
         {
             return c;
@@ -2002,9 +1972,9 @@ Workspace* windowManager_find_client_workspace_using_filters(Client *client)
     }
     else
     {
-        for(int i = 0; i < g_numberOfWorkspaces; i++)
+        for(int i = 0; i < g_windowManagerState.numberOfWorkspaces; i++)
         {
-            Workspace *currentWorkspace = g_workspaces[i];
+            Workspace *currentWorkspace = g_windowManagerState.workspaces[i];
             BOOL filterResult = FALSE;
             if(currentWorkspace->filterData)
             {
@@ -2052,7 +2022,7 @@ void windowManager_move_workspace_to_monitor(Monitor *monitor, Workspace *worksp
     Workspace *selectedMonitorCurrentWorkspace = monitor->workspace;
     if(monitor == g_windowManagerState.selectedMonitor)
     {
-        g_lastWorkspace = selectedMonitorCurrentWorkspace;
+        g_windowManagerState.lastWorkspace = selectedMonitorCurrentWorkspace;
     }
 
     if(monitor->scratchWindow)
@@ -2820,10 +2790,10 @@ Workspace* workspace_register(TCHAR *name, WCHAR* tag, bool isIcon, Layout *layo
 
 Workspace* workspace_register_with_window_filter(TCHAR *name, WindowFilter windowFilter, WCHAR* tag, bool isIcon, Layout *layout)
 {
-    if(g_numberOfWorkspaces < MAX_WORKSPACES)
+    if(g_windowManagerState.numberOfWorkspaces < MAX_WORKSPACES)
     {
-        Button ** buttons = (Button **) calloc(g_numberOfDisplayMonitors, sizeof(Button *));
-        Workspace *workspace = g_workspaces[g_numberOfWorkspaces];
+        Button ** buttons = (Button **) calloc(g_windowManagerState.numberOfDisplayMonitors, sizeof(Button *));
+        Workspace *workspace = g_windowManagerState.workspaces[g_windowManagerState.numberOfWorkspaces];
         workspace->name = _wcsdup(name);
         workspace->windowFilter = windowFilter;
         workspace->buttons = buttons;
@@ -2831,7 +2801,7 @@ Workspace* workspace_register_with_window_filter(TCHAR *name, WindowFilter windo
         workspace->isIcon = isIcon;
         workspace->layout = layout;
         workspace->filterData = calloc(1, sizeof(WorkspaceFilterData));
-        g_numberOfWorkspaces++;
+        g_windowManagerState.numberOfWorkspaces++;
         return workspace;
     }
 
@@ -2866,7 +2836,7 @@ void workspace_focus_selected_window(Workspace *workspace)
         bar_trigger_selected_window_paint(workspace->monitor->bar);
     }
 
-    border_window_update(g_borderWindowHwnd);
+    border_window_update(g_windowManagerState.borderWindowHwnd);
 }
 
 void noop_swap_clients(Client *client1, Client *client2)
@@ -3534,7 +3504,7 @@ void menu_focus(MenuView *self)
     if(!g_menuVisible)
     {
         g_menuVisible = TRUE;
-        border_window_hide(g_borderWindowHwnd);
+        border_window_hide(g_windowManagerState.borderWindowHwnd);
         ShowWindow(self->hwnd, SW_SHOW);
         SetForegroundWindow(self->hwnd);
         HDWP hdwp = BeginDeferWindowPos(1);
@@ -3561,7 +3531,7 @@ void scratch_window_focus(ScratchWindow *self)
     LONG lStyle = GetWindowLong(self->client->data->hwnd, GWL_STYLE);
     lStyle &= ~(WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_SYSMENU | WS_VSCROLL);
     SetWindowLong(self->client->data->hwnd, GWL_STYLE, lStyle);
-    border_window_hide(g_borderWindowHwnd);
+    border_window_hide(g_windowManagerState.borderWindowHwnd);
     HDWP hdwp = BeginDeferWindowPos(2);
     DeferWindowPos(
             hdwp,
@@ -3574,7 +3544,7 @@ void scratch_window_focus(ScratchWindow *self)
             SWP_SHOWWINDOW);
     DeferWindowPos(
             hdwp,
-            g_borderWindowHwnd,
+            g_windowManagerState.borderWindowHwnd,
             self->client->data->hwnd,
             self->client->data->x - 4,
             self->client->data->y - 4,
@@ -3583,7 +3553,7 @@ void scratch_window_focus(ScratchWindow *self)
             SWP_SHOWWINDOW);
     EndDeferWindowPos(hdwp);
     ShowWindow(self->client->data->hwnd, SW_RESTORE);
-    SetForegroundWindow(g_borderWindowHwnd);
+    SetForegroundWindow(g_windowManagerState.borderWindowHwnd);
     SetForegroundWindow(self->client->data->hwnd);
 }
 
@@ -3706,14 +3676,14 @@ void menu_hide(void)
     g_menuVisible = FALSE;
     ShowWindow(g_mView->hwnd, SW_HIDE);
     bar_trigger_selected_window_paint(g_windowManagerState.selectedMonitor->bar);
-    border_window_update(g_borderWindowHwnd);
+    border_window_update(g_windowManagerState.borderWindowHwnd);
 }
 
 void menu_on_escape(void)
 {
     menu_hide();
     HWND foregroundHwnd = GetForegroundWindow();
-    if((foregroundHwnd == g_mView->hwnd || foregroundHwnd == g_borderWindowHwnd) && g_windowManagerState.selectedMonitor->workspace)
+    if((foregroundHwnd == g_mView->hwnd || foregroundHwnd == g_windowManagerState.borderWindowHwnd) && g_windowManagerState.selectedMonitor->workspace)
     {
         workspace_focus_selected_window(g_windowManagerState.selectedMonitor->workspace);
     }
@@ -3903,7 +3873,7 @@ void monitor_calulate_coordinates(Monitor *monitor, int monitorNumber)
     monitor->xOffset = monitorNumber * screenWidth - screenWidth;
     monitor->w = screenWidth;
     monitor->h = screenHeight;
-    if(monitorNumber > g_numberOfDisplayMonitors)
+    if(monitorNumber > g_windowManagerState.numberOfDisplayMonitors)
     {
         monitor->isHidden = TRUE;
     }
@@ -3935,7 +3905,7 @@ void monitor_select_next(void)
     }
     else
     {
-        monitor_select(g_monitors[0]);
+        monitor_select(g_windowManagerState.monitors[0]);
     }
 }
 
@@ -3945,11 +3915,11 @@ void monitor_select(Monitor *monitor)
     {
         return;
     }
-    for(int i = 0; i < g_numberOfMonitors; i++)
+    for(int i = 0; i < g_windowManagerState.numberOfMonitors; i++)
     {
-        if(g_monitors[i]-> selected == TRUE && monitor != g_monitors[i])
+        if(g_windowManagerState.monitors[i]-> selected == TRUE && monitor != g_windowManagerState.monitors[i])
         {
-            g_monitors[i]->selected = FALSE;
+            g_windowManagerState.monitors[i]->selected = FALSE;
         }
     }
     monitor->selected = TRUE;
@@ -4949,7 +4919,7 @@ void dcomp_border_run(HINSTANCE module, TextStyle *textStyle)
     wc.lpfnWndProc = dcomp_border_window_message_loop;
     RegisterClass(&wc);
 
-    g_borderWindowHwnd = CreateWindowEx(
+    g_windowManagerState.borderWindowHwnd = CreateWindowEx(
             WS_EX_NOREDIRECTIONBITMAP | WS_EX_NOACTIVATE,
             wc.lpszClassName,
             L"nwm_dcomp_border",
@@ -4962,7 +4932,7 @@ void dcomp_border_run(HINSTANCE module, TextStyle *textStyle)
             NULL,
             module,
             textStyle);
-    SetWindowLong(g_borderWindowHwnd, GWL_STYLE, 0);
+    SetWindowLong(g_windowManagerState.borderWindowHwnd, GWL_STYLE, 0);
 }
 
 void border_window_run(WNDCLASSEX *windowClass)
@@ -4981,7 +4951,7 @@ void border_window_run(WNDCLASSEX *windowClass)
         GetModuleHandle(0),
         NULL);
 
-    g_borderWindowHwnd = hwnd;
+    g_windowManagerState.borderWindowHwnd = hwnd;
 }
 
 void drop_target_window_run(WNDCLASSEX *windowClass)
@@ -5000,7 +4970,7 @@ void drop_target_window_run(WNDCLASSEX *windowClass)
         GetModuleHandle(0),
         NULL);
     SetLayeredWindowAttributes(hwnd, RGB(255, 255, 255), (255 * 50) / 100, LWA_ALPHA);
-    g_dragDropState.dropTargetHwnd = hwnd;
+    g_windowManagerState.dragDropState.dropTargetHwnd = hwnd;
 }
 
 void command_execute_no_arg(Command *self)
@@ -5326,29 +5296,29 @@ void keybindings_register_defaults_with_modifiers(int modifiers)
     keybinding_create_with_no_arg("move_focused_window_to_main", modifiers, VK_RETURN, move_focused_window_to_main);
     keybinding_create_with_no_arg("mimimize_focused_window", LShift | modifiers, VK_DOWN, mimimize_focused_window);
 
-    keybinding_create_with_workspace_arg("swap_selected_monitor_to[1]", modifiers, VK_1, swap_selected_monitor_to, g_workspaces[0]);
-    keybinding_create_with_workspace_arg("swap_selected_monitor_to[2]", modifiers, VK_2, swap_selected_monitor_to, g_workspaces[1]);
-    keybinding_create_with_workspace_arg("swap_selected_monitor_to[3]", modifiers, VK_3, swap_selected_monitor_to, g_workspaces[2]);
-    keybinding_create_with_workspace_arg("swap_selected_monitor_to[4]", modifiers, VK_4, swap_selected_monitor_to, g_workspaces[3]);
-    keybinding_create_with_workspace_arg("swap_selected_monitor_to[5]", modifiers, VK_5, swap_selected_monitor_to, g_workspaces[4]);
-    keybinding_create_with_workspace_arg("swap_selected_monitor_to[6]", modifiers, VK_6, swap_selected_monitor_to, g_workspaces[5]);
-    keybinding_create_with_workspace_arg("swap_selected_monitor_to[7]", modifiers, VK_7, swap_selected_monitor_to, g_workspaces[6]);
-    keybinding_create_with_workspace_arg("swap_selected_monitor_to[8]", modifiers, VK_8, swap_selected_monitor_to, g_workspaces[7]);
-    keybinding_create_with_workspace_arg("swap_selected_monitor_to[9]", modifiers, VK_9, swap_selected_monitor_to, g_workspaces[8]);
-    keybinding_create_with_workspace_arg("swap_selected_monitor_to[0]", modifiers, VK_0, swap_selected_monitor_to, g_workspaces[9]);
+    keybinding_create_with_workspace_arg("swap_selected_monitor_to[1]", modifiers, VK_1, swap_selected_monitor_to, g_windowManagerState.workspaces[0]);
+    keybinding_create_with_workspace_arg("swap_selected_monitor_to[2]", modifiers, VK_2, swap_selected_monitor_to, g_windowManagerState.workspaces[1]);
+    keybinding_create_with_workspace_arg("swap_selected_monitor_to[3]", modifiers, VK_3, swap_selected_monitor_to, g_windowManagerState.workspaces[2]);
+    keybinding_create_with_workspace_arg("swap_selected_monitor_to[4]", modifiers, VK_4, swap_selected_monitor_to, g_windowManagerState.workspaces[3]);
+    keybinding_create_with_workspace_arg("swap_selected_monitor_to[5]", modifiers, VK_5, swap_selected_monitor_to, g_windowManagerState.workspaces[4]);
+    keybinding_create_with_workspace_arg("swap_selected_monitor_to[6]", modifiers, VK_6, swap_selected_monitor_to, g_windowManagerState.workspaces[5]);
+    keybinding_create_with_workspace_arg("swap_selected_monitor_to[7]", modifiers, VK_7, swap_selected_monitor_to, g_windowManagerState.workspaces[6]);
+    keybinding_create_with_workspace_arg("swap_selected_monitor_to[8]", modifiers, VK_8, swap_selected_monitor_to, g_windowManagerState.workspaces[7]);
+    keybinding_create_with_workspace_arg("swap_selected_monitor_to[9]", modifiers, VK_9, swap_selected_monitor_to, g_windowManagerState.workspaces[8]);
+    keybinding_create_with_workspace_arg("swap_selected_monitor_to[0]", modifiers, VK_0, swap_selected_monitor_to, g_windowManagerState.workspaces[9]);
 
     keybinding_create_with_no_arg("move_focused_client_next", LShift | modifiers, VK_J, move_focused_client_next);
     keybinding_create_with_no_arg("move_focused_client_previous", LShift | modifiers, VK_K, move_focused_client_previous);
 
-    keybinding_create_with_workspace_arg("move_focused_window_to_workspace[1]", LShift | modifiers, VK_1, move_focused_window_to_workspace, g_workspaces[0]);
-    keybinding_create_with_workspace_arg("move_focused_window_to_workspace[2]", LShift | modifiers, VK_2, move_focused_window_to_workspace, g_workspaces[1]);
-    keybinding_create_with_workspace_arg("move_focused_window_to_workspace[3]", LShift | modifiers, VK_3, move_focused_window_to_workspace, g_workspaces[2]);
-    keybinding_create_with_workspace_arg("move_focused_window_to_workspace[4]", LShift | modifiers, VK_4, move_focused_window_to_workspace, g_workspaces[3]);
-    keybinding_create_with_workspace_arg("move_focused_window_to_workspace[5]", LShift | modifiers, VK_5, move_focused_window_to_workspace, g_workspaces[4]);
-    keybinding_create_with_workspace_arg("move_focused_window_to_workspace[6]", LShift | modifiers, VK_6, move_focused_window_to_workspace, g_workspaces[5]);
-    keybinding_create_with_workspace_arg("move_focused_window_to_workspace[7]", LShift | modifiers, VK_7, move_focused_window_to_workspace, g_workspaces[6]);
-    keybinding_create_with_workspace_arg("move_focused_window_to_workspace[8]", LShift | modifiers, VK_8, move_focused_window_to_workspace, g_workspaces[7]);
-    keybinding_create_with_workspace_arg("move_focused_window_to_workspace[9]", LShift | modifiers, VK_9, move_focused_window_to_workspace, g_workspaces[8]);
+    keybinding_create_with_workspace_arg("move_focused_window_to_workspace[1]", LShift | modifiers, VK_1, move_focused_window_to_workspace, g_windowManagerState.workspaces[0]);
+    keybinding_create_with_workspace_arg("move_focused_window_to_workspace[2]", LShift | modifiers, VK_2, move_focused_window_to_workspace, g_windowManagerState.workspaces[1]);
+    keybinding_create_with_workspace_arg("move_focused_window_to_workspace[3]", LShift | modifiers, VK_3, move_focused_window_to_workspace, g_windowManagerState.workspaces[2]);
+    keybinding_create_with_workspace_arg("move_focused_window_to_workspace[4]", LShift | modifiers, VK_4, move_focused_window_to_workspace, g_windowManagerState.workspaces[3]);
+    keybinding_create_with_workspace_arg("move_focused_window_to_workspace[5]", LShift | modifiers, VK_5, move_focused_window_to_workspace, g_windowManagerState.workspaces[4]);
+    keybinding_create_with_workspace_arg("move_focused_window_to_workspace[6]", LShift | modifiers, VK_6, move_focused_window_to_workspace, g_windowManagerState.workspaces[5]);
+    keybinding_create_with_workspace_arg("move_focused_window_to_workspace[7]", LShift | modifiers, VK_7, move_focused_window_to_workspace, g_windowManagerState.workspaces[6]);
+    keybinding_create_with_workspace_arg("move_focused_window_to_workspace[8]", LShift | modifiers, VK_8, move_focused_window_to_workspace, g_windowManagerState.workspaces[7]);
+    keybinding_create_with_workspace_arg("move_focused_window_to_workspace[9]", LShift | modifiers, VK_9, move_focused_window_to_workspace, g_windowManagerState.workspaces[8]);
     keybinding_create_with_no_arg("move_focused_window_to_selected_monitor_workspace", LShift | modifiers, VK_0, move_focused_window_to_selected_monitor_workspace);
 
     keybinding_create_with_no_arg("goto_last_workspace", modifiers, VK_O, goto_last_workspace);
@@ -5406,9 +5376,9 @@ void keybindings_register_float_window_movements(int modifiers)
     keybinding_create_with_no_arg("move_focused_window_up", modifiers, VK_UP, move_focused_window_up);
     keybinding_create_with_no_arg("move_focused_window_down", modifiers, VK_DOWN, move_focused_window_down);
 
-    for(int i = 0; i < g_numberOfDisplayMonitors; i++)
+    for(int i = 0; i < g_windowManagerState.numberOfDisplayMonitors; i++)
     {
-        keybinding_create_with_monitor_arg("move_focused_window_to_monitor", modifiers, VK_1 + i, move_focused_window_to_monitor, g_monitors[i]);
+        keybinding_create_with_monitor_arg("move_focused_window_to_monitor", modifiers, VK_1 + i, move_focused_window_to_monitor, g_windowManagerState.monitors[i]);
     }
 }
 
@@ -5755,7 +5725,7 @@ void process_with_stdout_start(CHAR *cmdArgs, void (*onSuccess) (CHAR *))
 void open_program_scratch_callback(char *stdOut)
 {
     menu_hide();
-    border_window_hide(g_borderWindowHwnd);
+    border_window_hide(g_windowManagerState.borderWindowHwnd);
     char str[1024];
 
     sprintf_s(str, 1024, "/c start \"\" \"%s\"", stdOut);
@@ -5765,7 +5735,7 @@ void open_program_scratch_callback(char *stdOut)
 void open_program_scratch_callback_not_elevated(char *stdOut)
 {
     menu_hide();
-    border_window_hide(g_borderWindowHwnd);
+    border_window_hide(g_windowManagerState.borderWindowHwnd);
     char str[1024];
 
     sprintf_s(str, 1024, "/c start \"\" \"%s\"", stdOut);
@@ -5964,7 +5934,7 @@ BOOL CALLBACK enum_display_monitors_callback(HMONITOR hMonitor, HDC hdcMonitor, 
     UNREFERENCED_PARAMETER(hdcMonitor);
     UNREFERENCED_PARAMETER(lprcMonitor);
     UNREFERENCED_PARAMETER(dwData);
-    g_numberOfDisplayMonitors++;
+    g_windowManagerState.numberOfDisplayMonitors++;
     return TRUE;
 }
 
@@ -5976,6 +5946,8 @@ void discover_monitors(void)
 int run (void)
 {
     SetProcessDPIAware();
+    memset(&g_windowManagerState.dragDropState, 0, sizeof(DragDropState));
+    memset(&g_windowManagerState.resizeState, 0, sizeof(ResizeState));
     HANDLE hMutex;
     hMutex = CreateMutex(NULL, TRUE, TEXT("SimpleWindowManagerSingleInstanceLock"));
     if (GetLastError() == ERROR_ALREADY_EXISTS)
@@ -5991,23 +5963,23 @@ int run (void)
 
     discover_monitors();
 
-    g_workspaces = calloc(MAX_WORKSPACES, sizeof(Workspace*));
+    g_windowManagerState.workspaces = calloc(MAX_WORKSPACES, sizeof(Workspace*));
     for(int i = 0; i < MAX_WORKSPACES; i++)
     {
-        g_workspaces[i] = calloc(1, sizeof(Workspace));
+        g_windowManagerState.workspaces[i] = calloc(1, sizeof(Workspace));
     }
 
-    g_numberOfMonitors = MAX_WORKSPACES;
-    g_monitors = calloc(g_numberOfMonitors, sizeof(Monitor*));
-    for(int i = 0; i < g_numberOfMonitors; i++)
+    g_windowManagerState.numberOfMonitors = MAX_WORKSPACES;
+    g_windowManagerState.monitors = calloc(g_windowManagerState.numberOfMonitors, sizeof(Monitor*));
+    for(int i = 0; i < g_windowManagerState.numberOfMonitors; i++)
     {
         Monitor *monitor = calloc(1, sizeof(Monitor));
         monitor->id = i + 1;
-        g_monitors[i] = monitor;
+        g_windowManagerState.monitors[i] = monitor;
         monitor_calulate_coordinates(monitor, i + 1);
-        if(i > 0 && !g_monitors[i]->isHidden)
+        if(i > 0 && !g_windowManagerState.monitors[i]->isHidden)
         {
-            g_monitors[i - 1]->next = g_monitors[i];
+            g_windowManagerState.monitors[i - 1]->next = g_windowManagerState.monitors[i];
         }
     }
 
@@ -6026,8 +5998,8 @@ int run (void)
     g_mView = menu_create(menuTitle, configuration->textStyle);
     ShowWindow(g_mView->hwnd, SW_HIDE);
 
-    configuration->monitors = g_monitors;
-    configuration->workspaces = g_workspaces;
+    configuration->monitors = g_windowManagerState.monitors;
+    configuration->workspaces = g_windowManagerState.workspaces;
     configuration->windowRoutingMode = FilteredAndRoutedToWorkspace;
     configuration->alwaysRedraw = FALSE;
     configuration->nonFloatWindowHeightMinimum = 500;
@@ -6057,38 +6029,38 @@ int run (void)
     workspaceStyle->_dropTargetBrush = CreateSolidBrush(workspaceStyle->dropTargetColor);
 
     g_windowManagerState.hiddenWindowMonitor = calloc(1, sizeof(Monitor));
-    monitor_calulate_coordinates(g_windowManagerState.hiddenWindowMonitor, g_numberOfMonitors);
+    monitor_calulate_coordinates(g_windowManagerState.hiddenWindowMonitor, g_windowManagerState.numberOfMonitors);
 
     int barTop = 0;
     int barBottom = barHeight;
     int buttonWidth = 30;
 
     WNDCLASSEX *barWindowClass = bar_register_window_class();
-    for(int i = 0; i < g_numberOfMonitors; i++)
+    for(int i = 0; i < g_windowManagerState.numberOfMonitors; i++)
     {
-        g_monitors[i]->top = barHeight;
-        g_monitors[i]->workspaceStyle = workspaceStyle;
+        g_windowManagerState.monitors[i]->top = barHeight;
+        g_windowManagerState.monitors[i]->workspaceStyle = workspaceStyle;
 
-        if(!g_monitors[i]->isHidden)
+        if(!g_windowManagerState.monitors[i]->isHidden)
         {
             Bar *bar = calloc(1, sizeof(Bar));
             assert(bar);
             bar->textStyle = configuration->textStyle;
-            bar->numberOfButtons = g_numberOfWorkspaces;
+            bar->numberOfButtons = g_windowManagerState.numberOfWorkspaces;
             bar->buttons = calloc(bar->numberOfButtons, sizeof(Button*));
             assert(bar->buttons);
-            for(int j = 0; j < g_numberOfWorkspaces; j++)
+            for(int j = 0; j < g_windowManagerState.numberOfWorkspaces; j++)
             {
                 RECT *buttonRect = malloc(sizeof(RECT));
                 assert(buttonRect);
-                buttonRect->left = g_monitors[i]->xOffset + (j * buttonWidth);
-                buttonRect->right = g_monitors[i]->xOffset + (j * buttonWidth) + buttonWidth;
+                buttonRect->left = g_windowManagerState.monitors[i]->xOffset + (j * buttonWidth);
+                buttonRect->right = g_windowManagerState.monitors[i]->xOffset + (j * buttonWidth) + buttonWidth;
                 buttonRect->top = barTop;
                 buttonRect->bottom = barBottom;
 
                 Button *button = malloc(sizeof(Button));
                 assert(button);
-                button->workspace = g_workspaces[j];
+                button->workspace = g_windowManagerState.workspaces[j];
                 button->bar = bar;
                 button->rect = buttonRect;
                 button_set_has_clients(button, FALSE);
@@ -6102,18 +6074,18 @@ int run (void)
                 }
                 bar->buttons[j] = button;
 
-                g_workspaces[j]->buttons[i] = button;
-                g_workspaces[j]->numberOfButtons = i + 1;
+                g_windowManagerState.workspaces[j]->buttons[i] = button;
+                g_windowManagerState.workspaces[j]->numberOfButtons = i + 1;
             }
 
-            bar->monitor = g_monitors[i];
-            g_monitors[i]->bar = bar;
+            bar->monitor = g_windowManagerState.monitors[i];
+            g_windowManagerState.monitors[i]->bar = bar;
 
-            int selectWindowLeft = (buttonWidth * g_numberOfWorkspaces);
+            int selectWindowLeft = (buttonWidth * g_windowManagerState.numberOfWorkspaces);
             RECT *timesRect = malloc(sizeof(RECT));
             assert(timesRect);
-            timesRect->left = (g_monitors[i]->w / 2);
-            timesRect->right = g_monitors[i]->w - 10;
+            timesRect->left = (g_windowManagerState.monitors[i]->w / 2);
+            timesRect->right = g_windowManagerState.monitors[i]->w - 10;
             timesRect->top = barTop;
             timesRect->bottom = barBottom;
 
@@ -6127,10 +6099,10 @@ int run (void)
             bar->selectedWindowDescRect = selectedWindowDescRect;
             bar->timesRect = timesRect;
         }
-        monitor_set_workspace(g_workspaces[i], g_monitors[i]);
+        monitor_set_workspace(g_windowManagerState.workspaces[i], g_windowManagerState.monitors[i]);
     }
 
-    monitor_select(g_monitors[0]);
+    monitor_select(g_windowManagerState.monitors[0]);
 
     int menuLeft = g_windowManagerState.selectedMonitor->xOffset + g_windowManagerState.selectedMonitor->workspaceStyle->scratchWindowsScreenPadding;
     int menuTop = g_windowManagerState.selectedMonitor->workspaceStyle->scratchWindowsScreenPadding;
@@ -6226,11 +6198,11 @@ int run (void)
       return 1;
     }
 
-    for(int i = 0; i < g_numberOfDisplayMonitors; i++)
+    for(int i = 0; i < g_windowManagerState.numberOfDisplayMonitors; i++)
     {
-        bar_run(g_monitors[i]->bar, barWindowClass, barHeight);
-        HDC barHdc = GetDC(g_monitors[i]->bar->hwnd);
-        bar_add_segments_from_configuration(g_monitors[i]->bar, barHdc, configuration);
+        bar_run(g_windowManagerState.monitors[i]->bar, barWindowClass, barHeight);
+        HDC barHdc = GetDC(g_windowManagerState.monitors[i]->bar->hwnd);
+        bar_add_segments_from_configuration(g_windowManagerState.monitors[i]->bar, barHdc, configuration);
         DeleteDC(barHdc);
     }
 
@@ -6238,11 +6210,11 @@ int run (void)
 
     EnumWindows(enum_windows_callback, 0);
 
-    for(int i = 0; i < g_numberOfMonitors; i++)
+    for(int i = 0; i < g_windowManagerState.numberOfMonitors; i++)
     {
-        int workspaceNumberOfClients = workspace_get_number_of_clients(g_monitors[i]->workspace);
+        int workspaceNumberOfClients = workspace_get_number_of_clients(g_windowManagerState.monitors[i]->workspace);
         HDWP hdwp = BeginDeferWindowPos(workspaceNumberOfClients);
-        monitor_set_workspace_and_arrange(g_monitors[i]->workspace, g_monitors[i], hdwp);
+        monitor_set_workspace_and_arrange(g_windowManagerState.monitors[i]->workspace, g_windowManagerState.monitors[i], hdwp);
         EndDeferWindowPos(hdwp);
     }
 

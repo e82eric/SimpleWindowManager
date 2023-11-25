@@ -293,12 +293,37 @@ struct KeyBinding
     KeyBinding *next;
 };
 
+typedef struct ResizeState
+{
+    bool easyResizeInProgress;
+    POINT easyResizeStartPoint;
+    int easyResizeStartOffset;
+    bool regularResizeInProgress;
+    Client *regularResizeClient;
+} ResizeState;
+
+typedef struct DragDropState
+{
+    bool inProgress;
+    HWND dragHwnd;
+    HWND dropTargetHwnd;
+} DragDropState;
+
 typedef struct WindowManagerState
 {
     Monitor *primaryMonitor;
     Monitor *secondaryMonitor;
     Monitor *hiddenWindowMonitor;
     Monitor *selectedMonitor;
+    HWND borderWindowHwnd;
+    Monitor **monitors;
+    int numberOfMonitors;
+    int numberOfDisplayMonitors;
+    Workspace **workspaces;
+    int numberOfWorkspaces;
+    Workspace *lastWorkspace;
+    DragDropState dragDropState;
+    ResizeState resizeState;
 } WindowManagerState;
 
 extern Layout deckLayout;
