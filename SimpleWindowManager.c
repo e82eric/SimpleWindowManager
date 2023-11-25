@@ -60,7 +60,6 @@ struct LauncherProcess
 
 HHOOK g_kb_hook = 0;
 HHOOK g_mouse_hook = 0;
-HWINEVENTHOOK g_win_hook;
 
 static BOOL CALLBACK enum_windows_callback(HWND hWnd, LPARAM lparam);
 
@@ -92,10 +91,10 @@ static int get_modifiers_pressed();
 
 static void clients_add_before(Client *clientToAdd, Client *clientToAddBefore);
 
-static void windowManager_remove_client_if_found_by_hwnd(HWND hwnd);
-static void windowManager_move_window_to_workspace_and_arrange(HWND hwnd, Workspace *workspace);
-static Workspace* windowManager_find_client_workspace_using_filters(Client *client);
-static Client* windowManager_find_client_in_workspaces_by_hwnd(HWND hwnd);
+static void windowManager_remove_client_if_found_by_hwnd(WindowManagerState *self, HWND hwnd);
+static void windowManager_move_window_to_workspace_and_arrange(WindowManagerState *self, HWND hwnd, Workspace *workspace);
+static Workspace* windowManager_find_client_workspace_using_filters(WindowManagerState *self, Client *client);
+static Client* windowManager_find_client_in_workspaces_by_hwnd(WindowManagerState *self, HWND hwnd);
 static void workspace_add_client(Workspace *workspace, Client *client);
 static BOOL workspace_remove_client(Workspace *workspace, Client *client);
 static void workspace_arrange_windows(Workspace *workspace);
@@ -111,7 +110,7 @@ static int workspace_update_client_counts(Workspace *workspace);
 static int workspace_get_number_of_clients(Workspace *workspace);
 static KeyBinding* keybindings_find_existing_or_create(CHAR* name, int modifiers, unsigned int key);
 static ScratchWindow* scratch_windows_find_from_client(Client *client);
-static ScratchWindow* scratch_windows_find_from_hwnd(HWND hwnd);
+static ScratchWindow* scratch_windows_find_from_hwnd(WindowManagerState *self, HWND hwnd);
 static void scratch_window_toggle(ScratchWindow *self);
 static void scratch_window_show(ScratchWindow *self);
 static void scratch_window_hide(ScratchWindow *self);
@@ -449,7 +448,7 @@ void mimimize_focused_window(void)
 void move_focused_client_next(void)
 {
     HWND foregroundHwnd = GetForegroundWindow();
-    Client* existingClient = windowManager_find_client_in_workspaces_by_hwnd(foregroundHwnd);
+    Client* existingClient = windowManager_find_client_in_workspaces_by_hwnd(&g_windowManagerState, foregroundHwnd);
     if(existingClient)
     {
         existingClient->workspace->layout->move_client_next(existingClient);
@@ -459,7 +458,7 @@ void move_focused_client_next(void)
 void move_focused_client_previous(void)
 {
     HWND foregroundHwnd = GetForegroundWindow();
-    Client* existingClient = windowManager_find_client_in_workspaces_by_hwnd(foregroundHwnd);
+    Client* existingClient = windowManager_find_client_in_workspaces_by_hwnd(&g_windowManagerState, foregroundHwnd);
     if(existingClient)
     {
         existingClient->workspace->layout->move_client_previous(existingClient->workspace->selected);
@@ -469,7 +468,7 @@ void move_focused_client_previous(void)
 void move_focused_window_to_workspace(Workspace *workspace)
 {
     HWND foregroundHwnd = GetForegroundWindow();
-    windowManager_move_window_to_workspace_and_arrange(foregroundHwnd, workspace);
+    windowManager_move_window_to_workspace_and_arrange(&g_windowManagerState, foregroundHwnd, workspace);
     workspace_focus_selected_window(g_windowManagerState.selectedMonitor->workspace);
 }
 
@@ -675,7 +674,7 @@ void move_focused_window_right(void)
         return;
     }
     HWND foregroundHwnd = GetForegroundWindow();
-    Client* existingClient = windowManager_find_client_in_workspaces_by_hwnd(foregroundHwnd);
+    Client* existingClient = windowManager_find_client_in_workspaces_by_hwnd(&g_windowManagerState, foregroundHwnd);
     if(!existingClient)
     {
         float_window_move_right(foregroundHwnd);
@@ -693,7 +692,7 @@ void move_focused_window_left(void)
         return;
     }
     HWND foregroundHwnd = GetForegroundWindow();
-    Client* existingClient = windowManager_find_client_in_workspaces_by_hwnd(foregroundHwnd);
+    Client* existingClient = windowManager_find_client_in_workspaces_by_hwnd(&g_windowManagerState, foregroundHwnd);
     if(!existingClient)
     {
         float_window_move_left(foregroundHwnd);
@@ -711,7 +710,7 @@ void move_focused_window_up(void)
         return;
     }
     HWND foregroundHwnd = GetForegroundWindow();
-    Client* existingClient = windowManager_find_client_in_workspaces_by_hwnd(foregroundHwnd);
+    Client* existingClient = windowManager_find_client_in_workspaces_by_hwnd(&g_windowManagerState, foregroundHwnd);
     if(!existingClient)
     {
         float_window_move_up(foregroundHwnd);
@@ -722,7 +721,7 @@ void move_focused_window_to_monitor(Monitor *monitor)
 {
     HWND foregroundHwnd = GetForegroundWindow();
 
-    Client *client = windowManager_find_client_in_workspaces_by_hwnd(foregroundHwnd);
+    Client *client = windowManager_find_client_in_workspaces_by_hwnd(&g_windowManagerState, foregroundHwnd);
 
     if(!client)
     {
@@ -746,7 +745,7 @@ void move_focused_window_down(void)
         return;
     }
     HWND foregroundHwnd = GetForegroundWindow();
-    Client* existingClient = windowManager_find_client_in_workspaces_by_hwnd(foregroundHwnd);
+    Client* existingClient = windowManager_find_client_in_workspaces_by_hwnd(&g_windowManagerState, foregroundHwnd);
     if(!existingClient)
     {
         float_window_move_down(foregroundHwnd);
@@ -943,7 +942,7 @@ BOOL is_float_window(Client *client, LONG_PTR styles, LONG_PTR exStyles)
 
 static BOOL CALLBACK enum_windows_callback(HWND hwnd, LPARAM lparam)
 {
-    UNREFERENCED_PARAMETER(lparam);
+    WindowManagerState *windowManagerState = (WindowManagerState*)lparam;
 
     LONG styles = GetWindowLong(hwnd, GWL_STYLE);
     LONG exStyles = GetWindowLong(hwnd, GWL_EXSTYLE);
@@ -977,7 +976,7 @@ static BOOL CALLBACK enum_windows_callback(HWND hwnd, LPARAM lparam)
         return TRUE;
     }
 
-    Workspace *workspace = windowManager_find_client_workspace_using_filters(client);
+    Workspace *workspace = windowManager_find_client_workspace_using_filters(windowManagerState, client);
     if(workspace)
     {
         if(IsZoomed(hwnd))
@@ -1184,7 +1183,7 @@ void drag_drop_start_empty_workspace(DragDropState *self, Monitor *dropTargetMon
             SWP_SHOWWINDOW);
 }
 
-BOOL handle_location_change_with_mouse_down(HWND hwnd, LONG_PTR styles, LONG_PTR exStyles, DragDropState *dragDropState)
+BOOL handle_location_change_with_mouse_down(WindowManagerState *windowManagerState, HWND hwnd, LONG_PTR styles, LONG_PTR exStyles)
 {
     if(!hit_test_hwnd(hwnd))
     {
@@ -1197,7 +1196,7 @@ BOOL handle_location_change_with_mouse_down(HWND hwnd, LONG_PTR styles, LONG_PTR
         Client *dropTargetClient = drop_target_find_client_from_mouse_location(dropTargetMonitor, hwnd);
         if(dropTargetClient)
         {
-            Client *client = windowManager_find_client_in_workspaces_by_hwnd(hwnd);
+            Client *client = windowManager_find_client_in_workspaces_by_hwnd(windowManagerState, hwnd);
             if(client)
             {
                 RECT windowRect;
@@ -1215,7 +1214,7 @@ BOOL handle_location_change_with_mouse_down(HWND hwnd, LONG_PTR styles, LONG_PTR
                     g_windowManagerState.resizeState.regularResizeClient = client;
                     return FALSE;
                 }
-                drag_drop_start(dragDropState, hwnd, dropTargetClient);
+                drag_drop_start(&windowManagerState->dragDropState, hwnd, dropTargetClient);
                 return TRUE;
             }
             else if(has_float_styles(styles, exStyles))
@@ -1226,7 +1225,7 @@ BOOL handle_location_change_with_mouse_down(HWND hwnd, LONG_PTR styles, LONG_PTR
             int modifiers = get_modifiers_pressed();
             if(modifiers == configuration->dragDropFloatModifier)
             {
-                drag_drop_start(dragDropState, hwnd, dropTargetClient);
+                drag_drop_start(&g_windowManagerState.dragDropState, hwnd, dropTargetClient);
                 return TRUE;
             }
 
@@ -1236,10 +1235,10 @@ BOOL handle_location_change_with_mouse_down(HWND hwnd, LONG_PTR styles, LONG_PTR
         {
             if(!dropTargetMonitor->workspace->clients)
             {
-                Client *client = windowManager_find_client_in_workspaces_by_hwnd(hwnd);
+                Client *client = windowManager_find_client_in_workspaces_by_hwnd(windowManagerState, hwnd);
                 if(client)
                 {
-                    drag_drop_start_empty_workspace(dragDropState, dropTargetMonitor, hwnd);
+                    drag_drop_start_empty_workspace(&windowManagerState->dragDropState, dropTargetMonitor, hwnd);
                     return TRUE;
                 }
             }
@@ -1249,10 +1248,10 @@ BOOL handle_location_change_with_mouse_down(HWND hwnd, LONG_PTR styles, LONG_PTR
     return FALSE;
 }
 
-void drag_drop_complete(DragDropState *self)
+void drag_drop_complete(WindowManagerState *windowManagerState)
 {
-    HWND dragHwnd = self->dragHwnd;
-    drag_drop_cancel(self);
+    HWND dragHwnd = windowManagerState->dragDropState.dragHwnd;
+    drag_drop_cancel(&windowManagerState->dragDropState);
 
     Monitor *dropTargetMonitor = drop_target_find_monitor_from_mouse_location();
 
@@ -1267,7 +1266,7 @@ void drag_drop_complete(DragDropState *self)
         if(dropTargetClient)
         {
             Workspace *dropTargetWorkspace = dropTargetClient->workspace;
-            Client *client = windowManager_find_client_in_workspaces_by_hwnd(dragHwnd);
+            Client *client = windowManager_find_client_in_workspaces_by_hwnd(windowManagerState, dragHwnd);
             if(client)
             {
                 if(!isRootWindow)
@@ -1330,7 +1329,7 @@ void drag_drop_complete(DragDropState *self)
         {
             if(!dropTargetMonitor->workspace->clients)
             {
-                Client *client = windowManager_find_client_in_workspaces_by_hwnd(dragHwnd);
+                Client *client = windowManager_find_client_in_workspaces_by_hwnd(windowManagerState, dragHwnd);
                 if(client)
                 {
                     workspace_remove_client(client->workspace, client);
@@ -1422,7 +1421,7 @@ LRESULT CALLBACK handle_mouse(int code, WPARAM w, LPARAM l)
             }
             else if (g_windowManagerState.dragDropState.inProgress && g_windowManagerState.dragDropState.dragHwnd)
             {
-                drag_drop_complete(&g_windowManagerState.dragDropState);
+                drag_drop_complete(&g_windowManagerState);
             }
             else if (g_windowManagerState.resizeState.regularResizeInProgress)
             {
@@ -1570,7 +1569,7 @@ void CALLBACK handle_windows_event(
 
         if(!isRootWindow)
         {
-            windowManager_remove_client_if_found_by_hwnd(hwnd);
+            windowManager_remove_client_if_found_by_hwnd(&g_windowManagerState, hwnd);
             return;
         }
 
@@ -1594,7 +1593,7 @@ void CALLBACK handle_windows_event(
             //We do want to hide the Visual Studio and Outlook windows that are visible and then set to hidden.
             if(!(styles & WS_VISIBLE))
             {
-                windowManager_remove_client_if_found_by_hwnd(hwnd);
+                windowManager_remove_client_if_found_by_hwnd(&g_windowManagerState, hwnd);
                 return;
             }
         }
@@ -1612,7 +1611,7 @@ void CALLBACK handle_windows_event(
                 return;
             }
 
-            Client *existingClient = windowManager_find_client_in_workspaces_by_hwnd(hwnd);
+            Client *existingClient = windowManager_find_client_in_workspaces_by_hwnd(&g_windowManagerState, hwnd);
             if(existingClient)
             {
                 workspace_arrange_windows(existingClient->workspace);
@@ -1661,7 +1660,7 @@ void CALLBACK handle_windows_event(
                 return;
             }
 
-            Workspace *workspace = windowManager_find_client_workspace_using_filters(client);
+            Workspace *workspace = windowManager_find_client_workspace_using_filters(&g_windowManagerState, client);
             if(workspace)
             {
                 if(GetAsyncKeyState(VK_LBUTTON) & 0x8000)
@@ -1679,7 +1678,7 @@ void CALLBACK handle_windows_event(
         }
         else if(event == EVENT_SYSTEM_MINIMIZESTART)
         {
-            Client* client = windowManager_find_client_in_workspaces_by_hwnd(hwnd);
+            Client* client = windowManager_find_client_in_workspaces_by_hwnd(&g_windowManagerState, hwnd);
             if(client)
             {
                 if(!client->data->useMinimizeToHide)
@@ -1690,7 +1689,7 @@ void CALLBACK handle_windows_event(
         }
         else if(event == EVENT_OBJECT_LOCATIONCHANGE)
         {
-            ScratchWindow *scratchWindow = scratch_windows_find_from_hwnd(hwnd);
+            ScratchWindow *scratchWindow = scratch_windows_find_from_hwnd(&g_windowManagerState, hwnd);
             if(scratchWindow)
             {
                 BOOL isMinimized = IsIconic(hwnd);
@@ -1711,7 +1710,7 @@ void CALLBACK handle_windows_event(
             }
 
             Client *client = NULL;
-            client = windowManager_find_client_in_workspaces_by_hwnd(hwnd);
+            client = windowManager_find_client_in_workspaces_by_hwnd(&g_windowManagerState, hwnd);
 
             if(client)
             {
@@ -1748,7 +1747,7 @@ void CALLBACK handle_windows_event(
 
                         if(GetAsyncKeyState(VK_LBUTTON) & 0x8000 && !(GetAsyncKeyState(VK_LSHIFT) & 0x8000) && !g_windowManagerState.resizeState.easyResizeInProgress)
                         {
-                            handle_location_change_with_mouse_down(hwnd, styles, exStyles, &g_windowManagerState.dragDropState);
+                            handle_location_change_with_mouse_down(&g_windowManagerState, hwnd, styles, exStyles);
                             return;
                         }
 
@@ -1760,7 +1759,7 @@ void CALLBACK handle_windows_event(
             {
                 if(GetAsyncKeyState(VK_LBUTTON) & 0x8000 && !(GetAsyncKeyState(VK_LSHIFT) & 0x8000) && !g_windowManagerState.resizeState.easyResizeInProgress)
                 {
-                    if(handle_location_change_with_mouse_down(hwnd, styles, exStyles, &g_windowManagerState.dragDropState))
+                    if(handle_location_change_with_mouse_down(&g_windowManagerState, hwnd, styles, exStyles))
                     {
                         return;
                     }
@@ -1782,7 +1781,7 @@ void CALLBACK handle_windows_event(
         }
         else if (event == EVENT_OBJECT_DESTROY)
         {
-            windowManager_remove_client_if_found_by_hwnd(hwnd);
+            windowManager_remove_client_if_found_by_hwnd(&g_windowManagerState, hwnd);
         }
         else if(event == EVENT_SYSTEM_FOREGROUND)
         {
@@ -1791,7 +1790,7 @@ void CALLBACK handle_windows_event(
                 bar_trigger_selected_window_paint(g_windowManagerState.selectedMonitor->bar);
                 if(hit_test_hwnd(hwnd))
                 {
-                    Client* client = windowManager_find_client_in_workspaces_by_hwnd(hwnd);
+                    Client* client = windowManager_find_client_in_workspaces_by_hwnd(&g_windowManagerState, hwnd);
                     if(client)
                     {
                         if(g_windowManagerState.selectedMonitor->workspace->selected != client)
@@ -1827,9 +1826,9 @@ void CALLBACK handle_windows_event(
     }
 }
 
-void windowManager_remove_client_if_found_by_hwnd(HWND hwnd)
+void windowManager_remove_client_if_found_by_hwnd(WindowManagerState *self, HWND hwnd)
 {
-    Client* client = windowManager_find_client_in_workspaces_by_hwnd(hwnd);
+    Client* client = windowManager_find_client_in_workspaces_by_hwnd(self, hwnd);
     if(client)
     {
         workspace_remove_client_and_arrange(client->workspace, client);
@@ -1837,7 +1836,7 @@ void windowManager_remove_client_if_found_by_hwnd(HWND hwnd)
     }
     else
     {
-        ScratchWindow *sWindow = scratch_windows_find_from_hwnd(hwnd);
+        ScratchWindow *sWindow = scratch_windows_find_from_hwnd(self, hwnd);
         if(sWindow)
         {
             scratch_window_remove(sWindow);
@@ -1850,10 +1849,10 @@ void windowManager_remove_client_if_found_by_hwnd(HWND hwnd)
     }
 }
 
-void windowManager_move_window_to_workspace_and_arrange(HWND hwnd, Workspace *workspace)
+void windowManager_move_window_to_workspace_and_arrange(WindowManagerState *self, HWND hwnd, Workspace *workspace)
 {
-    ScratchWindow *scratchWindow = scratch_windows_find_from_hwnd(hwnd);
-    Client* existingClient = windowManager_find_client_in_workspaces_by_hwnd(hwnd);
+    ScratchWindow *scratchWindow = scratch_windows_find_from_hwnd(self, hwnd);
+    Client* existingClient = windowManager_find_client_in_workspaces_by_hwnd(self, hwnd);
     Client* client = NULL;
     if(!existingClient && !scratchWindow)
     {
@@ -1891,11 +1890,11 @@ void windowManager_move_window_to_workspace_and_arrange(HWND hwnd, Workspace *wo
     }
 }
 
-Client* windowManager_find_client_in_workspaces_by_hwnd(HWND hwnd)
+Client* windowManager_find_client_in_workspaces_by_hwnd(WindowManagerState *self, HWND hwnd)
 {
-    for(int i = 0; i < g_windowManagerState.numberOfWorkspaces; i++)
+    for(int i = 0; i < self->numberOfWorkspaces; i++)
     {
-        Client *c = workspace_find_client_by_hwnd(g_windowManagerState.workspaces[i], hwnd);
+        Client *c = workspace_find_client_by_hwnd(self->workspaces[i], hwnd);
         if(c)
         {
             return c;
@@ -1952,7 +1951,7 @@ BOOL windowManager_find_client_workspace_using_filter_data(WorkspaceFilterData *
     return FALSE;
 }
 
-Workspace* windowManager_find_client_workspace_using_filters(Client *client)
+Workspace* windowManager_find_client_workspace_using_filters(WindowManagerState *self, Client *client)
 {
     Workspace *workspaceFoundByFilter = NULL;
     Workspace *result = NULL;
@@ -1972,9 +1971,9 @@ Workspace* windowManager_find_client_workspace_using_filters(Client *client)
     }
     else
     {
-        for(int i = 0; i < g_windowManagerState.numberOfWorkspaces; i++)
+        for(int i = 0; i < self->numberOfWorkspaces; i++)
         {
-            Workspace *currentWorkspace = g_windowManagerState.workspaces[i];
+            Workspace *currentWorkspace = self->workspaces[i];
             BOOL filterResult = FALSE;
             if(currentWorkspace->filterData)
             {
@@ -2583,7 +2582,7 @@ void workspace_arrange_clients(Workspace *workspace, HDWP hdwp)
 void workspace_increase_main_width_selected_monitor(void)
 {
     HWND foregroundHwnd = GetForegroundWindow();
-    Client* existingClient = windowManager_find_client_in_workspaces_by_hwnd(foregroundHwnd);
+    Client* existingClient = windowManager_find_client_in_workspaces_by_hwnd(&g_windowManagerState, foregroundHwnd);
     if(!existingClient)
     {
         float_window_move_right(foregroundHwnd);
@@ -2611,7 +2610,7 @@ void workspace_decrease_main_width(Workspace *workspace)
 void workspace_decrease_main_width_selected_monitor(void)
 {
     HWND foregroundHwnd = GetForegroundWindow();
-    Client* existingClient = windowManager_find_client_in_workspaces_by_hwnd(foregroundHwnd);
+    Client* existingClient = windowManager_find_client_in_workspaces_by_hwnd(&g_windowManagerState, foregroundHwnd);
     if(!existingClient)
     {
         float_window_move_left(foregroundHwnd);
@@ -3572,9 +3571,9 @@ void scratch_window_add(ScratchWindow *self)
     self->client->data->h = g_windowManagerState.selectedMonitor->h - (g_windowManagerState.selectedMonitor->workspaceStyle->scratchWindowsScreenPadding * 2);
 }
 
-ScratchWindow* scratch_windows_find_from_hwnd(HWND hwnd)
+ScratchWindow* scratch_windows_find_from_hwnd(WindowManagerState *self, HWND hwnd)
 {
-    Client *client = windowManager_find_client_in_workspaces_by_hwnd(hwnd);
+    Client *client = windowManager_find_client_in_workspaces_by_hwnd(self, hwnd);
 
     if(client)
     {
@@ -3970,7 +3969,7 @@ void bar_trigger_selected_window_paint(Bar *self)
             FALSE);
 }
 
-void bar_render_selected_window_description(Bar *bar, HDC hdc)
+void bar_render_selected_window_description(WindowManagerState *windowManagerState, Bar *bar, HDC hdc)
 {
     TCHAR* windowRoutingMode = L"UNKNOWN";
     switch(currentWindowRoutingMode)
@@ -3990,7 +3989,7 @@ void bar_render_selected_window_description(Bar *bar, HDC hdc)
     }
 
     HWND foregroundHwnd = g_eventForegroundHwnd;
-    Client* focusedClient = windowManager_find_client_in_workspaces_by_hwnd(foregroundHwnd);
+    Client* focusedClient = windowManager_find_client_in_workspaces_by_hwnd(windowManagerState, foregroundHwnd);
     Client* clientToRender;
 
     TCHAR *isManagedIndicator = L"\0";
@@ -4305,7 +4304,7 @@ LRESULT CALLBACK bar_message_loop(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPa
                 FillRect(hNewDC, msgBar->selectedWindowDescRect, brush);
                 if(ps.rcPaint.left == msgBar->selectedWindowDescRect->left && ps.rcPaint.right == msgBar->selectedWindowDescRect->right)
                 {
-                    bar_render_selected_window_description(msgBar, hNewDC);
+                    bar_render_selected_window_description(&g_windowManagerState, msgBar, hNewDC);
                 }
                 else if(ps.rcPaint.left == msgBar->timesRect->left)
                 {
@@ -4314,7 +4313,7 @@ LRESULT CALLBACK bar_message_loop(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPa
                 }
                 else
                 {
-                    bar_render_selected_window_description(msgBar, hNewDC);
+                    bar_render_selected_window_description(&g_windowManagerState, msgBar, hNewDC);
                     bar_render_headers(msgBar, hNewDC);
                     bar_render_times(msgBar, hNewDC);
                 }
@@ -5725,7 +5724,7 @@ void process_with_stdout_start(CHAR *cmdArgs, void (*onSuccess) (CHAR *))
 void open_program_scratch_callback(char *stdOut)
 {
     menu_hide();
-    border_window_hide(g_windowManagerState.borderWindowHwnd);
+    /* border_window_hide(g_windowManagerState.borderWindowHwnd); */
     char str[1024];
 
     sprintf_s(str, 1024, "/c start \"\" \"%s\"", stdOut);
@@ -5735,7 +5734,7 @@ void open_program_scratch_callback(char *stdOut)
 void open_program_scratch_callback_not_elevated(char *stdOut)
 {
     menu_hide();
-    border_window_hide(g_windowManagerState.borderWindowHwnd);
+    /* border_window_hide(g_windowManagerState.borderWindowHwnd); */
     char str[1024];
 
     sprintf_s(str, 1024, "/c start \"\" \"%s\"", stdOut);
@@ -5753,7 +5752,7 @@ void open_windows_scratch_exit_callback(char *stdOut)
     char* lastCharRead;
     HWND hwnd = (HWND)strtoll(stdOut, &lastCharRead, 16);
 
-    Client *client = windowManager_find_client_in_workspaces_by_hwnd(hwnd);
+    Client *client = windowManager_find_client_in_workspaces_by_hwnd(&g_windowManagerState, hwnd);
     if(client)
     {
         if(client->data->isMinimized)
@@ -6208,7 +6207,7 @@ int run (void)
 
     WNDCLASSEX* dropTargetWindowClass = drop_target_window_register_class();
 
-    EnumWindows(enum_windows_callback, 0);
+    EnumWindows(enum_windows_callback, (LPARAM)&g_windowManagerState);
 
     for(int i = 0; i < g_windowManagerState.numberOfMonitors; i++)
     {
@@ -6229,7 +6228,7 @@ int run (void)
         return 0;
     };
 
-    g_win_hook = SetWinEventHook(
+    SetWinEventHook(
         EVENT_OBJECT_LOCATIONCHANGE, EVENT_OBJECT_LOCATIONCHANGE,
         NULL,
         handle_windows_event,
@@ -6237,7 +6236,7 @@ int run (void)
         0,
         WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
 
-    g_win_hook = SetWinEventHook(
+    SetWinEventHook(
         EVENT_SYSTEM_MINIMIZESTART, EVENT_SYSTEM_MINIMIZESTART,
         NULL,
         handle_windows_event,
@@ -6245,7 +6244,7 @@ int run (void)
         0,
         WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
 
-    g_win_hook = SetWinEventHook(
+    SetWinEventHook(
         EVENT_OBJECT_DESTROY, EVENT_OBJECT_SHOW,
         NULL,
         handle_windows_event,
@@ -6253,7 +6252,7 @@ int run (void)
         0,
         WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
 
-    g_win_hook = SetWinEventHook(
+    SetWinEventHook(
         EVENT_OBJECT_HIDE, EVENT_OBJECT_HIDE,
         NULL,
         handle_windows_event,
@@ -6261,7 +6260,7 @@ int run (void)
         0,
         WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
 
-    g_win_hook = SetWinEventHook(
+    SetWinEventHook(
         EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_FOREGROUND,
         NULL,
         handle_windows_event,
@@ -6269,7 +6268,7 @@ int run (void)
         0,
         WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
 
-    g_win_hook = SetWinEventHook(
+    SetWinEventHook(
         EVENT_OBJECT_UNCLOAKED, EVENT_OBJECT_UNCLOAKED,
         NULL,
         handle_windows_event,
