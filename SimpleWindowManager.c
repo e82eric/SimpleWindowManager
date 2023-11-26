@@ -127,7 +127,7 @@ static void scratch_window_focus(ScratchWindow *scratchWindow);
 static void menu_hide(void);
 static void button_set_selected(Button *button, BOOL value);
 static void button_set_has_clients(Button *button, BOOL value);
-static void button_press_handle(Button *button);
+static void button_press_handle(WindowManagerState *self, Button *button);
 static void button_redraw(Button *button);
 static void bar_apply_workspace_change(Bar *bar, Workspace *previousWorkspace, Workspace *newWorkspace);
 static void bar_trigger_paint(Bar *bar);
@@ -137,7 +137,7 @@ static void border_window_update(HWND self);
 static void border_window_update_with_defer(HWND self, HDWP hdwp);
 static void border_window_hide(HWND self);
 static LRESULT CALLBACK button_message_loop( HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam, UINT_PTR uIdSubclass, DWORD_PTR dwRefData);
-static void monitor_select(Monitor *monitor);
+static void monitor_select(WindowManagerState *self, Monitor *monitor);
 static void monitor_set_layout(Layout *layout);
 static void monitor_set_workspace_and_arrange(Workspace *workspace, Monitor *monitor, HDWP hdwp);
 static void monitor_set_workspace(Workspace *workspace, Monitor *monitor);
@@ -843,17 +843,17 @@ void monitor_calculate_height(Monitor *self, HWND taskbarHwnd)
     self->bottom = screenHeight - taskBarHeight;
 }
 
-void monitors_resize_for_taskbar(HWND taskbarHwnd)
+void monitors_resize_for_taskbar(WindowManagerState *windowManagerState, HWND taskbarHwnd)
 {
-    for(int i = 0; i < g_windowManagerState.numberOfMonitors; i++)
+    for(int i = 0; i < windowManagerState->numberOfMonitors; i++)
     {
-        monitor_calculate_height(g_windowManagerState.monitors[i], taskbarHwnd);
-        if(g_windowManagerState.monitors[i]->workspace)
+        monitor_calculate_height(windowManagerState->monitors[i], taskbarHwnd);
+        if(windowManagerState->monitors[i]->workspace)
         {
-            workspace_arrange_windows(g_windowManagerState.monitors[i]->workspace);
-            if(g_windowManagerState.monitors[i] == g_windowManagerState.selectedMonitor)
+            workspace_arrange_windows(windowManagerState->monitors[i]->workspace);
+            if(windowManagerState->monitors[i] == windowManagerState->selectedMonitor)
             {
-                workspace_focus_selected_window(g_windowManagerState.monitors[i]->workspace);
+                workspace_focus_selected_window(windowManagerState->monitors[i]->workspace);
             }
         }
     }
@@ -1093,12 +1093,12 @@ BOOL is_root_window(HWND hwnd, LONG styles, LONG exStyles)
     return TRUE;
 }
 
-Monitor* drop_target_find_monitor_from_mouse_location(void)
+Monitor* drop_target_find_monitor_from_mouse_location(WindowManagerState *self)
 {
     Monitor *result = NULL;
-    for(int i = 0; i < g_windowManagerState.numberOfDisplayMonitors; i++)
+    for(int i = 0; i < self->numberOfDisplayMonitors; i++)
     {
-        Monitor *monitor = g_windowManagerState.monitors[i];
+        Monitor *monitor = self->monitors[i];
         if(hit_test_monitor(monitor))
         {
             result = monitor;
@@ -1190,7 +1190,7 @@ BOOL handle_location_change_with_mouse_down(WindowManagerState *windowManagerSta
         return FALSE;
     }
 
-    Monitor *dropTargetMonitor = drop_target_find_monitor_from_mouse_location();
+    Monitor *dropTargetMonitor = drop_target_find_monitor_from_mouse_location(windowManagerState);
     if(dropTargetMonitor)
     {
         Client *dropTargetClient = drop_target_find_client_from_mouse_location(dropTargetMonitor, hwnd);
@@ -1253,7 +1253,7 @@ void drag_drop_complete(WindowManagerState *windowManagerState)
     HWND dragHwnd = windowManagerState->dragDropState.dragHwnd;
     drag_drop_cancel(&windowManagerState->dragDropState);
 
-    Monitor *dropTargetMonitor = drop_target_find_monitor_from_mouse_location();
+    Monitor *dropTargetMonitor = drop_target_find_monitor_from_mouse_location(windowManagerState);
 
     if(dropTargetMonitor)
     {
@@ -1290,7 +1290,7 @@ void drag_drop_complete(WindowManagerState *windowManagerState)
                     clients_add_before(client, dropTargetClient);
                     dropTargetWorkspace->selected = client;
                     workspace_update_client_counts(dropTargetWorkspace);
-                    monitor_select(dropTargetWorkspace->monitor);
+                    monitor_select(windowManagerState, dropTargetWorkspace->monitor);
                 }
             }
             else
@@ -1313,7 +1313,7 @@ void drag_drop_complete(WindowManagerState *windowManagerState)
                     clients_add_before(client, dropTargetClient);
                     dropTargetWorkspace->selected = client;
                     workspace_update_client_counts(dropTargetWorkspace);
-                    monitor_select(dropTargetWorkspace->monitor);
+                    monitor_select(windowManagerState, dropTargetWorkspace->monitor);
                 }
                 else
                 {
@@ -1339,7 +1339,7 @@ void drag_drop_complete(WindowManagerState *windowManagerState)
                     workspace_update_client_counts(dropTargetMonitor->workspace);
                     workspace_arrange_windows(dropTargetMonitor->workspace);
                     workspace_focus_selected_window(dropTargetMonitor->workspace);
-                    monitor_select(dropTargetMonitor);
+                    monitor_select(windowManagerState, dropTargetMonitor);
                 }
             }
         }
@@ -1391,7 +1391,7 @@ LRESULT CALLBACK handle_mouse(int code, WPARAM w, LPARAM l)
             if(modifiers == configuration->easyResizeModifiers)
             {
                 MSLLHOOKSTRUCT *p = (MSLLHOOKSTRUCT*)l;
-                Monitor *monitor = drop_target_find_monitor_from_mouse_location();
+                Monitor *monitor = drop_target_find_monitor_from_mouse_location(&g_windowManagerState);
                 if(monitor)
                 {
                     Workspace *workspace = monitor->workspace;
@@ -1583,7 +1583,7 @@ void CALLBACK handle_windows_event(
             BOOL isTaskBar = is_hwnd_taskbar(hwnd);
             if (isTaskBar)
             {
-                monitors_resize_for_taskbar(hwnd);
+                monitors_resize_for_taskbar(&g_windowManagerState, hwnd);
                 return;
             }
             //Double check that the window is really not visible.
@@ -1602,7 +1602,7 @@ void CALLBACK handle_windows_event(
             BOOL isTaskBar = is_hwnd_taskbar(hwnd);
             if (isTaskBar)
             {
-                monitors_resize_for_taskbar(hwnd);
+                monitors_resize_for_taskbar(&g_windowManagerState, hwnd);
                 return;
             }
 
@@ -1796,7 +1796,7 @@ void CALLBACK handle_windows_event(
                         if(g_windowManagerState.selectedMonitor->workspace->selected != client)
                         {
                             client->workspace->selected = client;
-                            monitor_select(client->workspace->monitor);
+                            monitor_select(&g_windowManagerState, client->workspace->monitor);
                         }
                     }
                 }
@@ -1840,7 +1840,7 @@ void windowManager_remove_client_if_found_by_hwnd(WindowManagerState *self, HWND
         if(sWindow)
         {
             scratch_window_remove(sWindow);
-            workspace_focus_selected_window(g_windowManagerState.selectedMonitor->workspace);
+            workspace_focus_selected_window(self->selectedMonitor->workspace);
         }
     }
     if(client)
@@ -1875,9 +1875,9 @@ void windowManager_move_window_to_workspace_and_arrange(WindowManagerState *self
     {
         client = scratchWindow->client;
         client->data->isScratchWindowBoundToWorkspace = TRUE;
-        if(g_windowManagerState.selectedMonitor->scratchWindow == scratchWindow)
+        if(self->selectedMonitor->scratchWindow == scratchWindow)
         {
-            g_windowManagerState.selectedMonitor->scratchWindow = NULL;
+            self->selectedMonitor->scratchWindow = NULL;
         }
         scratchWindow->client = NULL;
         SetWindowPos(client->data->hwnd, HWND_NOTOPMOST, 0, 0, 0, 0,  SWP_NOSIZE | SWP_NOMOVE);
@@ -1967,7 +1967,7 @@ Workspace* windowManager_find_client_workspace_using_filters(WindowManagerState 
     }
     else if(currentWindowRoutingMode == NotFilteredCurrentWorkspace)
     {
-        workspaceFoundByFilter = g_windowManagerState.selectedMonitor->workspace;
+        workspaceFoundByFilter = self->selectedMonitor->workspace;
     }
     else
     {
@@ -1988,7 +1988,7 @@ Workspace* windowManager_find_client_workspace_using_filters(WindowManagerState 
             {
                 if(currentWindowRoutingMode == FilteredCurrentWorkspace)
                 {
-                    workspaceFoundByFilter = g_windowManagerState.selectedMonitor->workspace;
+                    workspaceFoundByFilter = self->selectedMonitor->workspace;
                 }
                 else
                 {
@@ -2007,7 +2007,7 @@ Workspace* windowManager_find_client_workspace_using_filters(WindowManagerState 
     {
         if(currentWindowRoutingMode == FilteredRoutedNonFilteredCurrentWorkspace && !alwaysExclude)
         {
-            result = g_windowManagerState.selectedMonitor->workspace;
+            result = self->selectedMonitor->workspace;
         }
     }
 
@@ -3900,38 +3900,38 @@ void monitor_select_next(void)
 {
     if(g_windowManagerState.selectedMonitor->next)
     {
-        monitor_select(g_windowManagerState.selectedMonitor->next);
+        monitor_select(&g_windowManagerState, g_windowManagerState.selectedMonitor->next);
     }
     else
     {
-        monitor_select(g_windowManagerState.monitors[0]);
+        monitor_select(&g_windowManagerState, g_windowManagerState.monitors[0]);
     }
 }
 
-void monitor_select(Monitor *monitor)
+void monitor_select(WindowManagerState *self, Monitor *monitor)
 {
     if(monitor->isHidden)
     {
         return;
     }
-    for(int i = 0; i < g_windowManagerState.numberOfMonitors; i++)
+    for(int i = 0; i < self->numberOfMonitors; i++)
     {
-        if(g_windowManagerState.monitors[i]-> selected == TRUE && monitor != g_windowManagerState.monitors[i])
+        if(self->monitors[i]-> selected == TRUE && monitor != self->monitors[i])
         {
-            g_windowManagerState.monitors[i]->selected = FALSE;
+            self->monitors[i]->selected = FALSE;
         }
     }
     monitor->selected = TRUE;
-    Monitor* previousSelectedMonitor = g_windowManagerState.selectedMonitor;
-    g_windowManagerState.selectedMonitor = monitor;
+    Monitor* previousSelectedMonitor = self->selectedMonitor;
+    self->selectedMonitor = monitor;
 
-    if(g_windowManagerState.selectedMonitor->scratchWindow)
+    if(self->selectedMonitor->scratchWindow)
     {
-        scratch_window_focus(g_windowManagerState.selectedMonitor->scratchWindow);
+        scratch_window_focus(self->selectedMonitor->scratchWindow);
     }
     else
     {
-        workspace_focus_selected_window(g_windowManagerState.selectedMonitor->workspace);
+        workspace_focus_selected_window(self->selectedMonitor->workspace);
     }
     bar_trigger_selected_window_paint(monitor->bar);
     if(previousSelectedMonitor)
@@ -4624,9 +4624,9 @@ void button_redraw(Button *button)
     }
 }
 
-void button_press_handle(Button *button)
+void button_press_handle(WindowManagerState *windowManagerState, Button *button)
 {
-    monitor_select(button->bar->monitor);
+    monitor_select(windowManagerState, button->bar->monitor);
     windowManager_move_workspace_to_monitor(button->bar->monitor, button->workspace);
     workspace_focus_selected_window(button->workspace);
 }
@@ -4694,7 +4694,7 @@ LRESULT CALLBACK button_message_loop(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM
         }
         case WM_LBUTTONDOWN:
         {
-            button_press_handle(button);
+            button_press_handle(&g_windowManagerState, button);
             break;
         }
         default:
@@ -6101,7 +6101,7 @@ int run (void)
         monitor_set_workspace(g_windowManagerState.workspaces[i], g_windowManagerState.monitors[i]);
     }
 
-    monitor_select(g_windowManagerState.monitors[0]);
+    monitor_select(&g_windowManagerState, g_windowManagerState.monitors[0]);
 
     int menuLeft = g_windowManagerState.selectedMonitor->xOffset + g_windowManagerState.selectedMonitor->workspaceStyle->scratchWindowsScreenPadding;
     int menuTop = g_windowManagerState.selectedMonitor->workspaceStyle->scratchWindowsScreenPadding;
