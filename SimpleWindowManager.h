@@ -325,6 +325,7 @@ typedef struct WindowManagerState
     DragDropState dragDropState;
     ResizeState resizeState;
     KeyBinding *keyBindings;
+    ScratchWindow *scratchWindows;
 } WindowManagerState;
 
 extern Layout deckLayout;

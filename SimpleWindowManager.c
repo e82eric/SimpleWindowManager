@@ -212,7 +212,6 @@ static CHAR *cmdLineExe = "C:\\Windows\\System32\\cmd.exe";
 
 IWbemServices *services = NULL;
 
-ScratchWindow *g_scratchWindows;
 MenuView *g_mView;
 BOOL g_menuVisible;
 Command *g_commands[MAX_COMMANDS];
@@ -3570,7 +3569,7 @@ ScratchWindow* scratch_windows_find_from_hwnd(WindowManagerState *self, HWND hwn
         } 
     }
 
-    ScratchWindow *current = g_scratchWindows;
+    ScratchWindow *current = g_windowManagerState.scratchWindows;
     while(current)
     {
         if(current->client)
@@ -3594,7 +3593,7 @@ ScratchWindow* scratch_windows_find_from_client(Client *client)
         return NULL;
     }
 
-    ScratchWindow *current = g_scratchWindows;
+    ScratchWindow *current = g_windowManagerState.scratchWindows;
     while(current)
     {
         if(current->scratchFilter)
@@ -3631,13 +3630,13 @@ ScratchWindow* scratch_windows_find_from_client(Client *client)
 
 void scratch_windows_add_to_end(ScratchWindow *scratchWindow)
 {
-    if(g_scratchWindows == NULL)
+    if(g_windowManagerState.scratchWindows == NULL)
     {
-        g_scratchWindows = scratchWindow;
+        g_windowManagerState.scratchWindows = scratchWindow;
     }
     else
     {
-        ScratchWindow *current = g_scratchWindows;
+        ScratchWindow *current = g_windowManagerState.scratchWindows;
         while(current)
         {
             if(!current->next)
