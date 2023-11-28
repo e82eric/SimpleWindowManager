@@ -212,7 +212,6 @@ static CHAR *cmdLineExe = "C:\\Windows\\System32\\cmd.exe";
 
 IWbemServices *services = NULL;
 
-MenuView *g_mView;
 BOOL g_menuVisible;
 Command *g_commands[MAX_COMMANDS];
 int g_numberOfCommands = 0;
@@ -1575,7 +1574,7 @@ void CALLBACK handle_windows_event(
             return;
         }
 
-        if(hwnd == g_mView->hwnd)
+        if(hwnd == g_windowManagerState.menuView->hwnd)
         {
             return;
         }
@@ -2818,7 +2817,7 @@ void workspace_focus_selected_window(WindowManagerState *windowManagerState, Wor
 
     if(g_menuVisible)
     {
-        SetForegroundWindow(g_mView->hwnd);
+        SetForegroundWindow(g_windowManagerState.menuView->hwnd);
         return;
     }
 
@@ -3652,14 +3651,14 @@ void scratch_windows_add_to_end(ScratchWindow *scratchWindow)
 
 MenuDefinition* menu_create_and_register(void)
 {
-    MenuDefinition *result = menu_definition_create(g_mView);
+    MenuDefinition *result = menu_definition_create(g_windowManagerState.menuView);
     return result;
 }
 
 void menu_hide(void)
 {
     g_menuVisible = FALSE;
-    ShowWindow(g_mView->hwnd, SW_HIDE);
+    ShowWindow(g_windowManagerState.menuView->hwnd, SW_HIDE);
     bar_trigger_selected_window_paint(g_windowManagerState.selectedMonitor->bar);
     border_window_update(g_windowManagerState.borderWindowHwnd);
 }
@@ -3668,7 +3667,7 @@ void menu_on_escape(void)
 {
     menu_hide();
     HWND foregroundHwnd = GetForegroundWindow();
-    if((foregroundHwnd == g_mView->hwnd || foregroundHwnd == g_windowManagerState.borderWindowHwnd) && g_windowManagerState.selectedMonitor->workspace)
+    if((foregroundHwnd == g_windowManagerState.menuView->hwnd || foregroundHwnd == g_windowManagerState.borderWindowHwnd) && g_windowManagerState.selectedMonitor->workspace)
     {
         workspace_focus_selected_window(&g_windowManagerState, g_windowManagerState.selectedMonitor->workspace);
     }
@@ -3682,8 +3681,8 @@ void menu_run(MenuDefinition *definition)
     }
 
     definition->onEscape = menu_on_escape;
-    menu_run_definition(g_mView, definition);
-    menu_focus(&g_windowManagerState, g_mView);
+    menu_run_definition(g_windowManagerState.menuView, definition);
+    menu_focus(&g_windowManagerState, g_windowManagerState.menuView);
 }
 
 BOOL terminal_with_uniqueStr_filter(ScratchWindow *self, Client *client)
@@ -4806,7 +4805,7 @@ static LRESULT dcomp_border_window_message_loop(HWND window, UINT message, WPARA
                 WINDOWPOS* windowPos = (WINDOWPOS*)lparam;
                 if(g_menuVisible)
                 {
-                    windowPos->hwndInsertAfter = g_mView->hwnd;
+                    windowPos->hwndInsertAfter = g_windowManagerState.menuView->hwnd;
                 }
                 else if(!g_windowManagerState.selectedMonitor->scratchWindow)
                 {
@@ -5980,8 +5979,8 @@ int run (void)
     workspaceStyle->dropTargetColor = RGB(0, 90, 90);
 
     TCHAR menuTitle[BUF_LEN] = L"nmenu";
-    g_mView = menu_create(menuTitle, configuration->textStyle);
-    ShowWindow(g_mView->hwnd, SW_HIDE);
+    g_windowManagerState.menuView = menu_create(menuTitle, configuration->textStyle);
+    ShowWindow(g_windowManagerState.menuView->hwnd, SW_HIDE);
 
     configuration->monitors = g_windowManagerState.monitors;
     configuration->workspaces = g_windowManagerState.workspaces;
@@ -6093,7 +6092,7 @@ int run (void)
     int menuTop = g_windowManagerState.selectedMonitor->workspaceStyle->scratchWindowsScreenPadding;
     int menuWidth = g_windowManagerState.selectedMonitor->w - (g_windowManagerState.selectedMonitor->workspaceStyle->scratchWindowsScreenPadding * 2);
     int menuHeight = g_windowManagerState.selectedMonitor->h - (g_windowManagerState.selectedMonitor->workspaceStyle->scratchWindowsScreenPadding * 2);
-    SetWindowPos(g_mView->hwnd, HWND_TOPMOST, menuLeft, menuTop, menuWidth, menuHeight, SWP_HIDEWINDOW);
+    SetWindowPos(g_windowManagerState.menuView->hwnd, HWND_TOPMOST, menuLeft, menuTop, menuWidth, menuHeight, SWP_HIDEWINDOW);
 
     IWbemLocator *locator  = NULL;
 

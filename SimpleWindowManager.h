@@ -326,6 +326,7 @@ typedef struct WindowManagerState
     ResizeState resizeState;
     KeyBinding *keyBindings;
     ScratchWindow *scratchWindows;
+    MenuView *menuView;
 } WindowManagerState;
 
 extern Layout deckLayout;
