@@ -324,6 +324,7 @@ typedef struct WindowManagerState
     Workspace *lastWorkspace;
     DragDropState dragDropState;
     ResizeState resizeState;
+    KeyBinding *keyBindings;
 } WindowManagerState;
 
 extern Layout deckLayout;

@@ -212,7 +212,6 @@ static CHAR *cmdLineExe = "C:\\Windows\\System32\\cmd.exe";
 
 IWbemServices *services = NULL;
 
-KeyBinding *g_headKeyBinding;
 ScratchWindow *g_scratchWindows;
 MenuView *g_mView;
 BOOL g_menuVisible;
@@ -1444,7 +1443,7 @@ LRESULT CALLBACK handle_key_press(int code, WPARAM w, LPARAM l)
     PKBDLLHOOKSTRUCT p = (PKBDLLHOOKSTRUCT)l;
     if (code == 0 && (w == WM_KEYDOWN || w == WM_SYSKEYDOWN))
     {
-        KeyBinding *keyBinding = g_headKeyBinding;
+        KeyBinding *keyBinding = g_windowManagerState.keyBindings;
         while(keyBinding)
         {
             if(p->vkCode == keyBinding->key)
@@ -5233,13 +5232,13 @@ void keybinding_create_with_menu_arg(CHAR *name, int modifiers, unsigned int key
 
 void keybinding_add_to_list(KeyBinding *binding)
 {
-    if(!g_headKeyBinding)
+    if(!g_windowManagerState.keyBindings)
     {
-        g_headKeyBinding = binding;
+        g_windowManagerState.keyBindings = binding;
     }
     else
     {
-        KeyBinding *current = g_headKeyBinding;
+        KeyBinding *current = g_windowManagerState.keyBindings;
         while(current->next)
         {
             current = current->next;
@@ -5250,7 +5249,7 @@ void keybinding_add_to_list(KeyBinding *binding)
 
 KeyBinding* keybindings_find_existing_or_create(CHAR* name, int modifiers, unsigned int key)
 {
-    KeyBinding *current = g_headKeyBinding;
+    KeyBinding *current = g_windowManagerState.keyBindings;
     while(current)
     {
         if(current->modifiers == modifiers && current->key == key)
