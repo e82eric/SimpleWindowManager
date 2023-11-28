@@ -212,7 +212,6 @@ static CHAR *cmdLineExe = "C:\\Windows\\System32\\cmd.exe";
 
 IWbemServices *services = NULL;
 
-BOOL g_menuVisible;
 Command *g_commands[MAX_COMMANDS];
 int g_numberOfCommands = 0;
 BOOL g_isForegroundWindowSameAsSelectMonitorSelected;
@@ -1807,7 +1806,7 @@ void CALLBACK handle_windows_event(
             {
                 if(g_windowManagerState.selectedMonitor->workspace->selected)
                 {
-                    if(g_windowManagerState.selectedMonitor->workspace->selected->data->hwnd != hwnd && !g_windowManagerState.selectedMonitor->scratchWindow && !g_menuVisible)
+                    if(g_windowManagerState.selectedMonitor->workspace->selected->data->hwnd != hwnd && !g_windowManagerState.selectedMonitor->scratchWindow && !g_windowManagerState.menuVisible)
                     {
                         g_isForegroundWindowSameAsSelectMonitorSelected = FALSE;
                     }
@@ -2030,7 +2029,7 @@ void windowManager_move_workspace_to_monitor(Monitor *monitor, Workspace *worksp
         scratch_window_hide(monitor->scratchWindow);
     }
 
-    if(g_menuVisible)
+    if(g_windowManagerState.menuVisible)
     {
         menu_hide();
     }
@@ -2815,7 +2814,7 @@ void workspace_focus_selected_window(WindowManagerState *windowManagerState, Wor
         return;
     }
 
-    if(g_menuVisible)
+    if(g_windowManagerState.menuVisible)
     {
         SetForegroundWindow(g_windowManagerState.menuView->hwnd);
         return;
@@ -3485,9 +3484,9 @@ void menu_focus(WindowManagerState *windowManagerState, MenuView *self)
     int w = windowManagerState->selectedMonitor->w - (windowManagerState->selectedMonitor->workspaceStyle->scratchWindowsScreenPadding * 2);
     int h = windowManagerState->selectedMonitor->h - (windowManagerState->selectedMonitor->workspaceStyle->scratchWindowsScreenPadding * 2);
 
-    if(!g_menuVisible)
+    if(!g_windowManagerState.menuVisible)
     {
-        g_menuVisible = TRUE;
+        g_windowManagerState.menuVisible = TRUE;
         border_window_hide(windowManagerState->borderWindowHwnd);
         ShowWindow(self->hwnd, SW_SHOW);
         SetForegroundWindow(self->hwnd);
@@ -3657,7 +3656,7 @@ MenuDefinition* menu_create_and_register(void)
 
 void menu_hide(void)
 {
-    g_menuVisible = FALSE;
+    g_windowManagerState.menuVisible = FALSE;
     ShowWindow(g_windowManagerState.menuView->hwnd, SW_HIDE);
     bar_trigger_selected_window_paint(g_windowManagerState.selectedMonitor->bar);
     border_window_update(g_windowManagerState.borderWindowHwnd);
@@ -3728,7 +3727,7 @@ ScratchWindow *register_scratch_with_unique_string(TCHAR *processImageName, CHAR
 
 void scratch_window_show(ScratchWindow *self)
 {
-    if(g_menuVisible)
+    if(g_windowManagerState.menuVisible)
     {
         menu_hide();
     }
@@ -4704,7 +4703,7 @@ void border_window_update_with_defer(HWND self, HDWP hdwp)
 {
     if(g_windowManagerState.selectedMonitor)
     {
-        if(g_windowManagerState.selectedMonitor->scratchWindow || g_menuVisible)
+        if(g_windowManagerState.selectedMonitor->scratchWindow || g_windowManagerState.menuVisible)
         {
             InvalidateRect(self, NULL, FALSE);
         }
@@ -4777,7 +4776,7 @@ void border_window_update(HWND self)
 
 void drop_target_window_paint(HWND hWnd)
 {
-    if(g_windowManagerState.selectedMonitor->workspace->selected || g_windowManagerState.selectedMonitor->scratchWindow || g_menuVisible)
+    if(g_windowManagerState.selectedMonitor->workspace->selected || g_windowManagerState.selectedMonitor->scratchWindow || g_windowManagerState.menuVisible)
     {
         PAINTSTRUCT ps;
         HDC hDC = BeginPaint(hWnd, &ps);
@@ -4803,7 +4802,7 @@ static LRESULT dcomp_border_window_message_loop(HWND window, UINT message, WPARA
         case WM_WINDOWPOSCHANGING:
             {
                 WINDOWPOS* windowPos = (WINDOWPOS*)lparam;
-                if(g_menuVisible)
+                if(g_windowManagerState.menuVisible)
                 {
                     windowPos->hwndInsertAfter = g_windowManagerState.menuView->hwnd;
                 }

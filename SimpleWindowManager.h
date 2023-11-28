@@ -327,6 +327,7 @@ typedef struct WindowManagerState
     KeyBinding *keyBindings;
     ScratchWindow *scratchWindows;
     MenuView *menuView;
+    BOOL menuVisible;
 } WindowManagerState;
 
 extern Layout deckLayout;
