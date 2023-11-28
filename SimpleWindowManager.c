@@ -33,7 +33,6 @@
 #include "dcomp_border_window.h"
 
 #define MAX_WORKSPACES 10
-#define MAX_COMMANDS 256
 
 static const TCHAR UWP_WRAPPER_CLASS[] = L"ApplicationFrameWindow";
 static const TCHAR TASKBAR_CLASS[] = L"Shell_TrayWnd";
@@ -212,8 +211,6 @@ static CHAR *cmdLineExe = "C:\\Windows\\System32\\cmd.exe";
 
 IWbemServices *services = NULL;
 
-Command *g_commands[MAX_COMMANDS];
-int g_numberOfCommands = 0;
 BOOL g_isForegroundWindowSameAsSelectMonitorSelected;
 HWND g_eventForegroundHwnd;
 int g_floatWindowMovement;
@@ -229,11 +226,11 @@ void run_command_from_menu(char *stdOut)
     char *next_token = NULL;
     char* name = strtok_s(stdOut, deli, &next_token);
 
-    for(int i = 0; i < g_numberOfCommands; i++)
+    for(int i = 0; i < g_windowManagerState.numberOfCommands; i++)
     {
-        if(strcmp(name, g_commands[i]->name) == 0)
+        if(strcmp(name, g_windowManagerState.commands[i]->name) == 0)
         {
-            g_commands[i]->execute(g_commands[i]);
+            g_windowManagerState.commands[i]->execute(g_windowManagerState.commands[i]);
             return;
         }
     }
@@ -261,9 +258,9 @@ int commands_list(int maxItems, CHAR **lines)
 
     int numberOfBindings = 1;
 
-    for(int i = 0; i < g_numberOfCommands && g_numberOfCommands < maxItems; i++)
+    for(int i = 0; i < g_windowManagerState.numberOfCommands && g_windowManagerState.numberOfCommands < maxItems; i++)
     {
-        Command *command = g_commands[i];
+        Command *command = g_windowManagerState.commands[i];
         CHAR keyBindingStr[MAX_PATH];
         keyBindingStr[0] = '\0';
 
@@ -5067,13 +5064,13 @@ void command_shell_arg_get_description(Command *self, int maxLen, CHAR *toFill)
 
 void command_register(Command *self)
 {
-    g_commands[g_numberOfCommands] = self;
-    g_numberOfCommands++;
+    g_windowManagerState.commands[g_windowManagerState.numberOfCommands] = self;
+    g_windowManagerState.numberOfCommands++;
 }
 
 Command *command_create(CHAR *name)
 {
-    if(g_numberOfCommands < MAX_COMMANDS)
+    if(g_windowManagerState.numberOfCommands < MAX_COMMANDS)
     {
         size_t nameLen = strlen(name);
         if(nameLen > g_longestCommandName)
@@ -5929,6 +5926,7 @@ void discover_monitors(void)
 int run (void)
 {
     SetProcessDPIAware();
+    g_windowManagerState.numberOfCommands = 0;
     memset(&g_windowManagerState.dragDropState, 0, sizeof(DragDropState));
     memset(&g_windowManagerState.resizeState, 0, sizeof(ResizeState));
     HANDLE hMutex;

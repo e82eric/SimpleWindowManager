@@ -18,6 +18,8 @@ typedef struct BarSegmentConfiguration BarSegmentConfiguration;
 typedef BOOL (*WindowFilter)(Client *client);
 typedef BOOL (*ScratchFilter)(ScratchWindow *self, Client *client);
 
+#define MAX_COMMANDS 256
+
 #define VK_A 0x41
 #define VK_B 0x42
 #define VK_C 0x43
@@ -328,6 +330,8 @@ typedef struct WindowManagerState
     ScratchWindow *scratchWindows;
     MenuView *menuView;
     BOOL menuVisible;
+    Command *commands[MAX_COMMANDS];
+    int numberOfCommands;
 } WindowManagerState;
 
 extern Layout deckLayout;
