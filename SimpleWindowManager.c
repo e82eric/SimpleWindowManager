@@ -211,13 +211,6 @@ static CHAR *cmdLineExe = "C:\\Windows\\System32\\cmd.exe";
 
 IWbemServices *services = NULL;
 
-BOOL g_isForegroundWindowSameAsSelectMonitorSelected;
-HWND g_eventForegroundHwnd;
-int g_floatWindowMovement;
-size_t g_longestCommandName;
-
-enum WindowRoutingMode currentWindowRoutingMode;
-
 Configuration *configuration;
 
 void run_command_from_menu(char *stdOut)
@@ -238,7 +231,7 @@ void run_command_from_menu(char *stdOut)
 
 int commands_list(int maxItems, CHAR **lines)
 {
-    size_t nameWidth = g_longestCommandName;
+    size_t nameWidth = g_windowManagerState.longestCommandName;
     const int typeWidth = 25;
     const int keyBindingWidth = 30;
     CHAR header[1024];
@@ -527,13 +520,13 @@ void move_secondary_monitor_focused_window_to_main(void)
 
 void toggle_create_window_in_current_workspace(void)
 {
-    if(currentWindowRoutingMode != FilteredCurrentWorkspace)
+    if(g_windowManagerState.currentWindowRoutingMode != FilteredCurrentWorkspace)
     {
-        currentWindowRoutingMode = FilteredCurrentWorkspace;
+        g_windowManagerState.currentWindowRoutingMode = FilteredCurrentWorkspace;
     }
     else
     {
-        currentWindowRoutingMode = FilteredAndRoutedToWorkspace;
+        g_windowManagerState.currentWindowRoutingMode = FilteredAndRoutedToWorkspace;
     }
     for(int i = 0; i < g_windowManagerState.numberOfMonitors; i++)
     {
@@ -546,13 +539,13 @@ void toggle_create_window_in_current_workspace(void)
 
 void toggle_ignore_workspace_filters(void)
 {
-    if(currentWindowRoutingMode != NotFilteredCurrentWorkspace)
+    if(g_windowManagerState.currentWindowRoutingMode != NotFilteredCurrentWorkspace)
     {
-        currentWindowRoutingMode = NotFilteredCurrentWorkspace;
+        g_windowManagerState.currentWindowRoutingMode = NotFilteredCurrentWorkspace;
     }
     else
     {
-        currentWindowRoutingMode = FilteredAndRoutedToWorkspace;
+        g_windowManagerState.currentWindowRoutingMode = FilteredAndRoutedToWorkspace;
     }
     for(int i = 0; i < g_windowManagerState.numberOfMonitors; i++)
     {
@@ -565,13 +558,13 @@ void toggle_ignore_workspace_filters(void)
 
 void toggle_non_filtered_windows_assigned_to_current_workspace(void)
 {
-    if(currentWindowRoutingMode != FilteredRoutedNonFilteredCurrentWorkspace)
+    if(g_windowManagerState.currentWindowRoutingMode != FilteredRoutedNonFilteredCurrentWorkspace)
     {
-        currentWindowRoutingMode = FilteredRoutedNonFilteredCurrentWorkspace;
+        g_windowManagerState.currentWindowRoutingMode = FilteredRoutedNonFilteredCurrentWorkspace;
     }
     else
     {
-        currentWindowRoutingMode = FilteredAndRoutedToWorkspace;
+        g_windowManagerState.currentWindowRoutingMode = FilteredAndRoutedToWorkspace;
     }
     for(int i = 0; i < g_windowManagerState.numberOfMonitors; i++)
     {
@@ -609,7 +602,7 @@ void float_window_move_up(HWND hwnd)
     RECT currentRect;
     GetWindowRect(hwnd, &currentRect);
     int targetLeft = currentRect.left;
-    int targetTop = currentRect.top - g_floatWindowMovement;
+    int targetTop = currentRect.top - g_windowManagerState.floatWindowMovement;
     int targetWidth = currentRect.right - currentRect.left;
     int targetHeight = currentRect.bottom - currentRect.top;
     MoveWindow(hwnd, targetLeft, targetTop, targetWidth, targetHeight, FALSE);
@@ -620,7 +613,7 @@ void float_window_move_down(HWND hwnd)
     RECT currentRect;
     GetWindowRect(hwnd, &currentRect);
     int targetLeft = currentRect.left;
-    int targetTop = currentRect.top + g_floatWindowMovement;
+    int targetTop = currentRect.top + g_windowManagerState.floatWindowMovement;
     int targetWidth = currentRect.right - currentRect.left;
     int targetHeight = currentRect.bottom - currentRect.top;
     MoveWindow(hwnd, targetLeft, targetTop, targetWidth, targetHeight, FALSE);
@@ -630,7 +623,7 @@ void float_window_move_right(HWND hwnd)
 {
     RECT currentRect;
     GetWindowRect(hwnd, &currentRect);
-    int targetLeft = currentRect.left + g_floatWindowMovement;
+    int targetLeft = currentRect.left + g_windowManagerState.floatWindowMovement;
     int targetTop = currentRect.top;
     int targetWidth = currentRect.right - currentRect.left;
     int targetHeight = currentRect.bottom - currentRect.top;
@@ -641,7 +634,7 @@ void float_window_move_left(HWND hwnd)
 {
     RECT currentRect;
     GetWindowRect(hwnd, &currentRect);
-    int targetLeft = currentRect.left - g_floatWindowMovement;
+    int targetLeft = currentRect.left - g_windowManagerState.floatWindowMovement;
     int targetTop = currentRect.top;
     int targetWidth = currentRect.right - currentRect.left;
     int targetHeight = currentRect.bottom - currentRect.top;
@@ -1805,15 +1798,15 @@ void CALLBACK handle_windows_event(
                 {
                     if(g_windowManagerState.selectedMonitor->workspace->selected->data->hwnd != hwnd && !g_windowManagerState.selectedMonitor->scratchWindow && !g_windowManagerState.menuVisible)
                     {
-                        g_isForegroundWindowSameAsSelectMonitorSelected = FALSE;
+                        g_windowManagerState.isForegroundWindowSameAsSelectMonitorSelected = FALSE;
                     }
                     else
                     {
-                        g_isForegroundWindowSameAsSelectMonitorSelected = TRUE;
+                        g_windowManagerState.isForegroundWindowSameAsSelectMonitorSelected = TRUE;
                     }
                 }
             }
-            g_eventForegroundHwnd = hwnd;
+            g_windowManagerState.eventForegroundHwnd = hwnd;
             border_window_update(g_windowManagerState.borderWindowHwnd);
             if(g_windowManagerState.selectedMonitor)
             {
@@ -1962,7 +1955,7 @@ Workspace* windowManager_find_client_workspace_using_filters(WindowManagerState 
     if(alwaysExclude)
     {
     }
-    else if(currentWindowRoutingMode == NotFilteredCurrentWorkspace)
+    else if(g_windowManagerState.currentWindowRoutingMode == NotFilteredCurrentWorkspace)
     {
         workspaceFoundByFilter = self->selectedMonitor->workspace;
     }
@@ -1983,7 +1976,7 @@ Workspace* windowManager_find_client_workspace_using_filters(WindowManagerState 
 
             if(filterResult)
             {
-                if(currentWindowRoutingMode == FilteredCurrentWorkspace)
+                if(g_windowManagerState.currentWindowRoutingMode == FilteredCurrentWorkspace)
                 {
                     workspaceFoundByFilter = self->selectedMonitor->workspace;
                 }
@@ -2002,7 +1995,7 @@ Workspace* windowManager_find_client_workspace_using_filters(WindowManagerState 
     }
     else
     {
-        if(currentWindowRoutingMode == FilteredRoutedNonFilteredCurrentWorkspace && !alwaysExclude)
+        if(g_windowManagerState.currentWindowRoutingMode == FilteredRoutedNonFilteredCurrentWorkspace && !alwaysExclude)
         {
             result = self->selectedMonitor->workspace;
         }
@@ -2825,7 +2818,7 @@ void workspace_focus_selected_window(WindowManagerState *windowManagerState, Wor
             keybd_event(0, 0, 0, 0);
             SetForegroundWindow(workspace->selected->data->hwnd);
         }
-        g_isForegroundWindowSameAsSelectMonitorSelected = TRUE;
+        g_windowManagerState.isForegroundWindowSameAsSelectMonitorSelected = TRUE;
     }
     if(workspace->monitor->bar)
     {
@@ -3953,7 +3946,7 @@ void bar_trigger_selected_window_paint(Bar *self)
 void bar_render_selected_window_description(WindowManagerState *windowManagerState, Bar *bar, HDC hdc)
 {
     TCHAR* windowRoutingMode = L"UNKNOWN";
-    switch(currentWindowRoutingMode)
+    switch(g_windowManagerState.currentWindowRoutingMode)
     {
         case FilteredAndRoutedToWorkspace:
             windowRoutingMode = L"1";
@@ -3969,14 +3962,14 @@ void bar_render_selected_window_description(WindowManagerState *windowManagerSta
             break;
     }
 
-    HWND foregroundHwnd = g_eventForegroundHwnd;
+    HWND foregroundHwnd = g_windowManagerState.eventForegroundHwnd;
     Client* focusedClient = windowManager_find_client_in_workspaces_by_hwnd(windowManagerState, foregroundHwnd);
     Client* clientToRender;
 
     TCHAR *isManagedIndicator = L"\0";
     if(focusedClient)
     {
-        if(g_isForegroundWindowSameAsSelectMonitorSelected)
+        if(g_windowManagerState.isForegroundWindowSameAsSelectMonitorSelected)
         {
             isManagedIndicator = L"";
         }
@@ -4826,7 +4819,7 @@ static LRESULT dcomp_border_window_message_loop(HWND window, UINT message, WPARA
             {
                 UINT width = LOWORD(lparam);
                 UINT height = HIWORD(lparam);
-                dcomp_border_window_draw(width, height, !g_isForegroundWindowSameAsSelectMonitorSelected);
+                dcomp_border_window_draw(width, height, !g_windowManagerState.isForegroundWindowSameAsSelectMonitorSelected);
             }
             break;
         case WM_PAINT:
@@ -4836,7 +4829,7 @@ static LRESULT dcomp_border_window_message_loop(HWND window, UINT message, WPARA
 
                 UINT width = rcWindow.right - rcWindow.left;
                 UINT height = rcWindow.bottom - rcWindow.top;
-                dcomp_border_window_draw(width, height, !g_isForegroundWindowSameAsSelectMonitorSelected);
+                dcomp_border_window_draw(width, height, !g_windowManagerState.isForegroundWindowSameAsSelectMonitorSelected);
             }
             break;
         case WM_ERASEBKGND:
@@ -5073,9 +5066,9 @@ Command *command_create(CHAR *name)
     if(g_windowManagerState.numberOfCommands < MAX_COMMANDS)
     {
         size_t nameLen = strlen(name);
-        if(nameLen > g_longestCommandName)
+        if(nameLen > g_windowManagerState.longestCommandName)
         {
-            g_longestCommandName = nameLen;
+            g_windowManagerState.longestCommandName = nameLen;
         }
         Command *result = calloc(1, sizeof(Command));
         assert(result);
@@ -5991,7 +5984,7 @@ int run (void)
     configuration->borderWindowBackgroundTransparency = (128 << 24);
     configuration->workspaceStyle = workspaceStyle;
     configure(configuration);
-    currentWindowRoutingMode = configuration->windowRoutingMode;
+    g_windowManagerState.currentWindowRoutingMode = configuration->windowRoutingMode;
 
     int barHeight = 29;
     if(configuration->barHeight)
@@ -6004,7 +5997,7 @@ int run (void)
     configuration->textStyle->_focusBackgroundBrush = CreateSolidBrush(configuration->textStyle->focusBackgroundColor);
     configuration->textStyle->_focusPen2 = CreatePen(PS_SOLID, configuration->textStyle->borderWidth, configuration->textStyle->focusColor2);
 
-    g_floatWindowMovement = configuration->floatWindowMovement;
+    g_windowManagerState.floatWindowMovement = configuration->floatWindowMovement;
 
     HINSTANCE moduleHandle = GetModuleHandle(NULL);
     workspaceStyle->_dropTargetBrush = CreateSolidBrush(workspaceStyle->dropTargetColor);

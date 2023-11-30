@@ -330,8 +330,13 @@ typedef struct WindowManagerState
     ScratchWindow *scratchWindows;
     MenuView *menuView;
     BOOL menuVisible;
+    size_t longestCommandName;
     Command *commands[MAX_COMMANDS];
     int numberOfCommands;
+    BOOL isForegroundWindowSameAsSelectMonitorSelected;
+    HWND eventForegroundHwnd;
+    int floatWindowMovement;
+    enum WindowRoutingMode currentWindowRoutingMode;
 } WindowManagerState;
 
 extern Layout deckLayout;
