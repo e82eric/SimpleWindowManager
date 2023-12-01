@@ -108,10 +108,10 @@ static void workspace_remove_client_and_arrange(WindowManagerState *windowManage
 static int workspace_update_client_counts(Workspace *workspace);
 static int workspace_get_number_of_clients(Workspace *workspace);
 static KeyBinding* keybindings_find_existing_or_create(CHAR* name, int modifiers, unsigned int key);
-static ScratchWindow* scratch_windows_find_from_client(Client *client);
+static ScratchWindow* scratch_windows_find_from_client(WindowManagerState *self, Client *client);
 static ScratchWindow* scratch_windows_find_from_hwnd(WindowManagerState *self, HWND hwnd);
 static void scratch_window_toggle(ScratchWindow *self);
-static void scratch_window_show(ScratchWindow *self);
+static void scratch_window_show(WindowManagerState *windowManagerState, ScratchWindow *self);
 static void scratch_window_hide(ScratchWindow *self);
 static Client* workspace_find_client_by_hwnd(Workspace *workspace, HWND hwnd);
 static Client* clientFactory_create_from_hwnd(HWND hwnd);
@@ -123,7 +123,7 @@ static void free_client(Client *client);
 static void scratch_window_remove(ScratchWindow *scratchWindow);
 static void scratch_window_add(ScratchWindow *scratchWindow);
 static void scratch_window_focus(WindowManagerState *windowManagerState, ScratchWindow *scratchWindow);
-static void menu_hide(void);
+static void menu_hide(WindowManagerState *windowManagerState);
 static void button_set_selected(Button *button, BOOL value);
 static void button_set_has_clients(Button *button, BOOL value);
 static void button_press_handle(WindowManagerState *self, Button *button);
@@ -133,7 +133,7 @@ static void bar_trigger_paint(Bar *bar);
 static void bar_trigger_selected_window_paint(Bar *self);
 static void bar_run(Bar *bar, WNDCLASSEX *barWindowClass, int barHeight);
 static void border_window_update(HWND self);
-static void border_window_update_with_defer(HWND self, HDWP hdwp);
+static void border_window_update_with_defer(WindowManagerState *windowManagerState, HWND self, HDWP hdwp);
 static void border_window_hide(HWND self);
 static LRESULT CALLBACK button_message_loop( HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam, UINT_PTR uIdSubclass, DWORD_PTR dwRefData);
 static void monitor_select(WindowManagerState *self, Monitor *monitor);
@@ -470,7 +470,7 @@ void move_focused_window_to_selected_monitor_workspace(void)
 
 void move_workspace_to_secondary_monitor_without_focus(Workspace *workspace)
 {
-    windowManager_move_workspace_to_monitor(g_windowManagerState.secondaryMonitor, workspace);
+    windowManager_move_workspace_to_monitor(&g_windowManagerState, g_windowManagerState.secondaryMonitor, workspace);
     if(g_windowManagerState.primaryMonitor->workspace)
     {
         workspace_focus_selected_window(&g_windowManagerState, g_windowManagerState.primaryMonitor->workspace);
@@ -577,7 +577,7 @@ void toggle_non_filtered_windows_assigned_to_current_workspace(void)
 
 void swap_selected_monitor_to(Workspace *workspace)
 {
-    windowManager_move_workspace_to_monitor(g_windowManagerState.selectedMonitor, workspace);
+    windowManager_move_workspace_to_monitor(&g_windowManagerState, g_windowManagerState.selectedMonitor, workspace);
     workspace_focus_selected_window(&g_windowManagerState, workspace);
 }
 
@@ -586,7 +586,7 @@ void goto_last_workspace(void)
     Workspace *workspace = g_windowManagerState.lastWorkspace;
     if(workspace)
     {
-        windowManager_move_workspace_to_monitor(g_windowManagerState.selectedMonitor, workspace);
+        windowManager_move_workspace_to_monitor(&g_windowManagerState, g_windowManagerState.selectedMonitor, workspace);
         workspace_focus_selected_window(&g_windowManagerState, workspace);
     }
 }
@@ -949,7 +949,7 @@ static BOOL CALLBACK enum_windows_callback(HWND hwnd, LPARAM lparam)
 
     Client *client = clientFactory_create_from_hwnd(hwnd);
 
-    ScratchWindow *scratchWindow = scratch_windows_find_from_client(client);
+    ScratchWindow *scratchWindow = scratch_windows_find_from_client(windowManagerState, client);
     if(scratchWindow)
     {
         if(!scratchWindow->client)
@@ -1627,7 +1627,7 @@ void CALLBACK handle_windows_event(
 
             if(!client->data->isScratchWindowBoundToWorkspace)
             {
-                ScratchWindow *sWindow = scratch_windows_find_from_client(client);
+                ScratchWindow *sWindow = scratch_windows_find_from_client(&g_windowManagerState, client);
                 if(sWindow)
                 {
                     if(sWindow->client)
@@ -1638,7 +1638,7 @@ void CALLBACK handle_windows_event(
                     {
                         sWindow->client = client;
                         scratch_window_add(sWindow);
-                        scratch_window_show(sWindow);
+                        scratch_window_show(&g_windowManagerState, sWindow);
                     }
                     return;
                 }
@@ -1685,7 +1685,7 @@ void CALLBACK handle_windows_event(
                 BOOL isMinimized = IsIconic(hwnd);
                 if(!g_windowManagerState.selectedMonitor->scratchWindow && !isMinimized)
                 {
-                    scratch_window_show(scratchWindow);
+                    scratch_window_show(&g_windowManagerState, scratchWindow);
                     return;
                 }
                 else
@@ -1693,7 +1693,7 @@ void CALLBACK handle_windows_event(
                     if(g_windowManagerState.selectedMonitor->scratchWindow != scratchWindow && !isMinimized)
                     {
                         scratch_window_hide(g_windowManagerState.selectedMonitor->scratchWindow);
-                        scratch_window_show(scratchWindow);
+                        scratch_window_show(&g_windowManagerState, scratchWindow);
                         return;
                     }
                 }
@@ -2004,14 +2004,14 @@ Workspace* windowManager_find_client_workspace_using_filters(WindowManagerState 
     return result;
 }
 
-void windowManager_move_workspace_to_monitor(Monitor *monitor, Workspace *workspace)
+void windowManager_move_workspace_to_monitor(WindowManagerState *windowManagerState, Monitor *monitor, Workspace *workspace)
 {
     Monitor *currentMonitor = workspace->monitor;
 
     Workspace *selectedMonitorCurrentWorkspace = monitor->workspace;
-    if(monitor == g_windowManagerState.selectedMonitor)
+    if(monitor == windowManagerState->selectedMonitor)
     {
-        g_windowManagerState.lastWorkspace = selectedMonitorCurrentWorkspace;
+        windowManagerState->lastWorkspace = selectedMonitorCurrentWorkspace;
     }
 
     if(monitor->scratchWindow)
@@ -2019,9 +2019,9 @@ void windowManager_move_workspace_to_monitor(Monitor *monitor, Workspace *worksp
         scratch_window_hide(monitor->scratchWindow);
     }
 
-    if(g_windowManagerState.menuVisible)
+    if(windowManagerState->menuVisible)
     {
-        menu_hide();
+        menu_hide(windowManagerState);
     }
 
     if(currentMonitor == monitor)
@@ -2804,9 +2804,9 @@ void workspace_focus_selected_window(WindowManagerState *windowManagerState, Wor
         return;
     }
 
-    if(g_windowManagerState.menuVisible)
+    if(windowManagerState->menuVisible)
     {
-        SetForegroundWindow(g_windowManagerState.menuView->hwnd);
+        SetForegroundWindow(windowManagerState->menuView->hwnd);
         return;
     }
 
@@ -3474,9 +3474,9 @@ void menu_focus(WindowManagerState *windowManagerState, MenuView *self)
     int w = windowManagerState->selectedMonitor->w - (windowManagerState->selectedMonitor->workspaceStyle->scratchWindowsScreenPadding * 2);
     int h = windowManagerState->selectedMonitor->h - (windowManagerState->selectedMonitor->workspaceStyle->scratchWindowsScreenPadding * 2);
 
-    if(!g_windowManagerState.menuVisible)
+    if(!windowManagerState->menuVisible)
     {
-        g_windowManagerState.menuVisible = TRUE;
+        windowManagerState->menuVisible = TRUE;
         border_window_hide(windowManagerState->borderWindowHwnd);
         ShowWindow(self->hwnd, SW_SHOW);
         SetForegroundWindow(self->hwnd);
@@ -3557,7 +3557,7 @@ ScratchWindow* scratch_windows_find_from_hwnd(WindowManagerState *self, HWND hwn
         } 
     }
 
-    ScratchWindow *current = g_windowManagerState.scratchWindows;
+    ScratchWindow *current = self->scratchWindows;
     while(current)
     {
         if(current->client)
@@ -3574,14 +3574,14 @@ ScratchWindow* scratch_windows_find_from_hwnd(WindowManagerState *self, HWND hwn
     return NULL;
 }
 
-ScratchWindow* scratch_windows_find_from_client(Client *client)
+ScratchWindow* scratch_windows_find_from_client(WindowManagerState *windowManagerState, Client *client)
 {
     if(client->data->isScratchWindowBoundToWorkspace)
     {
         return NULL;
     }
 
-    ScratchWindow *current = g_windowManagerState.scratchWindows;
+    ScratchWindow *current = windowManagerState->scratchWindows;
     while(current)
     {
         if(current->scratchFilter)
@@ -3644,17 +3644,17 @@ MenuDefinition* menu_create_and_register(void)
     return result;
 }
 
-void menu_hide(void)
+void menu_hide(WindowManagerState *windowManagerState)
 {
-    g_windowManagerState.menuVisible = FALSE;
-    ShowWindow(g_windowManagerState.menuView->hwnd, SW_HIDE);
-    bar_trigger_selected_window_paint(g_windowManagerState.selectedMonitor->bar);
-    border_window_update(g_windowManagerState.borderWindowHwnd);
+    windowManagerState->menuVisible = FALSE;
+    ShowWindow(windowManagerState->menuView->hwnd, SW_HIDE);
+    bar_trigger_selected_window_paint(windowManagerState->selectedMonitor->bar);
+    border_window_update(windowManagerState->borderWindowHwnd);
 }
 
 void menu_on_escape(void)
 {
-    menu_hide();
+    menu_hide(&g_windowManagerState);
     HWND foregroundHwnd = GetForegroundWindow();
     if((foregroundHwnd == g_windowManagerState.menuView->hwnd || foregroundHwnd == g_windowManagerState.borderWindowHwnd) && g_windowManagerState.selectedMonitor->workspace)
     {
@@ -3715,16 +3715,16 @@ ScratchWindow *register_scratch_with_unique_string(TCHAR *processImageName, CHAR
     return sWindow;
 }
 
-void scratch_window_show(ScratchWindow *self)
+void scratch_window_show(WindowManagerState *windowManagerState, ScratchWindow *self)
 {
-    if(g_windowManagerState.menuVisible)
+    if(windowManagerState->menuVisible)
     {
-        menu_hide();
+        menu_hide(&g_windowManagerState);
     }
 
     self->client->data->isMinimized = FALSE;
     g_windowManagerState.selectedMonitor->scratchWindow = self;
-    scratch_window_focus(&g_windowManagerState, self);
+    scratch_window_focus(windowManagerState, self);
 }
 
 void scratch_window_hide(ScratchWindow *self)
@@ -3763,7 +3763,7 @@ void scratch_window_toggle(ScratchWindow *self)
             {
                 scratch_window_hide(g_windowManagerState.selectedMonitor->scratchWindow);
             }
-            scratch_window_show(self);
+            scratch_window_show(&g_windowManagerState, self);
         }
     }
     else
@@ -4601,7 +4601,7 @@ void button_redraw(Button *button)
 void button_press_handle(WindowManagerState *windowManagerState, Button *button)
 {
     monitor_select(windowManagerState, button->bar->monitor);
-    windowManager_move_workspace_to_monitor(button->bar->monitor, button->workspace);
+    windowManager_move_workspace_to_monitor(windowManagerState, button->bar->monitor, button->workspace);
     workspace_focus_selected_window(windowManagerState, button->workspace);
 }
 
@@ -4689,17 +4689,17 @@ void border_window_hide(HWND self)
             SWP_HIDEWINDOW | SWP_NOSIZE);
 }
 
-void border_window_update_with_defer(HWND self, HDWP hdwp)
+void border_window_update_with_defer(WindowManagerState *windowManagerState, HWND self, HDWP hdwp)
 {
-    if(g_windowManagerState.selectedMonitor)
+    if(windowManagerState->selectedMonitor)
     {
-        if(g_windowManagerState.selectedMonitor->scratchWindow || g_windowManagerState.menuVisible)
+        if(windowManagerState->selectedMonitor->scratchWindow || windowManagerState->menuVisible)
         {
             InvalidateRect(self, NULL, FALSE);
         }
-        else if(g_windowManagerState.selectedMonitor->workspace->selected)
+        else if(windowManagerState->selectedMonitor->workspace->selected)
         {
-            ClientData *selectedClientData = g_windowManagerState.selectedMonitor->workspace->selected->data;
+            ClientData *selectedClientData = windowManagerState->selectedMonitor->workspace->selected->data;
             BOOL isWindowVisible = IsWindowVisible(self);
 
             RECT currentPosition;
@@ -4760,7 +4760,7 @@ void border_window_update_with_defer(HWND self, HDWP hdwp)
 void border_window_update(HWND self)
 {
     HDWP hdwp = BeginDeferWindowPos(1);
-    border_window_update_with_defer(self, hdwp);
+    border_window_update_with_defer(&g_windowManagerState, self, hdwp);
     EndDeferWindowPos(hdwp);
 }
 
@@ -5697,7 +5697,7 @@ void process_with_stdout_start(CHAR *cmdArgs, void (*onSuccess) (CHAR *))
 
 void open_program_scratch_callback(char *stdOut)
 {
-    menu_hide();
+    menu_hide(&g_windowManagerState);
     /* border_window_hide(g_windowManagerState.borderWindowHwnd); */
     char str[1024];
 
@@ -5707,7 +5707,7 @@ void open_program_scratch_callback(char *stdOut)
 
 void open_program_scratch_callback_not_elevated(char *stdOut)
 {
-    menu_hide();
+    menu_hide(&g_windowManagerState);
     /* border_window_hide(g_windowManagerState.borderWindowHwnd); */
     char str[1024];
 
@@ -5722,7 +5722,7 @@ void open_process_list_scratch_callback(char *stdOut)
 
 void open_windows_scratch_exit_callback(char *stdOut)
 {
-    menu_hide();
+    menu_hide(&g_windowManagerState);
     char* lastCharRead;
     HWND hwnd = (HWND)strtoll(stdOut, &lastCharRead, 16);
 
@@ -5741,7 +5741,7 @@ void open_windows_scratch_exit_callback(char *stdOut)
 
         if(g_windowManagerState.selectedMonitor->workspace != client->workspace)
         {
-            windowManager_move_workspace_to_monitor(g_windowManagerState.selectedMonitor, client->workspace);
+            windowManager_move_workspace_to_monitor(&g_windowManagerState, g_windowManagerState.selectedMonitor, client->workspace);
             workspace_arrange_windows(client->workspace);
             workspace_focus_selected_window(&g_windowManagerState, client->workspace);
         }

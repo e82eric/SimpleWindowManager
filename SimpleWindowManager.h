@@ -390,7 +390,7 @@ void fill_memory_percent(TCHAR *toFill, int maxLen);
 void fill_is_connected_to_internet(TCHAR *toFill, int maxLen);
 
 void goto_last_workspace(void);
-void windowManager_move_workspace_to_monitor(Monitor *monitor, Workspace *workspace);
+void windowManager_move_workspace_to_monitor(WindowManagerState *windowManagerState, Monitor *monitor, Workspace *workspace);
 void redraw_focused_window(void);
 void select_next_window(void);
 void select_previous_window(void);
