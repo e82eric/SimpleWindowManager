@@ -337,6 +337,7 @@ typedef struct WindowManagerState
     HWND eventForegroundHwnd;
     int floatWindowMovement;
     enum WindowRoutingMode currentWindowRoutingMode;
+    BOOL (*useOldMoveLogicFunc) (Client *client);
 } WindowManagerState;
 
 extern Layout deckLayout;
