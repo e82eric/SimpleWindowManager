@@ -1053,7 +1053,10 @@ LRESULT CALLBACK SearchView_MessageProcessor(HWND hWnd, UINT uMsg, WPARAM wParam
                     {
                         if(current->modifier == 0)
                         {
-                            return 0;
+                            if (!(GetKeyState(VK_SHIFT) & 0x8000))
+                            {
+                                return 0;
+                            }
                         }
                     }
                     current = current->next;
@@ -1638,7 +1641,7 @@ void MenuView_CreateChildControls(MenuView *self)
             hinstance,
             NULL);
     //This only partially works because COM is initialized with a multi threaded apartment.  Ctrl-Backspace doesn't work but Ctrl-arrows does (jumping words).
-    SHAutoComplete(self->searchView->hwnd, SHACF_DEFAULT);
+    /* SHAutoComplete(self->searchView->hwnd, SHACF_DEFAULT); */
     SetWindowSubclass(self->searchView->hwnd, SearchView_MessageProcessor, 0, (DWORD_PTR)self->searchView);
 
     self->itemsView->headerHwnd = CreateWindowA(
