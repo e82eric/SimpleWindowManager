@@ -295,15 +295,6 @@ struct KeyBinding
     KeyBinding *next;
 };
 
-typedef struct ResizeState
-{
-    bool easyResizeInProgress;
-    POINT easyResizeStartPoint;
-    int easyResizeStartOffset;
-    bool regularResizeInProgress;
-    Client *regularResizeClient;
-} ResizeState;
-
 typedef struct DragDropState
 {
     bool inProgress;
@@ -325,7 +316,7 @@ typedef struct WindowManagerState
     int numberOfWorkspaces;
     Workspace *lastWorkspace;
     DragDropState dragDropState;
-    ResizeState resizeState;
+    /* ResizeState resizeState; */
     KeyBinding *keyBindings;
     ScratchWindow *scratchWindows;
     MenuView *menuView;
@@ -339,6 +330,17 @@ typedef struct WindowManagerState
     enum WindowRoutingMode currentWindowRoutingMode;
     BOOL (*useOldMoveLogicFunc) (Client *client);
 } WindowManagerState;
+
+typedef struct ResizeState
+{
+    bool easyResizeInProgress;
+    POINT easyResizeStartPoint;
+    int easyResizeStartOffset;
+    bool regularResizeInProgress;
+    Client *regularResizeClient;
+    WindowManagerState *windowManager;
+} ResizeState;
+
 
 extern Layout deckLayout;
 extern Layout monacleLayout;

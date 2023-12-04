@@ -153,6 +153,7 @@ static IAudioEndpointVolume *g_audioEndpointVolume;
 static INetworkListManager *g_networkListManager;
 
 static WindowManagerState g_windowManagerState;
+static ResizeState g_resizeState;
 
 Layout deckLayout = {
     .select_next_window = deckLayout_select_next_window,
@@ -1200,8 +1201,8 @@ BOOL handle_location_change_with_mouse_down(WindowManagerState *windowManagerSta
                 BOOL isMoving = (leftIsChanged && rightIsChanged) || (topIsChanged && bottomIsChanged);
                 if(!isMoving)
                 {
-                    g_windowManagerState.resizeState.regularResizeInProgress = TRUE;
-                    g_windowManagerState.resizeState.regularResizeClient = client;
+                    g_resizeState.regularResizeInProgress = TRUE;
+                    g_resizeState.regularResizeClient = client;
                     return FALSE;
                 }
                 drag_drop_start(&windowManagerState->dragDropState, hwnd, dropTargetClient);
@@ -1371,6 +1372,41 @@ int get_modifiers_pressed(void)
     return modifiersPressed;
 }
 
+void windowManager_hide_border(WindowManagerState *self)
+{
+    border_window_hide(self->borderWindowHwnd);
+}
+
+void easy_resize_handle(ResizeState *resizeState, Monitor *mouseMonitor, POINT mousePoint)
+{
+    Workspace *workspace = mouseMonitor->workspace;
+
+    if(!resizeState->easyResizeInProgress)
+    {
+        resizeState->easyResizeInProgress = TRUE;
+        resizeState->easyResizeStartPoint = mousePoint;
+        resizeState->easyResizeStartOffset = workspace->mainOffset; 
+    }
+
+    int diff = mousePoint.x - resizeState->easyResizeStartPoint.x;
+    workspace->mainOffset = resizeState->easyResizeStartOffset + diff;
+    workspace_arrange_windows(workspace, resizeState->windowManager);
+    windowManager_hide_border(resizeState->windowManager);
+}
+
+void easy_resize_complete(ResizeState *self)
+{
+    self->easyResizeInProgress = FALSE;
+    border_window_update(self->windowManager->borderWindowHwnd);
+}
+
+void resize_complete(ResizeState *self)
+{
+    self->regularResizeInProgress = FALSE;
+    workspace_arrange_windows(self->regularResizeClient->workspace, &g_windowManagerState);
+    self->regularResizeClient = NULL;
+}
+
 LRESULT CALLBACK handle_mouse(int code, WPARAM w, LPARAM l)
 {
     if (code >= 0) 
@@ -1384,40 +1420,24 @@ LRESULT CALLBACK handle_mouse(int code, WPARAM w, LPARAM l)
                 Monitor *monitor = drop_target_find_monitor_from_mouse_location(&g_windowManagerState);
                 if(monitor)
                 {
-                    Workspace *workspace = monitor->workspace;
-
-                    if(!g_windowManagerState.resizeState.easyResizeInProgress)
-                    {
-                        g_windowManagerState.resizeState.easyResizeInProgress = TRUE;
-                        g_windowManagerState.resizeState.easyResizeStartPoint = p->pt;
-                        g_windowManagerState.resizeState.easyResizeStartOffset = workspace->mainOffset; 
-                    }
-
-                    int diff = p->pt.x - g_windowManagerState.resizeState.easyResizeStartPoint.x;
-                    workspace->mainOffset = g_windowManagerState.resizeState.easyResizeStartOffset + diff;
-
-                    workspace_arrange_windows(workspace, &g_windowManagerState);
-                    border_window_hide(g_windowManagerState.borderWindowHwnd);
+                    easy_resize_handle(&g_resizeState, monitor, p->pt);
                 }
                 return CallNextHookEx(g_mouse_hook, code, w, l);
             }
         }
         else if(w == WM_LBUTTONUP)
         {
-            if(g_windowManagerState.resizeState.easyResizeInProgress)
+            if(g_resizeState.easyResizeInProgress)
             {
-                g_windowManagerState.resizeState.easyResizeInProgress = FALSE;
-                border_window_update(g_windowManagerState.borderWindowHwnd);
+                easy_resize_complete(&g_resizeState);
             }
             else if (g_windowManagerState.dragDropState.inProgress && g_windowManagerState.dragDropState.dragHwnd)
             {
                 drag_drop_complete(&g_windowManagerState);
             }
-            else if (g_windowManagerState.resizeState.regularResizeInProgress)
+            else if (g_resizeState.regularResizeInProgress)
             {
-                g_windowManagerState.resizeState.regularResizeInProgress = FALSE;
-                workspace_arrange_windows(g_windowManagerState.resizeState.regularResizeClient->workspace, &g_windowManagerState);
-                g_windowManagerState.resizeState.regularResizeClient = NULL;
+                resize_complete(&g_resizeState);
             }
         }
     }
@@ -1735,7 +1755,7 @@ void CALLBACK handle_windows_event(
                             return;
                         }
 
-                        if(GetAsyncKeyState(VK_LBUTTON) & 0x8000 && !(GetAsyncKeyState(VK_LSHIFT) & 0x8000) && !g_windowManagerState.resizeState.easyResizeInProgress)
+                        if(GetAsyncKeyState(VK_LBUTTON) & 0x8000 && !(GetAsyncKeyState(VK_LSHIFT) & 0x8000) && !g_resizeState.easyResizeInProgress)
                         {
                             handle_location_change_with_mouse_down(&g_windowManagerState, hwnd, styles, exStyles);
                             return;
@@ -1747,7 +1767,7 @@ void CALLBACK handle_windows_event(
             }
             else
             {
-                if(GetAsyncKeyState(VK_LBUTTON) & 0x8000 && !(GetAsyncKeyState(VK_LSHIFT) & 0x8000) && !g_windowManagerState.resizeState.easyResizeInProgress)
+                if(GetAsyncKeyState(VK_LBUTTON) & 0x8000 && !(GetAsyncKeyState(VK_LSHIFT) & 0x8000) && !g_resizeState.easyResizeInProgress)
                 {
                     if(handle_location_change_with_mouse_down(&g_windowManagerState, hwnd, styles, exStyles))
                     {
@@ -5926,7 +5946,8 @@ int run (void)
     SetProcessDPIAware();
     g_windowManagerState.numberOfCommands = 0;
     memset(&g_windowManagerState.dragDropState, 0, sizeof(DragDropState));
-    memset(&g_windowManagerState.resizeState, 0, sizeof(ResizeState));
+    memset(&g_resizeState, 0, sizeof(ResizeState));
+    g_resizeState.windowManager = &g_windowManagerState;
     HANDLE hMutex;
     hMutex = CreateMutex(NULL, TRUE, TEXT("SimpleWindowManagerSingleInstanceLock"));
     if (GetLastError() == ERROR_ALREADY_EXISTS)
