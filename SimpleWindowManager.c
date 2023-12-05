@@ -154,6 +154,7 @@ static INetworkListManager *g_networkListManager;
 
 static WindowManagerState g_windowManagerState;
 static ResizeState g_resizeState;
+static DragDropState g_dragDropState;
 
 Layout deckLayout = {
     .select_next_window = deckLayout_select_next_window,
@@ -1084,7 +1085,8 @@ BOOL is_root_window(HWND hwnd, LONG styles, LONG exStyles)
     return TRUE;
 }
 
-Monitor* drop_target_find_monitor_from_mouse_location(WindowManagerState *self)
+//This should be renamed to a windowManager function
+Monitor* windowManager_find_monitor_from_mouse_location(WindowManagerState *self)
 {
     Monitor *result = NULL;
     for(int i = 0; i < self->numberOfDisplayMonitors; i++)
@@ -1174,20 +1176,20 @@ void drag_drop_start_empty_workspace(DragDropState *self, Monitor *dropTargetMon
             SWP_SHOWWINDOW);
 }
 
-BOOL handle_location_change_with_mouse_down(WindowManagerState *windowManagerState, HWND hwnd, LONG_PTR styles, LONG_PTR exStyles)
+BOOL drag_drop_handle_location_change_with_mouse_down(DragDropState *self, HWND hwnd, LONG_PTR styles, LONG_PTR exStyles)
 {
     if(!hit_test_hwnd(hwnd))
     {
         return FALSE;
     }
 
-    Monitor *dropTargetMonitor = drop_target_find_monitor_from_mouse_location(windowManagerState);
+    Monitor *dropTargetMonitor = windowManager_find_monitor_from_mouse_location(self->windowManager);
     if(dropTargetMonitor)
     {
         Client *dropTargetClient = drop_target_find_client_from_mouse_location(dropTargetMonitor, hwnd);
         if(dropTargetClient)
         {
-            Client *client = windowManager_find_client_in_workspaces_by_hwnd(windowManagerState, hwnd);
+            Client *client = windowManager_find_client_in_workspaces_by_hwnd(self->windowManager, hwnd);
             if(client)
             {
                 RECT windowRect;
@@ -1205,7 +1207,7 @@ BOOL handle_location_change_with_mouse_down(WindowManagerState *windowManagerSta
                     g_resizeState.regularResizeClient = client;
                     return FALSE;
                 }
-                drag_drop_start(&windowManagerState->dragDropState, hwnd, dropTargetClient);
+                drag_drop_start(self, hwnd, dropTargetClient);
                 return TRUE;
             }
             else if(has_float_styles(styles, exStyles))
@@ -1216,7 +1218,7 @@ BOOL handle_location_change_with_mouse_down(WindowManagerState *windowManagerSta
             int modifiers = get_modifiers_pressed();
             if(modifiers == configuration->dragDropFloatModifier)
             {
-                drag_drop_start(&g_windowManagerState.dragDropState, hwnd, dropTargetClient);
+                drag_drop_start(self, hwnd, dropTargetClient);
                 return TRUE;
             }
 
@@ -1226,10 +1228,10 @@ BOOL handle_location_change_with_mouse_down(WindowManagerState *windowManagerSta
         {
             if(!dropTargetMonitor->workspace->clients)
             {
-                Client *client = windowManager_find_client_in_workspaces_by_hwnd(windowManagerState, hwnd);
+                Client *client = windowManager_find_client_in_workspaces_by_hwnd(self->windowManager, hwnd);
                 if(client)
                 {
-                    drag_drop_start_empty_workspace(&windowManagerState->dragDropState, dropTargetMonitor, hwnd);
+                    drag_drop_start_empty_workspace(self, dropTargetMonitor, hwnd);
                     return TRUE;
                 }
             }
@@ -1239,12 +1241,12 @@ BOOL handle_location_change_with_mouse_down(WindowManagerState *windowManagerSta
     return FALSE;
 }
 
-void drag_drop_complete(WindowManagerState *windowManagerState)
+void drag_drop_complete(DragDropState *self)
 {
-    HWND dragHwnd = windowManagerState->dragDropState.dragHwnd;
-    drag_drop_cancel(&windowManagerState->dragDropState);
+    HWND dragHwnd = self->dragHwnd;
+    drag_drop_cancel(self);
 
-    Monitor *dropTargetMonitor = drop_target_find_monitor_from_mouse_location(windowManagerState);
+    Monitor *dropTargetMonitor = windowManager_find_monitor_from_mouse_location(self->windowManager);
 
     if(dropTargetMonitor)
     {
@@ -1257,7 +1259,7 @@ void drag_drop_complete(WindowManagerState *windowManagerState)
         if(dropTargetClient)
         {
             Workspace *dropTargetWorkspace = dropTargetClient->workspace;
-            Client *client = windowManager_find_client_in_workspaces_by_hwnd(windowManagerState, dragHwnd);
+            Client *client = windowManager_find_client_in_workspaces_by_hwnd(self->windowManager, dragHwnd);
             if(client)
             {
                 if(!isRootWindow)
@@ -1275,13 +1277,13 @@ void drag_drop_complete(WindowManagerState *windowManagerState)
                 else
                 {
                     workspace_remove_client(client->workspace, client);
-                    workspace_arrange_windows(client->workspace, windowManagerState);
+                    workspace_arrange_windows(client->workspace, self->windowManager);
 
                     client->workspace = dropTargetWorkspace;
                     clients_add_before(client, dropTargetClient);
                     dropTargetWorkspace->selected = client;
                     workspace_update_client_counts(dropTargetWorkspace);
-                    monitor_select(windowManagerState, dropTargetWorkspace->monitor);
+                    monitor_select(self->windowManager, dropTargetWorkspace->monitor);
                 }
             }
             else
@@ -1304,7 +1306,7 @@ void drag_drop_complete(WindowManagerState *windowManagerState)
                     clients_add_before(client, dropTargetClient);
                     dropTargetWorkspace->selected = client;
                     workspace_update_client_counts(dropTargetWorkspace);
-                    monitor_select(windowManagerState, dropTargetWorkspace->monitor);
+                    monitor_select(self->windowManager, dropTargetWorkspace->monitor);
                 }
                 else
                 {
@@ -1313,28 +1315,38 @@ void drag_drop_complete(WindowManagerState *windowManagerState)
                 }
             }
 
-            workspace_arrange_windows(dropTargetWorkspace, windowManagerState);
-            workspace_focus_selected_window(windowManagerState, dropTargetWorkspace);
+            workspace_arrange_windows(dropTargetWorkspace, self->windowManager);
+            workspace_focus_selected_window(self->windowManager, dropTargetWorkspace);
         }
         else
         {
             if(!dropTargetMonitor->workspace->clients)
             {
-                Client *client = windowManager_find_client_in_workspaces_by_hwnd(windowManagerState, dragHwnd);
+                Client *client = windowManager_find_client_in_workspaces_by_hwnd(self->windowManager, dragHwnd);
                 if(client)
                 {
                     workspace_remove_client(client->workspace, client);
-                    workspace_arrange_windows(client->workspace, windowManagerState);
+                    workspace_arrange_windows(client->workspace, self->windowManager);
 
                     workspace_add_client(dropTargetMonitor->workspace, client);
                     workspace_update_client_counts(dropTargetMonitor->workspace);
-                    workspace_arrange_windows(dropTargetMonitor->workspace, windowManagerState);
-                    workspace_focus_selected_window(windowManagerState, dropTargetMonitor->workspace);
-                    monitor_select(windowManagerState, dropTargetMonitor);
+                    workspace_arrange_windows(dropTargetMonitor->workspace, self->windowManager);
+                    workspace_focus_selected_window(self->windowManager, dropTargetMonitor->workspace);
+                    monitor_select(self->windowManager, dropTargetMonitor);
                 }
             }
         }
     }
+}
+
+BOOL drag_drop_try_handle_left_mouse_up(DragDropState *self)
+{
+    if (self->inProgress && self->dragHwnd)
+    {
+        drag_drop_complete(self);
+        return TRUE;
+    }
+    return FALSE;
 }
 
 int get_modifiers_pressed(void)
@@ -1407,14 +1419,19 @@ void resize_complete(ResizeState *self)
     self->regularResizeClient = NULL;
 }
 
-BOOL resize_try_handle_left_mouse_button_up(ResizeState *self)
+BOOL resize_try_easy_resize_complete(ResizeState *self)
 {
     if(self->easyResizeInProgress)
     {
         easy_resize_complete(self);
         return TRUE;
     }
-    else if (self->regularResizeInProgress)
+    return FALSE;
+}
+
+BOOL resize_try_regular_resize_complete(ResizeState *self)
+{
+    if (self->regularResizeInProgress)
     {
         resize_complete(self);
         return TRUE;
@@ -1432,7 +1449,7 @@ LRESULT CALLBACK handle_mouse(int code, WPARAM w, LPARAM l)
             if(modifiers == configuration->easyResizeModifiers)
             {
                 MSLLHOOKSTRUCT *p = (MSLLHOOKSTRUCT*)l;
-                Monitor *monitor = drop_target_find_monitor_from_mouse_location(&g_windowManagerState);
+                Monitor *monitor = windowManager_find_monitor_from_mouse_location(&g_windowManagerState);
                 if(monitor)
                 {
                     easy_resize_handle(&g_resizeState, monitor, p->pt);
@@ -1442,11 +1459,11 @@ LRESULT CALLBACK handle_mouse(int code, WPARAM w, LPARAM l)
         }
         else if(w == WM_LBUTTONUP)
         {
-            if(!resize_try_handle_left_mouse_button_up(&g_resizeState))
+            if(!resize_try_easy_resize_complete(&g_resizeState))
             {
-                if (g_windowManagerState.dragDropState.inProgress && g_windowManagerState.dragDropState.dragHwnd)
+                if(!drag_drop_try_handle_left_mouse_up(&g_dragDropState))
                 {
-                    drag_drop_complete(&g_windowManagerState);
+                    resize_try_regular_resize_complete(&g_resizeState);
                 }
             }
         }
@@ -1767,7 +1784,7 @@ void CALLBACK handle_windows_event(
 
                         if(GetAsyncKeyState(VK_LBUTTON) & 0x8000 && !(GetAsyncKeyState(VK_LSHIFT) & 0x8000) && !g_resizeState.easyResizeInProgress)
                         {
-                            handle_location_change_with_mouse_down(&g_windowManagerState, hwnd, styles, exStyles);
+                            drag_drop_handle_location_change_with_mouse_down(&g_dragDropState, hwnd, styles, exStyles);
                             return;
                         }
 
@@ -1779,7 +1796,7 @@ void CALLBACK handle_windows_event(
             {
                 if(GetAsyncKeyState(VK_LBUTTON) & 0x8000 && !(GetAsyncKeyState(VK_LSHIFT) & 0x8000) && !g_resizeState.easyResizeInProgress)
                 {
-                    if(handle_location_change_with_mouse_down(&g_windowManagerState, hwnd, styles, exStyles))
+                    if(drag_drop_handle_location_change_with_mouse_down(&g_dragDropState, hwnd, styles, exStyles))
                     {
                         return;
                     }
@@ -3729,7 +3746,7 @@ BOOL terminal_with_uniqueStr_filter(ScratchWindow *self, Client *client)
 ScratchWindow *register_windows_terminal_scratch_with_unique_string(CHAR *name, char *cmd, TCHAR *uniqueStr)
 {
     CHAR buff[4096];
-    sprintf_s(buff, 4096, "wt.exe --title \"Scratch Window %ls\" %s", uniqueStr, cmd);
+    sprintf_s(buff, 4096, "wtd.exe --title \"Scratch Window %ls\" %s", uniqueStr, cmd);
 
     ScratchWindow *result = register_scratch_with_unique_string(L"WindowsTerminal.exe", name, buff, uniqueStr);
     return result;
@@ -4978,7 +4995,7 @@ void drop_target_window_run(WNDCLASSEX *windowClass)
         GetModuleHandle(0),
         NULL);
     SetLayeredWindowAttributes(hwnd, RGB(255, 255, 255), (255 * 50) / 100, LWA_ALPHA);
-    g_windowManagerState.dragDropState.dropTargetHwnd = hwnd;
+    g_dragDropState.dropTargetHwnd = hwnd;
 }
 
 void command_execute_no_arg(Command *self)
@@ -5955,9 +5972,10 @@ int run (void)
 {
     SetProcessDPIAware();
     g_windowManagerState.numberOfCommands = 0;
-    memset(&g_windowManagerState.dragDropState, 0, sizeof(DragDropState));
+    memset(&g_dragDropState, 0, sizeof(DragDropState));
     memset(&g_resizeState, 0, sizeof(ResizeState));
     g_resizeState.windowManager = &g_windowManagerState;
+    g_dragDropState.windowManager = &g_windowManagerState;
     HANDLE hMutex;
     hMutex = CreateMutex(NULL, TRUE, TEXT("SimpleWindowManagerSingleInstanceLock"));
     if (GetLastError() == ERROR_ALREADY_EXISTS)

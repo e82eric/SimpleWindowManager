@@ -295,13 +295,6 @@ struct KeyBinding
     KeyBinding *next;
 };
 
-typedef struct DragDropState
-{
-    bool inProgress;
-    HWND dragHwnd;
-    HWND dropTargetHwnd;
-} DragDropState;
-
 typedef struct WindowManagerState
 {
     Monitor *primaryMonitor;
@@ -315,7 +308,6 @@ typedef struct WindowManagerState
     Workspace **workspaces;
     int numberOfWorkspaces;
     Workspace *lastWorkspace;
-    DragDropState dragDropState;
     KeyBinding *keyBindings;
     ScratchWindow *scratchWindows;
     MenuView *menuView;
@@ -330,6 +322,14 @@ typedef struct WindowManagerState
     BOOL (*useOldMoveLogicFunc) (Client *client);
 } WindowManagerState;
 
+typedef struct DragDropState
+{
+    bool inProgress;
+    HWND dragHwnd;
+    HWND dropTargetHwnd;
+    WindowManagerState *windowManager;
+} DragDropState;
+
 typedef struct ResizeState
 {
     bool easyResizeInProgress;
@@ -339,7 +339,6 @@ typedef struct ResizeState
     Client *regularResizeClient;
     WindowManagerState *windowManager;
 } ResizeState;
-
 
 extern Layout deckLayout;
 extern Layout monacleLayout;
