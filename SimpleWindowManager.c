@@ -1407,6 +1407,21 @@ void resize_complete(ResizeState *self)
     self->regularResizeClient = NULL;
 }
 
+BOOL resize_try_handle_left_mouse_button_up(ResizeState *self)
+{
+    if(self->easyResizeInProgress)
+    {
+        easy_resize_complete(self);
+        return TRUE;
+    }
+    else if (self->regularResizeInProgress)
+    {
+        resize_complete(self);
+        return TRUE;
+    }
+    return FALSE;
+}
+
 LRESULT CALLBACK handle_mouse(int code, WPARAM w, LPARAM l)
 {
     if (code >= 0) 
@@ -1427,17 +1442,12 @@ LRESULT CALLBACK handle_mouse(int code, WPARAM w, LPARAM l)
         }
         else if(w == WM_LBUTTONUP)
         {
-            if(g_resizeState.easyResizeInProgress)
+            if(!resize_try_handle_left_mouse_button_up(&g_resizeState))
             {
-                easy_resize_complete(&g_resizeState);
-            }
-            else if (g_windowManagerState.dragDropState.inProgress && g_windowManagerState.dragDropState.dragHwnd)
-            {
-                drag_drop_complete(&g_windowManagerState);
-            }
-            else if (g_resizeState.regularResizeInProgress)
-            {
-                resize_complete(&g_resizeState);
+                if (g_windowManagerState.dragDropState.inProgress && g_windowManagerState.dragDropState.dragHwnd)
+                {
+                    drag_drop_complete(&g_windowManagerState);
+                }
             }
         }
     }

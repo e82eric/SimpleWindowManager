@@ -316,7 +316,6 @@ typedef struct WindowManagerState
     int numberOfWorkspaces;
     Workspace *lastWorkspace;
     DragDropState dragDropState;
-    /* ResizeState resizeState; */
     KeyBinding *keyBindings;
     ScratchWindow *scratchWindows;
     MenuView *menuView;
