@@ -1439,23 +1439,27 @@ BOOL resize_try_regular_resize_complete(ResizeState *self)
     return FALSE;
 }
 
+void resize_try_handle_mouse_move(ResizeState *self, POINT pt, int modifiers)
+{
+    if(modifiers == configuration->easyResizeModifiers)
+    {
+        Monitor *monitor = windowManager_find_monitor_from_mouse_location(self->windowManager);
+        if(monitor)
+        {
+            easy_resize_handle(self, monitor, pt);
+        }
+    }
+}
+
 LRESULT CALLBACK handle_mouse(int code, WPARAM w, LPARAM l)
 {
     if (code >= 0) 
     {
         if(w == WM_MOUSEMOVE && GetAsyncKeyState(VK_LBUTTON))
         {
+            MSLLHOOKSTRUCT *p = (MSLLHOOKSTRUCT*)l;
             int modifiers = get_modifiers_pressed();
-            if(modifiers == configuration->easyResizeModifiers)
-            {
-                MSLLHOOKSTRUCT *p = (MSLLHOOKSTRUCT*)l;
-                Monitor *monitor = windowManager_find_monitor_from_mouse_location(&g_windowManagerState);
-                if(monitor)
-                {
-                    easy_resize_handle(&g_resizeState, monitor, p->pt);
-                }
-                return CallNextHookEx(g_mouse_hook, code, w, l);
-            }
+            resize_try_handle_mouse_move(&g_resizeState, p->pt, modifiers);
         }
         else if(w == WM_LBUTTONUP)
         {
@@ -1472,27 +1476,36 @@ LRESULT CALLBACK handle_mouse(int code, WPARAM w, LPARAM l)
     return CallNextHookEx(g_mouse_hook, code, w, l);
 }
 
+BOOL key_bindings_try_handle(KeyBinding *self, DWORD vkCode, int modifiersPressed)
+{
+    KeyBinding *keyBinding = self;
+    while(keyBinding)
+    {
+        if(vkCode == keyBinding->key)
+        {
+            if(keyBinding->modifiers == modifiersPressed)
+            {
+                if(keyBinding->command)
+                {
+                    keyBinding->command->execute(keyBinding->command);
+                }
+                return TRUE;
+            }
+        }
+        keyBinding = keyBinding->next;
+    }
+    return FALSE;
+}
+
 LRESULT CALLBACK handle_key_press(int code, WPARAM w, LPARAM l)
 {
     PKBDLLHOOKSTRUCT p = (PKBDLLHOOKSTRUCT)l;
     if (code == 0 && (w == WM_KEYDOWN || w == WM_SYSKEYDOWN))
     {
-        KeyBinding *keyBinding = g_windowManagerState.keyBindings;
-        while(keyBinding)
+        int modifiersPressed = get_modifiers_pressed();
+        if(key_bindings_try_handle(g_windowManagerState.keyBindings, p->vkCode, modifiersPressed))
         {
-            if(p->vkCode == keyBinding->key)
-            {
-                int modifiersPressed = get_modifiers_pressed();
-                if(keyBinding->modifiers == modifiersPressed)
-                {
-                    if(keyBinding->command)
-                    {
-                        keyBinding->command->execute(keyBinding->command);
-                    }
-                    return 1;
-                }
-            }
-            keyBinding = keyBinding->next;
+            return 1;
         }
     }
 
