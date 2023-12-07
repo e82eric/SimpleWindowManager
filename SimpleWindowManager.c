@@ -1597,6 +1597,26 @@ BOOL is_hwnd_taskbar(HWND hwnd)
     return result;
 }
 
+BOOL window_manager_try_handle_hide_event(WindowManagerState *self, HWND hwnd, LONG styles)
+{
+    BOOL isTaskBar = is_hwnd_taskbar(hwnd);
+    if (isTaskBar)
+    {
+        monitors_resize_for_taskbar(self, hwnd);
+    }
+    //Double check that the window is really not visible.
+    //Windows that are "Not Responding" seem to have the hide message sent but have the visible style.
+    //Visual Studio seems to have some winodws that hide that do not have the visible style.
+    //We don't want to hide the windows that are temporarily Not Responding
+    //We do want to hide the Visual Studio and Outlook windows that are visible and then set to hidden.
+    if(!(styles & WS_VISIBLE))
+    {
+        windowManager_remove_client_if_found_by_hwnd(self, hwnd);
+    }
+
+    return TRUE;
+}
+
 void CALLBACK handle_windows_event(
         HWINEVENTHOOK hook,
         DWORD event,
@@ -1630,20 +1650,8 @@ void CALLBACK handle_windows_event(
 
         if (event == EVENT_OBJECT_HIDE)
         {
-            BOOL isTaskBar = is_hwnd_taskbar(hwnd);
-            if (isTaskBar)
+            if(window_manager_try_handle_hide_event(&g_windowManagerState, hwnd, styles))
             {
-                monitors_resize_for_taskbar(&g_windowManagerState, hwnd);
-                return;
-            }
-            //Double check that the window is really not visible.
-            //Windows that are "Not Responding" seem to have the hide message sent but have the visible style.
-            //Visual Studio seems to have some winodws that hide that do not have the visible style.
-            //We don't want to hide the windows that are temporarily Not Responding
-            //We do want to hide the Visual Studio and Outlook windows that are visible and then set to hidden.
-            if(!(styles & WS_VISIBLE))
-            {
-                windowManager_remove_client_if_found_by_hwnd(&g_windowManagerState, hwnd);
                 return;
             }
         }
