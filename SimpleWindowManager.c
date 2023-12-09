@@ -132,8 +132,8 @@ static void bar_apply_workspace_change(Bar *bar, Workspace *previousWorkspace, W
 static void bar_trigger_paint(Bar *bar);
 static void bar_trigger_selected_window_paint(Bar *self);
 static void bar_run(Bar *bar, WNDCLASSEX *barWindowClass, int barHeight);
-static void border_window_update(HWND self);
-static void border_window_update_with_defer(WindowManagerState *windowManagerState, HWND self, HDWP hdwp);
+static void border_window_update(WindowManagerState *windowManagerState);
+static void border_window_update_with_defer(WindowManagerState *windowManagerState, HDWP hdwp);
 static void border_window_hide(HWND self);
 static LRESULT CALLBACK button_message_loop( HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam, UINT_PTR uIdSubclass, DWORD_PTR dwRefData);
 static void monitor_select(WindowManagerState *self, Monitor *monitor);
@@ -1409,7 +1409,7 @@ void easy_resize_handle(ResizeState *resizeState, Monitor *mouseMonitor, POINT m
 void easy_resize_complete(ResizeState *self)
 {
     self->easyResizeInProgress = FALSE;
-    border_window_update(self->windowManager->borderWindowHwnd);
+    border_window_update(self->windowManager);
 }
 
 void resize_complete(ResizeState *self)
@@ -1822,7 +1822,7 @@ BOOL window_manager_try_handle_foreground_event(WindowManagerState *self, HWND h
         }
     }
     self->eventForegroundHwnd = hwnd;
-    border_window_update(self->borderWindowHwnd);
+    border_window_update(self);
     if(self->selectedMonitor)
     {
         bar_trigger_selected_window_paint(self->selectedMonitor->bar);
@@ -2922,7 +2922,7 @@ void workspace_focus_selected_window(WindowManagerState *windowManagerState, Wor
         bar_trigger_selected_window_paint(workspace->monitor->bar);
     }
 
-    border_window_update(windowManagerState->borderWindowHwnd);
+    border_window_update(windowManagerState);
 }
 
 void noop_swap_clients(Client *client1, Client *client2)
@@ -3746,7 +3746,7 @@ void menu_hide(WindowManagerState *windowManagerState)
     windowManagerState->menuVisible = FALSE;
     ShowWindow(windowManagerState->menuView->hwnd, SW_HIDE);
     bar_trigger_selected_window_paint(windowManagerState->selectedMonitor->bar);
-    border_window_update(windowManagerState->borderWindowHwnd);
+    border_window_update(windowManagerState);
 }
 
 void menu_on_escape(void)
@@ -4786,21 +4786,21 @@ void border_window_hide(HWND self)
             SWP_HIDEWINDOW | SWP_NOSIZE);
 }
 
-void border_window_update_with_defer(WindowManagerState *windowManagerState, HWND self, HDWP hdwp)
+void border_window_update_with_defer(WindowManagerState *windowManagerState, HDWP hdwp)
 {
     if(windowManagerState->selectedMonitor)
     {
         if(windowManagerState->selectedMonitor->scratchWindow || windowManagerState->menuVisible)
         {
-            InvalidateRect(self, NULL, FALSE);
+            InvalidateRect(windowManagerState->borderWindowHwnd, NULL, FALSE);
         }
         else if(windowManagerState->selectedMonitor->workspace->selected)
         {
             ClientData *selectedClientData = windowManagerState->selectedMonitor->workspace->selected->data;
-            BOOL isWindowVisible = IsWindowVisible(self);
+            BOOL isWindowVisible = IsWindowVisible(windowManagerState->borderWindowHwnd);
 
             RECT currentPosition;
-            GetWindowRect(self, &currentPosition);
+            GetWindowRect(windowManagerState->borderWindowHwnd, &currentPosition);
 
             int targetLeft = selectedClientData->x - 4;
             int targetTop = selectedClientData->y - 4;
@@ -4821,7 +4821,7 @@ void border_window_update_with_defer(WindowManagerState *windowManagerState, HWN
             {
                 DeferWindowPos(
                         hdwp,
-                        self,
+                        windowManagerState->borderWindowHwnd,
                         HWND_BOTTOM,
                         targetLeft,
                         targetTop,
@@ -4830,34 +4830,34 @@ void border_window_update_with_defer(WindowManagerState *windowManagerState, HWN
                         positionFlags);
                 if(positionFlags == SWP_SHOWWINDOW || !isWindowVisible)
                 {
-                    InvalidateRect(self, NULL, FALSE);
+                    InvalidateRect(windowManagerState->borderWindowHwnd, NULL, FALSE);
                 }
             }
             else
             {
-                InvalidateRect(self, NULL, FALSE);
+                InvalidateRect(windowManagerState->borderWindowHwnd, NULL, FALSE);
             }
         }
         else
         {
             DeferWindowPos(
                 hdwp,
-                self,
+                windowManagerState->borderWindowHwnd,
                 HWND_BOTTOM,
                 0,
                 0,
                 0,
                 0,
                 SWP_HIDEWINDOW);
-            RedrawWindow(self, NULL, NULL, RDW_ERASE | RDW_INVALIDATE);
+            RedrawWindow(windowManagerState->borderWindowHwnd, NULL, NULL, RDW_ERASE | RDW_INVALIDATE);
         }
     }
 }
 
-void border_window_update(HWND self)
+void border_window_update(WindowManagerState *windowManagerState)
 {
     HDWP hdwp = BeginDeferWindowPos(1);
-    border_window_update_with_defer(&g_windowManagerState, self, hdwp);
+    border_window_update_with_defer(windowManagerState, hdwp);
     EndDeferWindowPos(hdwp);
 }
 
