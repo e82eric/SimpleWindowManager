@@ -1617,6 +1617,220 @@ BOOL window_manager_try_handle_hide_event(WindowManagerState *self, HWND hwnd, L
     return TRUE;
 }
 
+BOOL window_manager_try_handle_show_event(WindowManagerState *self, HWND hwnd, LONG styles, LONG exStyles)
+{
+    BOOL isTaskBar = is_hwnd_taskbar(hwnd);
+    if (isTaskBar)
+    {
+        monitors_resize_for_taskbar(self, hwnd);
+        return TRUE;
+    }
+
+    Client *existingClient = windowManager_find_client_in_workspaces_by_hwnd(self, hwnd);
+    if(existingClient)
+    {
+        workspace_arrange_windows(existingClient->workspace, self);
+        workspace_focus_selected_window(self, existingClient->workspace);
+        return true;
+    }
+
+    Client *client = clientFactory_create_from_hwnd(hwnd);
+
+    BOOL isWindowVisible = IsWindowVisible(hwnd);
+    if(!isWindowVisible)
+    {
+        if(configuration->clientShouldUseMinimizeToHide)
+        {
+            BOOL clientShouldUseMinimizeToHide = configuration->clientShouldUseMinimizeToHide(client);
+            if(!clientShouldUseMinimizeToHide)
+            {
+                free_client(client);
+                return true;
+            }
+        }
+    }
+
+    if(!client->data->isScratchWindowBoundToWorkspace)
+    {
+        ScratchWindow *sWindow = scratch_windows_find_from_client(self, client);
+        if(sWindow)
+        {
+            if(sWindow->client)
+            {
+                free_client(client);
+            }
+            else
+            {
+                sWindow->client = client;
+                scratch_window_add(sWindow);
+                scratch_window_show(self, sWindow);
+            }
+            return true;
+        }
+    }
+
+    if(is_float_window(client, styles, exStyles))
+    {
+        free_client(client);
+        return true;
+    }
+
+    Workspace *workspace = windowManager_find_client_workspace_using_filters(self, client);
+    if(workspace)
+    {
+        if(GetAsyncKeyState(VK_LBUTTON) & 0x8000)
+        {
+            return true;
+        }
+        workspace_add_client(workspace, client);
+        workspace_arrange_windows(workspace, self);
+        workspace_focus_selected_window(self, workspace);
+    }
+    else
+    {
+        free_client(client);
+    }
+
+    return true;
+}
+
+BOOL window_manager_try_handle_location_changed_event(WindowManagerState *self, HWND hwnd, LONG styles, LONG exStyles)
+{
+    ScratchWindow *scratchWindow = scratch_windows_find_from_hwnd(self, hwnd);
+    if(scratchWindow)
+    {
+        BOOL isMinimized = IsIconic(hwnd);
+        if(!self->selectedMonitor->scratchWindow && !isMinimized)
+        {
+            scratch_window_show(self, scratchWindow);
+            return true;
+        }
+        else
+        {
+            if(self->selectedMonitor->scratchWindow != scratchWindow && !isMinimized)
+            {
+                scratch_window_hide(self->selectedMonitor->scratchWindow);
+                scratch_window_show(self, scratchWindow);
+                return true;
+            }
+        }
+    }
+
+    Client *client = NULL;
+    client = windowManager_find_client_in_workspaces_by_hwnd(self, hwnd);
+
+    if(client)
+    {
+        BOOL isMinimized = IsIconic(hwnd);
+        if(client->data->isMinimized)
+        {
+            if(!isMinimized)
+            {
+                if(!client->data->useMinimizeToHide)
+                {
+                    client_move_from_minimized_to_unminimized(self, client);
+                }
+            }
+        }
+        else
+        {
+            if(isMinimized)
+            {
+                if(!client->data->useMinimizeToHide)
+                {
+                    client_move_from_unminimized_to_minimized(self, client);
+                }
+            }
+            else
+            {
+                if(isFullscreen(hwnd))
+                {
+                    return true;
+                }
+                else if(IsZoomed(hwnd))
+                {
+                    return true;
+                }
+
+                if(GetAsyncKeyState(VK_LBUTTON) & 0x8000 && !(GetAsyncKeyState(VK_LSHIFT) & 0x8000) && !g_resizeState.easyResizeInProgress)
+                {
+                    drag_drop_handle_location_change_with_mouse_down(&g_dragDropState, hwnd, styles, exStyles);
+                    return true;
+                }
+
+                workspace_arrange_windows(client->workspace, self);
+            }
+        }
+    }
+    else
+    {
+        if(GetAsyncKeyState(VK_LBUTTON) & 0x8000 && !(GetAsyncKeyState(VK_LSHIFT) & 0x8000) && !g_resizeState.easyResizeInProgress)
+        {
+            if(drag_drop_handle_location_change_with_mouse_down(&g_dragDropState, hwnd, styles, exStyles))
+            {
+                return true;
+            }
+        }
+        if(self->selectedMonitor->scratchWindow)
+        {
+            if(self->selectedMonitor->scratchWindow->client)
+            {
+                if(!self->selectedMonitor->scratchWindow->client->data->isMinimized)
+                {
+                    HDWP hdwp = BeginDeferWindowPos(1);
+                    client_move_to_location_on_screen(self->selectedMonitor->scratchWindow->client, hdwp, TRUE, self->hiddenWindowMonitor, self->useOldMoveLogicFunc);
+                    EndDeferWindowPos(hdwp);
+                }
+                return true;
+            }
+        }
+    }
+    return true;
+}
+
+BOOL window_manager_try_handle_foreground_event(WindowManagerState *self, HWND hwnd)
+{
+    if(self->selectedMonitor)
+    {
+        bar_trigger_selected_window_paint(self->selectedMonitor->bar);
+        if(hit_test_hwnd(hwnd))
+        {
+            Client* client = windowManager_find_client_in_workspaces_by_hwnd(self, hwnd);
+            if(client)
+            {
+                if(self->selectedMonitor->workspace->selected != client)
+                {
+                    client->workspace->selected = client;
+                    monitor_select(self, client->workspace->monitor);
+                }
+            }
+        }
+    }
+
+    if(self->selectedMonitor)
+    {
+        if(self->selectedMonitor->workspace->selected)
+        {
+            if(self->selectedMonitor->workspace->selected->data->hwnd != hwnd && !self->selectedMonitor->scratchWindow && !self->menuVisible)
+            {
+                self->isForegroundWindowSameAsSelectMonitorSelected = FALSE;
+            }
+            else
+            {
+                self->isForegroundWindowSameAsSelectMonitorSelected = TRUE;
+            }
+        }
+    }
+    self->eventForegroundHwnd = hwnd;
+    border_window_update(self->borderWindowHwnd);
+    if(self->selectedMonitor)
+    {
+        bar_trigger_selected_window_paint(self->selectedMonitor->bar);
+    }
+
+    return TRUE;
+}
+
 void CALLBACK handle_windows_event(
         HWINEVENTHOOK hook,
         DWORD event,
@@ -1657,81 +1871,9 @@ void CALLBACK handle_windows_event(
         }
         else if (event == EVENT_OBJECT_SHOW || event == EVENT_OBJECT_UNCLOAKED)
         {
-            BOOL isTaskBar = is_hwnd_taskbar(hwnd);
-            if (isTaskBar)
-            {
-                monitors_resize_for_taskbar(&g_windowManagerState, hwnd);
-                return;
-            }
-
-            if(!isRootWindow)
+            if(window_manager_try_handle_show_event(&g_windowManagerState, hwnd, styles, exStyles))
             {
                 return;
-            }
-
-            Client *existingClient = windowManager_find_client_in_workspaces_by_hwnd(&g_windowManagerState, hwnd);
-            if(existingClient)
-            {
-                workspace_arrange_windows(existingClient->workspace, &g_windowManagerState);
-                workspace_focus_selected_window(&g_windowManagerState, existingClient->workspace);
-                return;
-            }
-
-            Client *client = clientFactory_create_from_hwnd(hwnd);
-
-            BOOL isWindowVisible = IsWindowVisible(hwnd);
-            if(!isWindowVisible)
-            {
-                if(configuration->clientShouldUseMinimizeToHide)
-                {
-                    BOOL clientShouldUseMinimizeToHide = configuration->clientShouldUseMinimizeToHide(client);
-                    if(!clientShouldUseMinimizeToHide)
-                    {
-                        free_client(client);
-                        return;
-                    }
-                }
-            }
-
-            if(!client->data->isScratchWindowBoundToWorkspace)
-            {
-                ScratchWindow *sWindow = scratch_windows_find_from_client(&g_windowManagerState, client);
-                if(sWindow)
-                {
-                    if(sWindow->client)
-                    {
-                        free_client(client);
-                    }
-                    else
-                    {
-                        sWindow->client = client;
-                        scratch_window_add(sWindow);
-                        scratch_window_show(&g_windowManagerState, sWindow);
-                    }
-                    return;
-                }
-            }
-
-            if(is_float_window(client, styles, exStyles))
-            {
-                free_client(client);
-                return;
-            }
-
-            Workspace *workspace = windowManager_find_client_workspace_using_filters(&g_windowManagerState, client);
-            if(workspace)
-            {
-                if(GetAsyncKeyState(VK_LBUTTON) & 0x8000)
-                {
-                    return;
-                }
-                workspace_add_client(workspace, client);
-                workspace_arrange_windows(workspace, &g_windowManagerState);
-                workspace_focus_selected_window(&g_windowManagerState, workspace);
-            }
-            else
-            {
-                free_client(client);
             }
         }
         else if(event == EVENT_SYSTEM_MINIMIZESTART)
@@ -1747,94 +1889,9 @@ void CALLBACK handle_windows_event(
         }
         else if(event == EVENT_OBJECT_LOCATIONCHANGE)
         {
-            ScratchWindow *scratchWindow = scratch_windows_find_from_hwnd(&g_windowManagerState, hwnd);
-            if(scratchWindow)
+            if(window_manager_try_handle_location_changed_event(&g_windowManagerState, hwnd, styles, exStyles))
             {
-                BOOL isMinimized = IsIconic(hwnd);
-                if(!g_windowManagerState.selectedMonitor->scratchWindow && !isMinimized)
-                {
-                    scratch_window_show(&g_windowManagerState, scratchWindow);
-                    return;
-                }
-                else
-                {
-                    if(g_windowManagerState.selectedMonitor->scratchWindow != scratchWindow && !isMinimized)
-                    {
-                        scratch_window_hide(g_windowManagerState.selectedMonitor->scratchWindow);
-                        scratch_window_show(&g_windowManagerState, scratchWindow);
-                        return;
-                    }
-                }
-            }
-
-            Client *client = NULL;
-            client = windowManager_find_client_in_workspaces_by_hwnd(&g_windowManagerState, hwnd);
-
-            if(client)
-            {
-                BOOL isMinimized = IsIconic(hwnd);
-                if(client->data->isMinimized)
-                {
-                    if(!isMinimized)
-                    {
-                        if(!client->data->useMinimizeToHide)
-                        {
-                            client_move_from_minimized_to_unminimized(&g_windowManagerState, client);
-                        }
-                    }
-                }
-                else
-                {
-                    if(isMinimized)
-                    {
-                        if(!client->data->useMinimizeToHide)
-                        {
-                            client_move_from_unminimized_to_minimized(&g_windowManagerState, client);
-                        }
-                    }
-                    else
-                    {
-                        if(isFullscreen(hwnd))
-                        {
-                            return;
-                        }
-                        else if(IsZoomed(hwnd))
-                        {
-                            return;
-                        }
-
-                        if(GetAsyncKeyState(VK_LBUTTON) & 0x8000 && !(GetAsyncKeyState(VK_LSHIFT) & 0x8000) && !g_resizeState.easyResizeInProgress)
-                        {
-                            drag_drop_handle_location_change_with_mouse_down(&g_dragDropState, hwnd, styles, exStyles);
-                            return;
-                        }
-
-                        workspace_arrange_windows(client->workspace, &g_windowManagerState);
-                    }
-                }
-            }
-            else
-            {
-                if(GetAsyncKeyState(VK_LBUTTON) & 0x8000 && !(GetAsyncKeyState(VK_LSHIFT) & 0x8000) && !g_resizeState.easyResizeInProgress)
-                {
-                    if(drag_drop_handle_location_change_with_mouse_down(&g_dragDropState, hwnd, styles, exStyles))
-                    {
-                        return;
-                    }
-                }
-                if(g_windowManagerState.selectedMonitor->scratchWindow)
-                {
-                    if(g_windowManagerState.selectedMonitor->scratchWindow->client)
-                    {
-                        if(!g_windowManagerState.selectedMonitor->scratchWindow->client->data->isMinimized)
-                        {
-                            HDWP hdwp = BeginDeferWindowPos(1);
-                            client_move_to_location_on_screen(g_windowManagerState.selectedMonitor->scratchWindow->client, hdwp, TRUE, g_windowManagerState.hiddenWindowMonitor, g_windowManagerState.useOldMoveLogicFunc);
-                            EndDeferWindowPos(hdwp);
-                        }
-                        return;
-                    }
-                }
+                return;
             }
         }
         else if (event == EVENT_OBJECT_DESTROY)
@@ -1843,42 +1900,9 @@ void CALLBACK handle_windows_event(
         }
         else if(event == EVENT_SYSTEM_FOREGROUND)
         {
-            if(g_windowManagerState.selectedMonitor)
+            if(window_manager_try_handle_foreground_event(&g_windowManagerState, hwnd))
             {
-                bar_trigger_selected_window_paint(g_windowManagerState.selectedMonitor->bar);
-                if(hit_test_hwnd(hwnd))
-                {
-                    Client* client = windowManager_find_client_in_workspaces_by_hwnd(&g_windowManagerState, hwnd);
-                    if(client)
-                    {
-                        if(g_windowManagerState.selectedMonitor->workspace->selected != client)
-                        {
-                            client->workspace->selected = client;
-                            monitor_select(&g_windowManagerState, client->workspace->monitor);
-                        }
-                    }
-                }
-            }
-
-            if(g_windowManagerState.selectedMonitor)
-            {
-                if(g_windowManagerState.selectedMonitor->workspace->selected)
-                {
-                    if(g_windowManagerState.selectedMonitor->workspace->selected->data->hwnd != hwnd && !g_windowManagerState.selectedMonitor->scratchWindow && !g_windowManagerState.menuVisible)
-                    {
-                        g_windowManagerState.isForegroundWindowSameAsSelectMonitorSelected = FALSE;
-                    }
-                    else
-                    {
-                        g_windowManagerState.isForegroundWindowSameAsSelectMonitorSelected = TRUE;
-                    }
-                }
-            }
-            g_windowManagerState.eventForegroundHwnd = hwnd;
-            border_window_update(g_windowManagerState.borderWindowHwnd);
-            if(g_windowManagerState.selectedMonitor)
-            {
-                bar_trigger_selected_window_paint(g_windowManagerState.selectedMonitor->bar);
+                return;
             }
         }
     }
@@ -2023,7 +2047,7 @@ Workspace* windowManager_find_client_workspace_using_filters(WindowManagerState 
     if(alwaysExclude)
     {
     }
-    else if(g_windowManagerState.currentWindowRoutingMode == NotFilteredCurrentWorkspace)
+    else if(self->currentWindowRoutingMode == NotFilteredCurrentWorkspace)
     {
         workspaceFoundByFilter = self->selectedMonitor->workspace;
     }
@@ -2044,7 +2068,7 @@ Workspace* windowManager_find_client_workspace_using_filters(WindowManagerState 
 
             if(filterResult)
             {
-                if(g_windowManagerState.currentWindowRoutingMode == FilteredCurrentWorkspace)
+                if(self->currentWindowRoutingMode == FilteredCurrentWorkspace)
                 {
                     workspaceFoundByFilter = self->selectedMonitor->workspace;
                 }
@@ -2063,7 +2087,7 @@ Workspace* windowManager_find_client_workspace_using_filters(WindowManagerState 
     }
     else
     {
-        if(g_windowManagerState.currentWindowRoutingMode == FilteredRoutedNonFilteredCurrentWorkspace && !alwaysExclude)
+        if(self->currentWindowRoutingMode == FilteredRoutedNonFilteredCurrentWorkspace && !alwaysExclude)
         {
             result = self->selectedMonitor->workspace;
         }
@@ -2891,7 +2915,7 @@ void workspace_focus_selected_window(WindowManagerState *windowManagerState, Wor
             keybd_event(0, 0, 0, 0);
             SetForegroundWindow(workspace->selected->data->hwnd);
         }
-        g_windowManagerState.isForegroundWindowSameAsSelectMonitorSelected = TRUE;
+        windowManagerState->isForegroundWindowSameAsSelectMonitorSelected = TRUE;
     }
     if(workspace->monitor->bar)
     {
@@ -3792,11 +3816,11 @@ void scratch_window_show(WindowManagerState *windowManagerState, ScratchWindow *
 {
     if(windowManagerState->menuVisible)
     {
-        menu_hide(&g_windowManagerState);
+        menu_hide(windowManagerState);
     }
 
     self->client->data->isMinimized = FALSE;
-    g_windowManagerState.selectedMonitor->scratchWindow = self;
+    windowManagerState->selectedMonitor->scratchWindow = self;
     scratch_window_focus(windowManagerState, self);
 }
 
@@ -3989,7 +4013,7 @@ void monitor_select(WindowManagerState *self, Monitor *monitor)
 
 void monitor_set_layout(WindowManagerState *windowManagerState, Layout *layout)
 {
-    Workspace *workspace = g_windowManagerState.selectedMonitor->workspace;
+    Workspace *workspace = windowManagerState->selectedMonitor->workspace;
     workspace->layout = layout;
     workspace_arrange_windows(workspace, windowManagerState);
     if(workspace->monitor->bar)
@@ -4019,7 +4043,7 @@ void bar_trigger_selected_window_paint(Bar *self)
 void bar_render_selected_window_description(WindowManagerState *windowManagerState, Bar *bar, HDC hdc)
 {
     TCHAR* windowRoutingMode = L"UNKNOWN";
-    switch(g_windowManagerState.currentWindowRoutingMode)
+    switch(windowManagerState->currentWindowRoutingMode)
     {
         case FilteredAndRoutedToWorkspace:
             windowRoutingMode = L"1";
@@ -4035,14 +4059,14 @@ void bar_render_selected_window_description(WindowManagerState *windowManagerSta
             break;
     }
 
-    HWND foregroundHwnd = g_windowManagerState.eventForegroundHwnd;
+    HWND foregroundHwnd = windowManagerState->eventForegroundHwnd;
     Client* focusedClient = windowManager_find_client_in_workspaces_by_hwnd(windowManagerState, foregroundHwnd);
     Client* clientToRender;
 
     TCHAR *isManagedIndicator = L"\0";
     if(focusedClient)
     {
-        if(g_windowManagerState.isForegroundWindowSameAsSelectMonitorSelected)
+        if(windowManagerState->isForegroundWindowSameAsSelectMonitorSelected)
         {
             isManagedIndicator = L"";
         }
