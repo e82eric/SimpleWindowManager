@@ -4861,9 +4861,9 @@ void border_window_update(WindowManagerState *windowManagerState)
     EndDeferWindowPos(hdwp);
 }
 
-void drop_target_window_paint(HWND hWnd)
+void drop_target_window_paint(HWND hWnd, WindowManagerState *windowManagerState)
 {
-    if(g_windowManagerState.selectedMonitor->workspace->selected || g_windowManagerState.selectedMonitor->scratchWindow || g_windowManagerState.menuVisible)
+    if(windowManagerState->selectedMonitor->workspace->selected || windowManagerState->selectedMonitor->scratchWindow || windowManagerState->menuVisible)
     {
         PAINTSTRUCT ps;
         HDC hDC = BeginPaint(hWnd, &ps);
@@ -4871,7 +4871,7 @@ void drop_target_window_paint(HWND hWnd)
         RECT rcWindow;
         GetClientRect(hWnd, &rcWindow);
 
-        FillRect(hDC, &rcWindow, g_windowManagerState.selectedMonitor->workspaceStyle->_dropTargetBrush);
+        FillRect(hDC, &rcWindow, windowManagerState->selectedMonitor->workspaceStyle->_dropTargetBrush);
 
         EndPaint(hWnd, &ps);
     }
@@ -4947,7 +4947,7 @@ static LRESULT drop_target_window_message_loop(HWND h, UINT msg, WPARAM wp, LPAR
     {
         case WM_PAINT:
         {
-            drop_target_window_paint(h);
+            drop_target_window_paint(h, &g_windowManagerState);
         } break;
 
         default:
