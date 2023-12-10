@@ -24,9 +24,10 @@ typedef struct MenuDefinition
     int returnRangeStart;
     int returnRangeEnd;
     BOOL hasReturnRange;
-    void (*onSelection)(char* stdOut);
-    void (*onEscape)(void);
-    int (*itemsAction)(int maxItems, CHAR** items);
+    void (*onSelection)(char* stdOut, void *state);
+    void (*onEscape)(void *state);
+    int (*itemsAction)(int maxItems, CHAR** items, void *state);
+    void *state;
 } MenuDefinition;
 
 struct NamedCommand
@@ -56,7 +57,7 @@ struct MenuKeyBinding
     NamedCommand* command;
     MenuKeyBinding* next;
     BOOL isLoadCommand;
-    int (*loadAction)(int maxItems, CHAR** items);
+    int (*loadAction)(int maxItems, CHAR** items, void *state);
     char *loadActionDescription;
 };
 
@@ -112,7 +113,7 @@ typedef struct SearchView
     ItemsView *itemsView;
     MenuKeyBinding *keyBindings;
     MenuKeyBinding *lastKeyBinding;
-    void (*onEscape)(void);
+    void (*onEscape)(void *state);
     BOOL isSearching;
     BOOL cancelSearch;
     HANDLE searchEvent;
@@ -144,7 +145,7 @@ struct ItemsView
     BOOL headerSet;
     BOOL hasLoadCommand;
     NamedCommand *loadCommand;
-    int (*loadAction)(int maxItems, CHAR**);
+    int (*loadAction)(int maxItems, CHAR**, void *state);
     int viewPortLines;
     int cmdViewPortLines;
     int numberOfItemsMatched;
@@ -161,7 +162,7 @@ struct ItemsView
     BOOL hasReturnRange;
     int returnRangeStart;
     int returnRangeEnd;
-    void (*onSelection)(char* stdOut);
+    void (*onSelection)(char* stdOut, void *state);
     BOOL isLoading;
     BOOL cancelLoad;
     HANDLE loadEvent;
@@ -169,6 +170,7 @@ struct ItemsView
     Item *displayItems[MAX_DISPLAY_BUF];
     int numberOfDisplayItems;
     BOOL isScrollable;
+    void *state;
 };
 
 typedef struct ProcessCmdOutputJob
@@ -200,7 +202,7 @@ void menu_set_border_pen(MenuView *self, HPEN pen);
 void menu_run_definition(MenuView *self, MenuDefinition *menuDefinition);
 void MenuDefinition_ParseAndAddLoadCommand(MenuDefinition *self, char *argText, BOOL isScrollable);
 void MenuDefinition_ParseAndSetRange(MenuDefinition *self, char *argText);
-void MenuDefinition_AddLoadActionKeyBinding(MenuDefinition *self, unsigned int modifier, unsigned int key, int (*loadAction)(int maxItems, CHAR**), char* loadActionDescription);
-void menu_definition_set_load_action(MenuDefinition *self, int (*loadAction)(int maxItems, CHAR** items));
+void MenuDefinition_AddLoadActionKeyBinding(MenuDefinition *self, unsigned int modifier, unsigned int key, int (*loadAction)(int maxItems, CHAR**, void *state), char* loadActionDescription);
+void menu_definition_set_load_action(MenuDefinition *self, int (*loadAction)(int maxItems, CHAR** items, void *state));
 void menu_definition_set_load_command(MenuDefinition *self, NamedCommand *loadCommand);
 MenuDefinition* menu_definition_create(MenuView *menuView);

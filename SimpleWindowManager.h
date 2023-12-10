@@ -437,15 +437,15 @@ void client_stop_managing(void);
 void open_windows_scratch_start(void);
 void open_program_scratch_start(void);
 void open_program_scratch_start_not_elevated(void);
-void open_windows_scratch_exit_callback(char *stdOut);
-void open_program_scratch_callback_not_elevated(char *stdOut);
-void open_program_scratch_callback(char *stdOut);
+void open_windows_scratch_exit_callback(char *stdOut, void *state);
+void open_program_scratch_callback_not_elevated(char *stdOut, void *state);
+void open_program_scratch_callback(char *stdOut, void *state);
 void open_process_list_scratch_callback(char *stdOut);
 void open_process_list(void);
 void quit(void);
 
 void menu_defintion_register(MenuDefinition *definition);
-void menu_on_escape(void);
+void menu_on_escape(void *state);
 
 MenuDefinition* menu_create_and_register(void);
 void menu_run(MenuDefinition *definition);

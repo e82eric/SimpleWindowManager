@@ -150,8 +150,9 @@ int EnumerateAllServices(SC_HANDLE hSCM, CHAR **toFill, DWORD maxItems)
     }
 }
 
-int list_services_run_no_sort(int maxItems, CHAR** linesToFill)
+int list_services_run_no_sort(int maxItems, CHAR** linesToFill, void *state)
 {
+    UNREFERENCED_PARAMETER(state);
     SC_HANDLE scHandle = OpenSCManagerA(
             NULL,
             NULL,

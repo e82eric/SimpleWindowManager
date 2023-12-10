@@ -215,25 +215,27 @@ IWbemServices *services = NULL;
 
 Configuration *configuration;
 
-void run_command_from_menu(char *stdOut)
+void run_command_from_menu(char *stdOut, void *state)
 {
+    WindowManagerState *windowManagerState = (WindowManagerState*)state;
     const char deli[] = " ";
     char *next_token = NULL;
     char* name = strtok_s(stdOut, deli, &next_token);
 
-    for(int i = 0; i < g_windowManagerState.numberOfCommands; i++)
+    for(int i = 0; i < windowManagerState->numberOfCommands; i++)
     {
-        if(strcmp(name, g_windowManagerState.commands[i]->name) == 0)
+        if(strcmp(name, windowManagerState->commands[i]->name) == 0)
         {
-            g_windowManagerState.commands[i]->execute(g_windowManagerState.commands[i]);
+            windowManagerState->commands[i]->execute(windowManagerState->commands[i]);
             return;
         }
     }
 }
 
-int commands_list(int maxItems, CHAR **lines)
+int commands_list(int maxItems, CHAR **lines, void *state)
 {
-    size_t nameWidth = g_windowManagerState.longestCommandName;
+    WindowManagerState *windowManagerState = (WindowManagerState*)state;
+    size_t nameWidth = windowManagerState->longestCommandName;
     const int typeWidth = 25;
     const int keyBindingWidth = 30;
     CHAR header[1024];
@@ -253,9 +255,9 @@ int commands_list(int maxItems, CHAR **lines)
 
     int numberOfBindings = 1;
 
-    for(int i = 0; i < g_windowManagerState.numberOfCommands && g_windowManagerState.numberOfCommands < maxItems; i++)
+    for(int i = 0; i < windowManagerState->numberOfCommands && windowManagerState->numberOfCommands < maxItems; i++)
     {
-        Command *command = g_windowManagerState.commands[i];
+        Command *command = windowManagerState->commands[i];
         CHAR keyBindingStr[MAX_PATH];
         keyBindingStr[0] = '\0';
 
@@ -3738,6 +3740,7 @@ void scratch_windows_add_to_end(ScratchWindow *scratchWindow)
 MenuDefinition* menu_create_and_register(void)
 {
     MenuDefinition *result = menu_definition_create(g_windowManagerState.menuView);
+    result->state = &g_windowManagerState;
     return result;
 }
 
@@ -3749,13 +3752,14 @@ void menu_hide(WindowManagerState *windowManagerState)
     border_window_update(windowManagerState);
 }
 
-void menu_on_escape(void)
+void menu_on_escape(void *state)
 {
-    menu_hide(&g_windowManagerState);
+    WindowManagerState *windowManagerState = (WindowManagerState*)state;
+    menu_hide(windowManagerState);
     HWND foregroundHwnd = GetForegroundWindow();
-    if((foregroundHwnd == g_windowManagerState.menuView->hwnd || foregroundHwnd == g_windowManagerState.borderWindowHwnd) && g_windowManagerState.selectedMonitor->workspace)
+    if((foregroundHwnd == windowManagerState->menuView->hwnd || foregroundHwnd == windowManagerState->borderWindowHwnd) && windowManagerState->selectedMonitor->workspace)
     {
-        workspace_focus_selected_window(&g_windowManagerState, g_windowManagerState.selectedMonitor->workspace);
+        workspace_focus_selected_window(windowManagerState, windowManagerState->selectedMonitor->workspace);
     }
 }
 
@@ -5792,9 +5796,10 @@ void process_with_stdout_start(CHAR *cmdArgs, void (*onSuccess) (CHAR *))
     CloseHandle(hChildStd_OUT_Wr);
 }
 
-void open_program_scratch_callback(char *stdOut)
+void open_program_scratch_callback(char *stdOut, void *state)
 {
-    menu_hide(&g_windowManagerState);
+    WindowManagerState *windowManagerState = (WindowManagerState*)state;
+    menu_hide(windowManagerState);
     /* border_window_hide(g_windowManagerState.borderWindowHwnd); */
     char str[1024];
 
@@ -5802,9 +5807,10 @@ void open_program_scratch_callback(char *stdOut)
     start_launcher(str);
 }
 
-void open_program_scratch_callback_not_elevated(char *stdOut)
+void open_program_scratch_callback_not_elevated(char *stdOut, void *state)
 {
-    menu_hide(&g_windowManagerState);
+    WindowManagerState *windowManagerState = (WindowManagerState*)state;
+    menu_hide(windowManagerState);
     /* border_window_hide(g_windowManagerState.borderWindowHwnd); */
     char str[1024];
 
@@ -5817,35 +5823,36 @@ void open_process_list_scratch_callback(char *stdOut)
     UNREFERENCED_PARAMETER(stdOut);
 }
 
-void open_windows_scratch_exit_callback(char *stdOut)
+void open_windows_scratch_exit_callback(char *stdOut, void *state)
 {
-    menu_hide(&g_windowManagerState);
+    WindowManagerState *windowManagerState = (WindowManagerState*)state;
+    menu_hide(windowManagerState);
     char* lastCharRead;
     HWND hwnd = (HWND)strtoll(stdOut, &lastCharRead, 16);
 
-    Client *client = windowManager_find_client_in_workspaces_by_hwnd(&g_windowManagerState, hwnd);
+    Client *client = windowManager_find_client_in_workspaces_by_hwnd(windowManagerState, hwnd);
     if(client)
     {
         if(client->data->isMinimized)
         {
             ShowWindow(hwnd, SW_RESTORE);
-            client_move_from_minimized_to_unminimized(&g_windowManagerState, client);
+            client_move_from_minimized_to_unminimized(windowManagerState, client);
             client->workspace->selected = client;
         }
 
         client->workspace->layout->move_client_to_main(client);
         client->workspace->selected = client->workspace->clients;
 
-        if(g_windowManagerState.selectedMonitor->workspace != client->workspace)
+        if(windowManagerState->selectedMonitor->workspace != client->workspace)
         {
-            windowManager_move_workspace_to_monitor(&g_windowManagerState, g_windowManagerState.selectedMonitor, client->workspace);
-            workspace_arrange_windows(client->workspace, &g_windowManagerState);
-            workspace_focus_selected_window(&g_windowManagerState, client->workspace);
+            windowManager_move_workspace_to_monitor(windowManagerState, windowManagerState->selectedMonitor, client->workspace);
+            workspace_arrange_windows(client->workspace, windowManagerState);
+            workspace_focus_selected_window(windowManagerState, client->workspace);
         }
         else
         {
-            workspace_arrange_windows(client->workspace, &g_windowManagerState);
-            workspace_focus_selected_window(&g_windowManagerState, client->workspace);
+            workspace_arrange_windows(client->workspace, windowManagerState);
+            workspace_focus_selected_window(windowManagerState, client->workspace);
         }
     }
     else
@@ -5856,12 +5863,12 @@ void open_windows_scratch_exit_callback(char *stdOut)
         RECT focusedRect;
         GetWindowRect(hwnd, &focusedRect);
         
-        if(focusedRect.left > g_windowManagerState.selectedMonitor->xOffset + g_windowManagerState.selectedMonitor->w ||
-                focusedRect.left < g_windowManagerState.selectedMonitor->xOffset)
+        if(focusedRect.left > windowManagerState->selectedMonitor->xOffset + windowManagerState->selectedMonitor->w ||
+                focusedRect.left < windowManagerState->selectedMonitor->xOffset)
         {
             MoveWindow(
                     hwnd,
-                    g_windowManagerState.selectedMonitor->xOffset + (g_windowManagerState.selectedMonitor->workspaceStyle->gapWidth * 2),
+                    windowManagerState->selectedMonitor->xOffset + (windowManagerState->selectedMonitor->workspaceStyle->gapWidth * 2),
                     focusedRect.top,
                     focusedRect.right - focusedRect.left,
                     focusedRect.bottom - focusedRect.top,

@@ -390,7 +390,7 @@ void ItemsView_HandleSelection(ItemsView *self)
     ItemsView_Clear(self->searchView->itemsView);
     if(self->onSelection)
     {
-        self->onSelection(result);
+        self->onSelection(result, self->state);
     }
 }
 
@@ -581,7 +581,7 @@ void ItemsView_StartLoadItems_FromCommand(ItemsView *self, NamedCommand *namedCo
     ProcessWithItemStreamOutput_Start(namedCommand->expression, job);
 }
 
-void ItemsView_LoadFromAction(ItemsView *self, int (itemsAction)(int maxItems, CHAR **items))
+void ItemsView_LoadFromAction(ItemsView *self, int (itemsAction)(int maxItems, CHAR **items, void *state))
 {
     ItemsView_Clear(self);
 
@@ -593,7 +593,7 @@ void ItemsView_LoadFromAction(ItemsView *self, int (itemsAction)(int maxItems, C
     self->numberOfChunks = 1;
 
     static CHAR *itemsBuf[CHUNK_SIZE];
-    int numberOfItems = itemsAction(CHUNK_SIZE, itemsBuf);
+    int numberOfItems = itemsAction(CHUNK_SIZE, itemsBuf, self->state);
 
     for(int i = 0; i < numberOfItems; i++)
     {
@@ -748,7 +748,7 @@ void CALLBACK BindProcessFinishCallback(void* lpParameter, BOOLEAN isTimeout)
 
     if(asyncState->quitAfter)
     {
-        asyncState->itemsView->searchView->onEscape();
+        asyncState->itemsView->searchView->onEscape(asyncState->itemsView->state);
         ItemsView_Clear(asyncState->itemsView);
     }
 
@@ -763,7 +763,7 @@ void ItemsView_HandleBinding(ItemsView *self, NamedCommand *command)
         {
             if(command->quitAfter)
             {
-                self->searchView->onEscape();
+                self->searchView->onEscape(self->state);
             }
 
             LRESULT dwSel = SendMessageA(self->hwnd, LB_GETCURSEL, 0, 0);
@@ -976,7 +976,7 @@ void SearchView_HandleEscape(SearchView *self)
     }
     else
     {
-        self->onEscape();
+        self->onEscape(self->itemsView->state);
         ItemsView_Clear(self->itemsView);
     }
 }
@@ -1926,7 +1926,7 @@ void MenuDefinition_AddLoadActionKeyBinding(
         MenuDefinition *self,
         unsigned int modifier,
         unsigned int key,
-        int (*loadAction)(int, CHAR**),
+        int (*loadAction)(int, CHAR**, void *state),
         char *loadActionDescription)
 {
     MenuKeyBinding *binding = calloc(1, sizeof(MenuKeyBinding));
@@ -2306,7 +2306,7 @@ MenuDefinition* menu_definition_create(MenuView *menuView)
     return result;
 }
 
-void menu_definition_set_load_action(MenuDefinition *self, int (*loadAction)(int maxItems, CHAR** items))
+void menu_definition_set_load_action(MenuDefinition *self, int (*loadAction)(int maxItems, CHAR** items, void *state))
 {
     self->itemsAction = loadAction;
     MenuDefinition_AddLoadActionKeyBinding(self, VK_CONTROL, VkKeyScanW('r'), self->itemsAction, "Reload");
@@ -2329,6 +2329,7 @@ void menu_run_definition(MenuView *self, MenuDefinition *menuDefinition)
     self->itemsView->returnRangeStart = menuDefinition->returnRangeStart;
     self->itemsView->returnRangeEnd = menuDefinition->returnRangeEnd;
     self->itemsView->onSelection = menuDefinition->onSelection;
+    self->itemsView->state = menuDefinition->state;
     self->searchView->onEscape = menuDefinition->onEscape;
     self->searchView->keyBindings = menuDefinition->keyBindings;
 

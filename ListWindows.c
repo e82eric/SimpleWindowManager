@@ -259,8 +259,9 @@ static BOOL CALLBACK enum_windows_callback(HWND hwnd, LPARAM lparam)
     return TRUE;
 }
 
-int list_windows_run(int maxItems, CHAR** toFill)
+int list_windows_run(int maxItems, CHAR** toFill, void *state)
 {
+    UNREFERENCED_PARAMETER(state);
     ListWindowsWorkspace *workspace = calloc(1, sizeof(ListWindowsWorkspace));
     assert(workspace);
     EnumWindows(enum_windows_callback, (LPARAM)workspace);

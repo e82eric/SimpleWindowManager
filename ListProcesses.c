@@ -173,32 +173,37 @@ int list_processes_run(int maxItems, CHAR** linesToFill, BOOL sort, int (*sortFu
     return numberOfResults;
 }
 
-int list_processes_run_no_sort(int maxItems, CHAR** linesToFill)
+int list_processes_run_no_sort(int maxItems, CHAR** linesToFill, void *state)
 {
+    UNREFERENCED_PARAMETER(state);
     int numberOfResults = list_processes_run(maxItems, linesToFill, FALSE, NULL);
     return numberOfResults;
 }
 
-int list_processes_run_sorted_by_cpu(int maxItems, CHAR **linesToFill)
+int list_processes_run_sorted_by_cpu(int maxItems, CHAR **linesToFill, void *state)
 {
+    UNREFERENCED_PARAMETER(state);
     int numberOfResults = list_processes_run(maxItems, linesToFill, TRUE, CompareProcessCpu);
     return numberOfResults;
 }
 
-int list_processes_run_sorted_by_private_bytes(int maxItems, CHAR **linesToFill)
+int list_processes_run_sorted_by_private_bytes(int maxItems, CHAR **linesToFill, void *state)
 {
+    UNREFERENCED_PARAMETER(state);
     int numberOfResults = list_processes_run(maxItems, linesToFill, TRUE, CompareProcessPrivateBytes);
     return numberOfResults;
 }
 
-int list_processes_run_sorted_by_working_set(int maxItems, CHAR **linesToFill)
+int list_processes_run_sorted_by_working_set(int maxItems, CHAR **linesToFill, void *state)
 {
+    UNREFERENCED_PARAMETER(state);
     int numberOfResults = list_processes_run(maxItems, linesToFill, TRUE, CompareProcessWorkingSet);
     return numberOfResults;
 }
 
-int list_processes_run_sorted_by_pid(int maxItems, CHAR **linesToFill)
+int list_processes_run_sorted_by_pid(int maxItems, CHAR **linesToFill, void *state)
 {
+    UNREFERENCED_PARAMETER(state);
     int numberOfResults = list_processes_run(maxItems, linesToFill, TRUE, CompareProcessPid);
     return numberOfResults;
 }
