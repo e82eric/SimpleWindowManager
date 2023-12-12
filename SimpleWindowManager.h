@@ -1,5 +1,6 @@
 #include "CommonTypes.h"
 
+typedef struct WindowManagerState WindowManagerState;
 typedef struct Workspace Workspace;
 typedef struct WorkspaceFilterData WorkspaceFilterData;
 typedef struct Client Client;
@@ -272,7 +273,7 @@ struct Command
     CHAR *type;
     void (*execute)(Command *self);
     void (*getDescription)(Command *self, int maxLen, CHAR *toFill);
-    void (*action)(void);
+    void (*action)(WindowManagerState *windowManager);
     void (*monitorAction)(Monitor *arg);
     Monitor *monitorArg;
     void (*workspaceAction)(Workspace *arg);
@@ -284,6 +285,7 @@ struct Command
     void (*shellAction) (TCHAR *arg);
     TCHAR *shellArg;
     KeyBinding *keyBinding;
+    WindowManagerState *windowManager;
 };
 
 struct KeyBinding
@@ -295,7 +297,7 @@ struct KeyBinding
     KeyBinding *next;
 };
 
-typedef struct WindowManagerState
+struct WindowManagerState
 {
     Monitor *primaryMonitor;
     Monitor *secondaryMonitor;
@@ -320,7 +322,7 @@ typedef struct WindowManagerState
     int floatWindowMovement;
     enum WindowRoutingMode currentWindowRoutingMode;
     BOOL (*useOldMoveLogicFunc) (Client *client);
-} WindowManagerState;
+};
 
 typedef struct DragDropState
 {
@@ -357,7 +359,7 @@ void workspace_register_title_not_contains_filter(Workspace *workspace, TCHAR *t
 void workspace_focus_selected_window(WindowManagerState *windowManagerState, Workspace *workspace);
 Workspace* workspace_create(TCHAR *name, WindowFilter windowFilter, WCHAR* tag, Layout *layout, int numberOfButtons);
 
-void keybinding_create_with_no_arg(CHAR *name, int modifiers, unsigned int key, void (*action) (void));
+void keybinding_create_with_no_arg(CHAR *name, int modifiers, unsigned int key, void (*action) (WindowManagerState*));
 void keybinding_create_with_workspace_arg(CHAR *name, int modifiers, unsigned int key, void (*action) (Workspace*), Workspace *arg);
 void keybinding_create_with_scratchwindow_arg(CHAR *name, int modifiers, unsigned int key, ScratchWindow *arg);
 void keybinding_create_with_menu_arg(CHAR *name, int modifiers, unsigned int key, void (*action) (MenuDefinition*), MenuDefinition *arg);
@@ -390,12 +392,12 @@ void fill_local_date(TCHAR *toFill, int maxLen);
 void fill_memory_percent(TCHAR *toFill, int maxLen);
 void fill_is_connected_to_internet(TCHAR *toFill, int maxLen);
 
-void goto_last_workspace(void);
+void goto_last_workspace(WindowManagerState *self);
 void windowManager_move_workspace_to_monitor(WindowManagerState *windowManagerState, Monitor *monitor, Workspace *workspace);
-void redraw_focused_window(void);
-void select_next_window(void);
-void select_previous_window(void);
-void monitor_select_next(void);
+void redraw_focused_window(WindowManagerState *self);
+void select_next_window(WindowManagerState *self);
+void select_previous_window(WindowManagerState *self);
+void monitor_select_next(WindowManagerState *self);
 void start_launcher(CHAR *cmdArgs);
 void start_scratch_not_elevated(CHAR *cmdArgs);
 void scratch_terminal_register_with_unique_string(CHAR *cmd, int modifiers, int key, TCHAR *uniqueStr);
@@ -405,35 +407,35 @@ ScratchWindow *register_windows_terminal_scratch_with_unique_string(CHAR *name, 
 void process_with_stdout_start(CHAR *cmdArgs, void (*onSuccess) (CHAR *));
 void start_app(TCHAR *processExe);
 void start_app_non_elevated(TCHAR *processExe);
-void toggle_selected_monitor_layout(void);
-void arrange_clients_in_selected_workspace(void);
-void workspace_increase_main_width_selected_monitor(void);
-void workspace_decrease_main_width_selected_monitor(void);
-void move_focused_window_to_main(void);
-void move_secondary_monitor_focused_window_to_main(void);
-void move_focused_window_left(void);
-void move_focused_window_right(void);
-void move_focused_window_up(void);
-void move_focused_window_down(void);
+void toggle_selected_monitor_layout(WindowManagerState *self);
+void arrange_clients_in_selected_workspace(WindowManagerState *self);
+void workspace_increase_main_width_selected_monitor(WindowManagerState *self);
+void workspace_decrease_main_width_selected_monitor(WindowManagerState *self);
+void move_focused_window_to_main(WindowManagerState *self);
+void move_secondary_monitor_focused_window_to_main(WindowManagerState *self);
+void move_focused_window_left(WindowManagerState *self);
+void move_focused_window_right(WindowManagerState *self);
+void move_focused_window_up(WindowManagerState *self);
+void move_focused_window_down(WindowManagerState *self);
 void swap_selected_monitor_to(Workspace *workspace);
 void move_focused_window_to_workspace(Workspace *workspace);
-void move_focused_window_to_selected_monitor_workspace(void);
-void close_focused_window(void);
-void kill_focused_window(void);
+void move_focused_window_to_selected_monitor_workspace(WindowManagerState *self);
+void close_focused_window(WindowManagerState *self);
+void kill_focused_window(WindowManagerState *self);
 void float_window_move_right(HWND hwnd);
 void float_window_move_left(HWND hwnd);
 void float_window_move_up(HWND hwnd);
 void float_window_move_down(HWND hwnd);
-void taskbar_toggle(void);
-void mimimize_focused_window(void);
-void move_focused_client_next(void);
-void move_focused_client_previous(void);
-void swap_selected_monitor_to_deck_layout(void);
-void swap_selected_monitor_to_monacle_layout(void);
-void swap_selected_monitor_to_tile_layout(void);
-void toggle_create_window_in_current_workspace(void);
-void toggle_ignore_workspace_filters(void);
-void client_stop_managing(void);
+void taskbar_toggle(WindowManagerState *self);
+void mimimize_focused_window(WindowManagerState *self);
+void move_focused_client_next(WindowManagerState *self);
+void move_focused_client_previous(WindowManagerState *self);
+void swap_selected_monitor_to_deck_layout(WindowManagerState *self);
+void swap_selected_monitor_to_monacle_layout(WindowManagerState *self);
+void swap_selected_monitor_to_tile_layout(WindowManagerState *self);
+void toggle_create_window_in_current_workspace(WindowManagerState *self);
+void toggle_ignore_workspace_filters(WindowManagerState *self);
+void client_stop_managing(WindowManagerState *self);
 void open_windows_scratch_start(void);
 void open_program_scratch_start(void);
 void open_program_scratch_start_not_elevated(void);
@@ -442,7 +444,7 @@ void open_program_scratch_callback_not_elevated(char *stdOut, void *state);
 void open_program_scratch_callback(char *stdOut, void *state);
 void open_process_list_scratch_callback(char *stdOut);
 void open_process_list(void);
-void quit(void);
+void quit(WindowManagerState *self);
 
 void menu_defintion_register(MenuDefinition *definition);
 void menu_on_escape(void *state);
