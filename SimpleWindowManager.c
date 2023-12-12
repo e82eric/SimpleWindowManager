@@ -188,7 +188,7 @@ Layout monacleLayout = {
     .select_next_window = monacleLayout_select_next_client,
     .select_previous_window = monacleLayout_select_previous_client,
     .swap_clients = noop_swap_clients,
-    .move_client_to_main = monacleLayout_move_client_next,
+    .move_client_to_main = deckLayout_client_to_main,
     .move_client_next = monacleLayout_move_client_next,
     .move_client_previous = monacleLayout_move_client_previous,
     .apply_to_workspace = monacleLayout_calculate_and_apply_client_sizes,
@@ -3477,6 +3477,7 @@ void monacleLayout_select_next_client(Workspace *workspace)
     }
 
     workspace->selected = workspace->clients;
+    workspace_arrange_windows(workspace, &g_windowManagerState);
 }
 
 void monacleLayout_move_client_next(Client *client)
