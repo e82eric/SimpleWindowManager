@@ -459,26 +459,26 @@ void move_focused_client_previous(WindowManagerState *self)
     }
 }
 
-void move_focused_window_to_workspace(Workspace *workspace)
+void move_focused_window_to_workspace(WindowManagerState *self, Workspace *workspace)
 {
     HWND foregroundHwnd = GetForegroundWindow();
-    windowManager_move_window_to_workspace_and_arrange(&g_windowManagerState, foregroundHwnd, workspace);
-    workspace_focus_selected_window(&g_windowManagerState, g_windowManagerState.selectedMonitor->workspace);
+    windowManager_move_window_to_workspace_and_arrange(self, foregroundHwnd, workspace);
+    workspace_focus_selected_window(self, self->selectedMonitor->workspace);
 }
 
 void move_focused_window_to_selected_monitor_workspace(WindowManagerState *self)
 {
     UNREFERENCED_PARAMETER(self);
-    Workspace *workspace = g_windowManagerState.selectedMonitor->workspace;
-    move_focused_window_to_workspace(workspace);
+    Workspace *workspace = self->selectedMonitor->workspace;
+    move_focused_window_to_workspace(self, workspace);
 }
 
-void move_workspace_to_secondary_monitor_without_focus(Workspace *workspace)
+void move_workspace_to_secondary_monitor_without_focus(WindowManagerState *self, Workspace *workspace)
 {
-    windowManager_move_workspace_to_monitor(&g_windowManagerState, g_windowManagerState.secondaryMonitor, workspace);
-    if(g_windowManagerState.primaryMonitor->workspace)
+    windowManager_move_workspace_to_monitor(self, self->secondaryMonitor, workspace);
+    if(self->primaryMonitor->workspace)
     {
-        workspace_focus_selected_window(&g_windowManagerState, g_windowManagerState.primaryMonitor->workspace);
+        workspace_focus_selected_window(self, self->primaryMonitor->workspace);
     }
 }
 
@@ -580,10 +580,10 @@ void toggle_non_filtered_windows_assigned_to_current_workspace(WindowManagerStat
     }
 }
 
-void swap_selected_monitor_to(Workspace *workspace)
+void swap_selected_monitor_to(WindowManagerState *self, Workspace *workspace)
 {
-    windowManager_move_workspace_to_monitor(&g_windowManagerState, g_windowManagerState.selectedMonitor, workspace);
-    workspace_focus_selected_window(&g_windowManagerState, workspace);
+    windowManager_move_workspace_to_monitor(self, self->selectedMonitor, workspace);
+    workspace_focus_selected_window(self, workspace);
 }
 
 void goto_last_workspace(WindowManagerState *self)
@@ -603,44 +603,44 @@ void close_focused_window(WindowManagerState *self)
     SendMessage(foregroundHwnd, WM_CLOSE, (WPARAM)NULL, (LPARAM)NULL);
 }
 
-void float_window_move_up(HWND hwnd)
+void float_window_move_up(WindowManagerState *self, HWND hwnd)
 {
     RECT currentRect;
     GetWindowRect(hwnd, &currentRect);
     int targetLeft = currentRect.left;
-    int targetTop = currentRect.top - g_windowManagerState.floatWindowMovement;
+    int targetTop = currentRect.top - self->floatWindowMovement;
     int targetWidth = currentRect.right - currentRect.left;
     int targetHeight = currentRect.bottom - currentRect.top;
     MoveWindow(hwnd, targetLeft, targetTop, targetWidth, targetHeight, FALSE);
 }
 
-void float_window_move_down(HWND hwnd)
+void float_window_move_down(WindowManagerState *self, HWND hwnd)
 {
     RECT currentRect;
     GetWindowRect(hwnd, &currentRect);
     int targetLeft = currentRect.left;
-    int targetTop = currentRect.top + g_windowManagerState.floatWindowMovement;
+    int targetTop = currentRect.top + self->floatWindowMovement;
     int targetWidth = currentRect.right - currentRect.left;
     int targetHeight = currentRect.bottom - currentRect.top;
     MoveWindow(hwnd, targetLeft, targetTop, targetWidth, targetHeight, FALSE);
 }
 
-void float_window_move_right(HWND hwnd)
+void float_window_move_right(WindowManagerState *self, HWND hwnd)
 {
     RECT currentRect;
     GetWindowRect(hwnd, &currentRect);
-    int targetLeft = currentRect.left + g_windowManagerState.floatWindowMovement;
+    int targetLeft = currentRect.left + self->floatWindowMovement;
     int targetTop = currentRect.top;
     int targetWidth = currentRect.right - currentRect.left;
     int targetHeight = currentRect.bottom - currentRect.top;
     MoveWindow(hwnd, targetLeft, targetTop, targetWidth, targetHeight, FALSE);
 }
 
-void float_window_move_left(HWND hwnd)
+void float_window_move_left(WindowManagerState *self, HWND hwnd)
 {
     RECT currentRect;
     GetWindowRect(hwnd, &currentRect);
-    int targetLeft = currentRect.left - g_windowManagerState.floatWindowMovement;
+    int targetLeft = currentRect.left - self->floatWindowMovement;
     int targetTop = currentRect.top;
     int targetWidth = currentRect.right - currentRect.left;
     int targetHeight = currentRect.bottom - currentRect.top;
@@ -675,7 +675,7 @@ void move_focused_window_right(WindowManagerState *self)
     Client* existingClient = windowManager_find_client_in_workspaces_by_hwnd(self, foregroundHwnd);
     if(!existingClient)
     {
-        float_window_move_right(foregroundHwnd);
+        float_window_move_right(self, foregroundHwnd);
     }
     else
     {
@@ -693,7 +693,7 @@ void move_focused_window_left(WindowManagerState *self)
     Client* existingClient = windowManager_find_client_in_workspaces_by_hwnd(self, foregroundHwnd);
     if(!existingClient)
     {
-        float_window_move_left(foregroundHwnd);
+        float_window_move_left(self, foregroundHwnd);
     }
     else
     {
@@ -711,7 +711,7 @@ void move_focused_window_up(WindowManagerState *self)
     Client* existingClient = windowManager_find_client_in_workspaces_by_hwnd(self, foregroundHwnd);
     if(!existingClient)
     {
-        float_window_move_up(foregroundHwnd);
+        float_window_move_up(self, foregroundHwnd);
     }
 }
 
@@ -746,7 +746,7 @@ void move_focused_window_down(WindowManagerState *self)
     Client* existingClient = windowManager_find_client_in_workspaces_by_hwnd(self, foregroundHwnd);
     if(!existingClient)
     {
-        float_window_move_down(foregroundHwnd);
+        float_window_move_down(self, foregroundHwnd);
     }
 }
 
@@ -2679,7 +2679,7 @@ void workspace_increase_main_width_selected_monitor(WindowManagerState *self)
     Client* existingClient = windowManager_find_client_in_workspaces_by_hwnd(self, foregroundHwnd);
     if(!existingClient)
     {
-        float_window_move_right(foregroundHwnd);
+        float_window_move_right(self, foregroundHwnd);
     }
     else
     {
@@ -2707,7 +2707,7 @@ void workspace_decrease_main_width_selected_monitor(WindowManagerState *self)
     Client* existingClient = windowManager_find_client_in_workspaces_by_hwnd(self, foregroundHwnd);
     if(!existingClient)
     {
-        float_window_move_left(foregroundHwnd);
+        float_window_move_left(self, foregroundHwnd);
     }
     else
     {
@@ -5082,7 +5082,7 @@ void command_execute_workspace_arg(Command *self)
 {
     if(self->workspaceArg && self->workspaceAction)
     {
-        self->workspaceAction(self->workspaceArg);
+        self->workspaceAction(self->windowManager, self->workspaceArg);
     }
 }
 
@@ -5165,6 +5165,7 @@ void command_shell_arg_get_description(Command *self, int maxLen, CHAR *toFill)
 void command_register(Command *self)
 {
     g_windowManagerState.commands[g_windowManagerState.numberOfCommands] = self;
+    g_windowManagerState.commands[g_windowManagerState.numberOfCommands]->windowManager = &g_windowManagerState;
     g_windowManagerState.numberOfCommands++;
 }
 
@@ -5196,7 +5197,6 @@ Command *command_create_with_no_arg(CHAR *name, void (*action) (WindowManagerSta
         result->action = action;
         result->execute = command_execute_no_arg;
         result->getDescription = command_no_arg_get_description;
-        result->windowManager = &g_windowManagerState;
     }
 
     return result;
@@ -5217,7 +5217,7 @@ Command *command_create_with_monitor_arg(CHAR *name, Monitor *arg, void (*action
     return result;
 }
 
-Command *command_create_with_workspace_arg(CHAR *name, Workspace *arg, void (*action) (Workspace *arg))
+Command *command_create_with_workspace_arg(CHAR *name, Workspace *arg, void (*action) (WindowManagerState *windowManager, Workspace *arg))
 {
     Command *result = command_create(name);
     if(result)
@@ -5297,7 +5297,7 @@ void keybinding_create_with_monitor_arg(CHAR *name, int modifiers, unsigned int 
     keybinding_assign_to_command(keyBinding, command);
 }
 
-void keybinding_create_with_workspace_arg(CHAR *name, int modifiers, unsigned int key, void (*action) (Workspace*), Workspace *arg)
+void keybinding_create_with_workspace_arg(CHAR *name, int modifiers, unsigned int key, void (*action) (WindowManagerState*, Workspace*), Workspace *arg)
 {
     KeyBinding *keyBinding = keybindings_find_existing_or_create(name, modifiers, key);
     Command *command = command_create_with_workspace_arg(name, arg, action);
