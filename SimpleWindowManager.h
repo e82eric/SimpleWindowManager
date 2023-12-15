@@ -274,7 +274,7 @@ struct Command
     void (*execute)(Command *self);
     void (*getDescription)(Command *self, int maxLen, CHAR *toFill);
     void (*action)(WindowManagerState *windowManager);
-    void (*monitorAction)(Monitor *arg);
+    void (*monitorAction)(WindowManagerState *windowManager, Monitor *arg);
     Monitor *monitorArg;
     void (*workspaceAction)(WindowManagerState *windowManager, Workspace *arg);
     Workspace *workspaceArg;

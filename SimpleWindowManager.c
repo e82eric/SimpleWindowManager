@@ -715,11 +715,11 @@ void move_focused_window_up(WindowManagerState *self)
     }
 }
 
-void move_focused_window_to_monitor(Monitor *monitor)
+void move_focused_window_to_monitor(WindowManagerState *self, Monitor *monitor)
 {
     HWND foregroundHwnd = GetForegroundWindow();
 
-    Client *client = windowManager_find_client_in_workspaces_by_hwnd(&g_windowManagerState, foregroundHwnd);
+    Client *client = windowManager_find_client_in_workspaces_by_hwnd(self, foregroundHwnd);
 
     if(!client)
     {
@@ -5074,7 +5074,7 @@ void command_execute_monitor_arg(Command *self)
 {
     if(self->monitorArg && self->monitorAction)
     {
-        self->monitorAction(self->monitorArg);
+        self->monitorAction(self->windowManager, self->monitorArg);
     }
 }
 
@@ -5202,7 +5202,7 @@ Command *command_create_with_no_arg(CHAR *name, void (*action) (WindowManagerSta
     return result;
 }
 
-Command *command_create_with_monitor_arg(CHAR *name, Monitor *arg, void (*action) (Monitor *arg))
+Command *command_create_with_monitor_arg(CHAR *name, Monitor *arg, void (*action) (WindowManagerState *windowManager, Monitor *arg))
 {
     Command *result = command_create(name);
     if(result)
@@ -5290,7 +5290,7 @@ void keybinding_create_with_no_arg(CHAR *name, int modifiers, unsigned int key, 
     keybinding_assign_to_command(keyBinding, command);
 }
 
-void keybinding_create_with_monitor_arg(CHAR *name, int modifiers, unsigned int key, void (*action) (Monitor*), Monitor *arg)
+void keybinding_create_with_monitor_arg(CHAR *name, int modifiers, unsigned int key, void (*action) (WindowManagerState *windowManager, Monitor*), Monitor *arg)
 {
     KeyBinding *keyBinding = keybindings_find_existing_or_create(name, modifiers, key);
     Command *command = command_create_with_monitor_arg(name, arg, action);
