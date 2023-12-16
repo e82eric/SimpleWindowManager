@@ -278,7 +278,7 @@ struct Command
     Monitor *monitorArg;
     void (*workspaceAction)(WindowManagerState *windowManager, Workspace *arg);
     Workspace *workspaceArg;
-    void (*scratchWindowAction)(ScratchWindow *arg);
+    void (*scratchWindowAction)(WindowManagerState *windowManager, ScratchWindow *arg);
     ScratchWindow *scratchWindowArg;
     void (*menuAction)(MenuDefinition *arg);
     MenuDefinition *menuArg;

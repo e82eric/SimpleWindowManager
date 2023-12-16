@@ -110,7 +110,7 @@ static int workspace_get_number_of_clients(Workspace *workspace);
 static KeyBinding* keybindings_find_existing_or_create(CHAR* name, int modifiers, unsigned int key);
 static ScratchWindow* scratch_windows_find_from_client(WindowManagerState *self, Client *client);
 static ScratchWindow* scratch_windows_find_from_hwnd(WindowManagerState *self, HWND hwnd);
-static void scratch_window_toggle(ScratchWindow *self);
+static void scratch_window_toggle(WindowManagerState *windowManager, ScratchWindow *self);
 static void scratch_window_show(WindowManagerState *windowManagerState, ScratchWindow *self);
 static void scratch_window_hide(WindowManagerState *windowManager, ScratchWindow *self);
 static Client* workspace_find_client_by_hwnd(Workspace *workspace, HWND hwnd);
@@ -3852,34 +3852,34 @@ unsigned __int64 ConvertFileTimeToInt64(FILETIME *fileTime)
     return result.QuadPart;
 }
 
-void scratch_window_toggle(ScratchWindow *self)
+void scratch_window_toggle(WindowManagerState *windowManager, ScratchWindow *self)
 {
     if(self->client)
     {
         if(!self->client->data->isMinimized)
         {
-            scratch_window_hide(&g_windowManagerState, self);
+            scratch_window_hide(windowManager, self);
         }
         else
         {
-            if(g_windowManagerState.selectedMonitor->scratchWindow == self)
+            if(windowManager->selectedMonitor->scratchWindow == self)
             {
                 return;
             }
-            else if(g_windowManagerState.selectedMonitor->scratchWindow)
+            else if(windowManager->selectedMonitor->scratchWindow)
             {
-                scratch_window_hide(&g_windowManagerState, g_windowManagerState.selectedMonitor->scratchWindow);
+                scratch_window_hide(windowManager, windowManager->selectedMonitor->scratchWindow);
             }
-            scratch_window_show(&g_windowManagerState, self);
+            scratch_window_show(windowManager, self);
         }
     }
     else
     {
-        if(g_windowManagerState.selectedMonitor->scratchWindow)
+        if(windowManager->selectedMonitor->scratchWindow)
         {
-            if(g_windowManagerState.selectedMonitor->scratchWindow != self)
+            if(windowManager->selectedMonitor->scratchWindow != self)
             {
-                scratch_window_hide(&g_windowManagerState, g_windowManagerState.selectedMonitor->scratchWindow);
+                scratch_window_hide(windowManager, windowManager->selectedMonitor->scratchWindow);
             }
         }
 
@@ -3892,7 +3892,7 @@ void scratch_window_toggle(ScratchWindow *self)
             self->timeout = nowLong + 50000000;
             if(self->runFunc)
             {
-                self->runFunc(self, g_windowManagerState.selectedMonitor, g_windowManagerState.selectedMonitor->workspaceStyle->scratchWindowsScreenPadding);
+                self->runFunc(self, windowManager->selectedMonitor, windowManager->selectedMonitor->workspaceStyle->scratchWindowsScreenPadding);
                 return;
             }
             if(self->stdOutCallback)
@@ -3945,7 +3945,7 @@ void monitor_set_workspace(Workspace *workspace, Monitor *monitor) {
     monitor->workspace = workspace;
 }
 
-void monitor_calulate_coordinates(Monitor *monitor, int monitorNumber)
+void monitor_calulate_coordinates(WindowManagerState *windowManager, Monitor *monitor, int monitorNumber)
 {
     int screenWidth = GetSystemMetrics(SM_CXSCREEN);
     int screenHeight = GetSystemMetrics(SM_CYSCREEN);
@@ -3953,7 +3953,7 @@ void monitor_calulate_coordinates(Monitor *monitor, int monitorNumber)
     monitor->xOffset = monitorNumber * screenWidth - screenWidth;
     monitor->w = screenWidth;
     monitor->h = screenHeight;
-    if(monitorNumber > g_windowManagerState.numberOfDisplayMonitors)
+    if(monitorNumber > windowManager->numberOfDisplayMonitors)
     {
         monitor->isHidden = TRUE;
     }
@@ -5109,7 +5109,7 @@ void command_execute_scratchwindow_arg(Command *self)
 {
     if(self->scratchWindowArg && self->scratchWindowAction)
     {
-        self->scratchWindowAction(self->scratchWindowArg);
+        self->scratchWindowAction(self->windowManager, self->scratchWindowArg);
     }
 }
 
@@ -5232,7 +5232,7 @@ Command *command_create_with_workspace_arg(CHAR *name, Workspace *arg, void (*ac
     return result;
 }
 
-Command *command_create_with_scratchwindow_arg(CHAR *name, ScratchWindow *arg, void (*action) (ScratchWindow *arg))
+Command *command_create_with_scratchwindow_arg(CHAR *name, ScratchWindow *arg, void (*action) (WindowManagerState *self, ScratchWindow *arg))
 {
     Command *result = command_create(name);
     if(result)
@@ -6063,7 +6063,7 @@ int run (void)
         Monitor *monitor = calloc(1, sizeof(Monitor));
         monitor->id = i + 1;
         g_windowManagerState.monitors[i] = monitor;
-        monitor_calulate_coordinates(monitor, i + 1);
+        monitor_calulate_coordinates(&g_windowManagerState, monitor, i + 1);
         if(i > 0 && !g_windowManagerState.monitors[i]->isHidden)
         {
             g_windowManagerState.monitors[i - 1]->next = g_windowManagerState.monitors[i];
@@ -6117,7 +6117,7 @@ int run (void)
     workspaceStyle->_dropTargetBrush = CreateSolidBrush(workspaceStyle->dropTargetColor);
 
     g_windowManagerState.hiddenWindowMonitor = calloc(1, sizeof(Monitor));
-    monitor_calulate_coordinates(g_windowManagerState.hiddenWindowMonitor, g_windowManagerState.numberOfMonitors);
+    monitor_calulate_coordinates(&g_windowManagerState, g_windowManagerState.hiddenWindowMonitor, g_windowManagerState.numberOfMonitors);
 
     int barTop = 0;
     int barBottom = barHeight;
