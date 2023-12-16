@@ -107,7 +107,7 @@ static void workspace_remove_unminimized_client(Workspace *workspace, Client *cl
 static void workspace_remove_client_and_arrange(WindowManagerState *windowManagerState, Workspace *workspace, Client *client);
 static int workspace_update_client_counts(Workspace *workspace);
 static int workspace_get_number_of_clients(Workspace *workspace);
-static KeyBinding* keybindings_find_existing_or_create(CHAR* name, int modifiers, unsigned int key);
+static KeyBinding* keybindings_find_existing_or_create(WindowManagerState *windowManager, CHAR* name, int modifiers, unsigned int key);
 static ScratchWindow* scratch_windows_find_from_client(WindowManagerState *self, Client *client);
 static ScratchWindow* scratch_windows_find_from_hwnd(WindowManagerState *self, HWND hwnd);
 static void scratch_window_toggle(WindowManagerState *windowManager, ScratchWindow *self);
@@ -5143,35 +5143,35 @@ void command_shell_arg_get_description(Command *self, int maxLen, CHAR *toFill)
             self->shellArg);
 }
 
-void command_register(Command *self)
+void command_register(WindowManagerState *windowManager, Command *self)
 {
-    g_windowManagerState.commands[g_windowManagerState.numberOfCommands] = self;
-    g_windowManagerState.commands[g_windowManagerState.numberOfCommands]->windowManager = &g_windowManagerState;
-    g_windowManagerState.numberOfCommands++;
+    windowManager->commands[windowManager->numberOfCommands] = self;
+    windowManager->commands[windowManager->numberOfCommands]->windowManager = windowManager;
+    windowManager->numberOfCommands++;
 }
 
-Command *command_create(CHAR *name)
+Command *command_create(WindowManagerState *windowManager, CHAR *name)
 {
-    if(g_windowManagerState.numberOfCommands < MAX_COMMANDS)
+    if(windowManager->numberOfCommands < MAX_COMMANDS)
     {
         size_t nameLen = strlen(name);
-        if(nameLen > g_windowManagerState.longestCommandName)
+        if(nameLen > windowManager->longestCommandName)
         {
-            g_windowManagerState.longestCommandName = nameLen;
+            windowManager->longestCommandName = nameLen;
         }
         Command *result = calloc(1, sizeof(Command));
         assert(result);
         result->name = name;
-        command_register(result);
+        command_register(windowManager, result);
         return result;
     }
 
     return NULL;
 }
 
-Command *command_create_with_no_arg(CHAR *name, void (*action) (WindowManagerState *windowManager))
+Command *command_create_with_no_arg(WindowManagerState *windowManager, CHAR *name, void (*action) (WindowManagerState *windowManager))
 {
-    Command *result = command_create(name);
+    Command *result = command_create(windowManager, name);
     if(result)
     {
         result->type = "Function";
@@ -5183,9 +5183,9 @@ Command *command_create_with_no_arg(CHAR *name, void (*action) (WindowManagerSta
     return result;
 }
 
-Command *command_create_with_monitor_arg(CHAR *name, Monitor *arg, void (*action) (WindowManagerState *windowManager, Monitor *arg))
+Command *command_create_with_monitor_arg(WindowManagerState *windowManager, CHAR *name, Monitor *arg, void (*action) (WindowManagerState *windowManager, Monitor *arg))
 {
-    Command *result = command_create(name);
+    Command *result = command_create(windowManager, name);
     if(result)
     {
         result->type = "MonitorFunction";
@@ -5198,9 +5198,9 @@ Command *command_create_with_monitor_arg(CHAR *name, Monitor *arg, void (*action
     return result;
 }
 
-Command *command_create_with_workspace_arg(CHAR *name, Workspace *arg, void (*action) (WindowManagerState *windowManager, Workspace *arg))
+Command *command_create_with_workspace_arg(WindowManagerState *windowManager, CHAR *name, Workspace *arg, void (*action) (WindowManagerState *windowManager, Workspace *arg))
 {
-    Command *result = command_create(name);
+    Command *result = command_create(windowManager, name);
     if(result)
     {
         result->type = "WorkspaceFunction";
@@ -5213,9 +5213,9 @@ Command *command_create_with_workspace_arg(CHAR *name, Workspace *arg, void (*ac
     return result;
 }
 
-Command *command_create_with_scratchwindow_arg(CHAR *name, ScratchWindow *arg, void (*action) (WindowManagerState *self, ScratchWindow *arg))
+Command *command_create_with_scratchwindow_arg(WindowManagerState *windowManager, CHAR *name, ScratchWindow *arg, void (*action) (WindowManagerState *self, ScratchWindow *arg))
 {
-    Command *result = command_create(name);
+    Command *result = command_create(windowManager, name);
     if(result)
     {
         result->type = "ScratchWindow";
@@ -5228,9 +5228,9 @@ Command *command_create_with_scratchwindow_arg(CHAR *name, ScratchWindow *arg, v
     return result;
 }
 
-Command *command_create_with_menu_arg(CHAR *name, MenuDefinition *arg, void (*action) (MenuDefinition *arg))
+Command *command_create_with_menu_arg(WindowManagerState *windowManager, CHAR *name, MenuDefinition *arg, void (*action) (MenuDefinition *arg))
 {
-    Command *result = command_create(name);
+    Command *result = command_create(windowManager, name);
     if(result)
     {
         result->type = "Menu";
@@ -5243,9 +5243,9 @@ Command *command_create_with_menu_arg(CHAR *name, MenuDefinition *arg, void (*ac
     return result;
 }
 
-Command *command_create_with_shell_arg(CHAR *name, TCHAR *arg, void (*action) (TCHAR *arg))
+Command *command_create_with_shell_arg(WindowManagerState *windowManager, CHAR *name, TCHAR *arg, void (*action) (TCHAR *arg))
 {
-    Command *result = command_create(name);
+    Command *result = command_create(windowManager, name);
     if(result)
     {
         result->type = "Shell";
@@ -5266,55 +5266,55 @@ void keybinding_assign_to_command(KeyBinding *keyBinding, Command *command)
 
 void keybinding_create_with_no_arg(CHAR *name, int modifiers, unsigned int key, void (*action) (WindowManagerState*))
 {
-    KeyBinding *keyBinding = keybindings_find_existing_or_create(name, modifiers, key);
-    Command *command = command_create_with_no_arg(name, action);
+    KeyBinding *keyBinding = keybindings_find_existing_or_create(&g_windowManagerState, name, modifiers, key);
+    Command *command = command_create_with_no_arg(&g_windowManagerState, name, action);
     keybinding_assign_to_command(keyBinding, command);
 }
 
 void keybinding_create_with_monitor_arg(CHAR *name, int modifiers, unsigned int key, void (*action) (WindowManagerState *windowManager, Monitor*), Monitor *arg)
 {
-    KeyBinding *keyBinding = keybindings_find_existing_or_create(name, modifiers, key);
-    Command *command = command_create_with_monitor_arg(name, arg, action);
+    KeyBinding *keyBinding = keybindings_find_existing_or_create(&g_windowManagerState, name, modifiers, key);
+    Command *command = command_create_with_monitor_arg(&g_windowManagerState, name, arg, action);
     keybinding_assign_to_command(keyBinding, command);
 }
 
 void keybinding_create_with_workspace_arg(CHAR *name, int modifiers, unsigned int key, void (*action) (WindowManagerState*, Workspace*), Workspace *arg)
 {
-    KeyBinding *keyBinding = keybindings_find_existing_or_create(name, modifiers, key);
-    Command *command = command_create_with_workspace_arg(name, arg, action);
+    KeyBinding *keyBinding = keybindings_find_existing_or_create(&g_windowManagerState, name, modifiers, key);
+    Command *command = command_create_with_workspace_arg(&g_windowManagerState, name, arg, action);
     keybinding_assign_to_command(keyBinding, command);
 }
 
 void keybinding_create_with_scratchwindow_arg(CHAR *name, int modifiers, unsigned int key, ScratchWindow *arg)
 {
-    KeyBinding *keyBinding = keybindings_find_existing_or_create(name, modifiers, key);
-    Command *command = command_create_with_scratchwindow_arg(name, arg, scratch_window_toggle);
+    KeyBinding *keyBinding = keybindings_find_existing_or_create(&g_windowManagerState, name, modifiers, key);
+    Command *command = command_create_with_scratchwindow_arg(&g_windowManagerState, name, arg, scratch_window_toggle);
     keybinding_assign_to_command(keyBinding, command);
 }
 
 void keybinding_create_with_shell_arg(CHAR *name, int modifiers, unsigned int key, void (*action) (TCHAR*), TCHAR *arg)
 {
-    KeyBinding *keyBinding = keybindings_find_existing_or_create(name, modifiers, key);
-    Command *command = command_create_with_shell_arg(name, arg, action);
+    KeyBinding *keyBinding = keybindings_find_existing_or_create(&g_windowManagerState, name, modifiers, key);
+    Command *command = command_create_with_shell_arg(&g_windowManagerState, name, arg, action);
     keybinding_assign_to_command(keyBinding, command);
 }
 
 void keybinding_create_with_menu_arg(CHAR *name, int modifiers, unsigned int key, void (*action) (MenuDefinition*), MenuDefinition *arg)
 {
-    KeyBinding *keyBinding = keybindings_find_existing_or_create(name, modifiers, key);
-    Command *command = command_create_with_menu_arg(name, arg, action);
+    KeyBinding *keyBinding = keybindings_find_existing_or_create(&g_windowManagerState, name, modifiers, key);
+    Command *command = command_create_with_menu_arg(&g_windowManagerState, name, arg, action);
     keybinding_assign_to_command(keyBinding, command);
 }
 
-void keybinding_add_to_list(KeyBinding *binding)
+void keybinding_add_to_list(WindowManagerState *windowManager, KeyBinding *binding)
 {
-    if(!g_windowManagerState.keyBindings)
+    if(!windowManager->keyBindings)
     {
-        g_windowManagerState.keyBindings = binding;
+        windowManager->keyBindings = binding;
     }
     else
     {
-        KeyBinding *current = g_windowManagerState.keyBindings;
+        KeyBinding *current = windowManager->keyBindings;
         while(current->next)
         {
             current = current->next;
@@ -5323,9 +5323,9 @@ void keybinding_add_to_list(KeyBinding *binding)
     }
 }
 
-KeyBinding* keybindings_find_existing_or_create(CHAR* name, int modifiers, unsigned int key)
+KeyBinding* keybindings_find_existing_or_create(WindowManagerState *windowManager, CHAR* name, int modifiers, unsigned int key)
 {
-    KeyBinding *current = g_windowManagerState.keyBindings;
+    KeyBinding *current = windowManager->keyBindings;
     while(current)
     {
         if(current->modifiers == modifiers && current->key == key)
@@ -5342,7 +5342,7 @@ KeyBinding* keybindings_find_existing_or_create(CHAR* name, int modifiers, unsig
     result->modifiers = modifiers;
     result->key = key;
 
-    keybinding_add_to_list(result);
+    keybinding_add_to_list(windowManager, result);
 
     return result;
 }
