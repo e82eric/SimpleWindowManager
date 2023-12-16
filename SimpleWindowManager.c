@@ -4989,7 +4989,7 @@ WNDCLASSEX* drop_target_window_register_class(void)
     return wc;
 }
 
-void dcomp_border_run(HINSTANCE module, TextStyle *textStyle)
+void dcomp_border_run(WindowManagerState *windowManager, HINSTANCE module, TextStyle *textStyle)
 {
     WNDCLASS wc = {0};
     wc.hCursor = LoadCursor(NULL, IDC_ARROW);
@@ -4999,7 +4999,7 @@ void dcomp_border_run(HINSTANCE module, TextStyle *textStyle)
     wc.lpfnWndProc = dcomp_border_window_message_loop;
     RegisterClass(&wc);
 
-    g_windowManagerState.borderWindowHwnd = CreateWindowEx(
+    windowManager->borderWindowHwnd = CreateWindowEx(
             WS_EX_NOREDIRECTIONBITMAP | WS_EX_NOACTIVATE,
             wc.lpszClassName,
             L"nwm_dcomp_border",
@@ -5012,26 +5012,7 @@ void dcomp_border_run(HINSTANCE module, TextStyle *textStyle)
             NULL,
             module,
             textStyle);
-    SetWindowLong(g_windowManagerState.borderWindowHwnd, GWL_STYLE, 0);
-}
-
-void border_window_run(WNDCLASSEX *windowClass)
-{
-    HWND hwnd = CreateWindowEx(
-        WS_EX_PALETTEWINDOW | WS_EX_NOACTIVATE | WS_EX_LAYERED,
-        windowClass->lpszClassName,
-        L"SimpleWM Border",
-        WS_POPUP,
-        0,
-        0,
-        0,
-        0,
-        NULL,
-        NULL,
-        GetModuleHandle(0),
-        NULL);
-
-    g_windowManagerState.borderWindowHwnd = hwnd;
+    SetWindowLong(windowManager->borderWindowHwnd, GWL_STYLE, 0);
 }
 
 void drop_target_window_run(WNDCLASSEX *windowClass)
@@ -6306,7 +6287,7 @@ int run (void)
         EndDeferWindowPos(hdwp);
     }
 
-    dcomp_border_run(moduleHandle, configuration->textStyle);
+    dcomp_border_run(&g_windowManagerState, moduleHandle, configuration->textStyle);
     drop_target_window_run(dropTargetWindowClass);
 
     g_mouse_hook = SetWindowsHookEx(WH_KEYBOARD_LL, &handle_key_press, moduleHandle, 0);
