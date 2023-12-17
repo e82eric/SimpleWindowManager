@@ -256,7 +256,7 @@ struct Bar
     RECT *timesRect;
     BarSegment **segments;
     int numberOfSegments;
-    TextStyle *textStyle;
+    WindowManagerState *windowManager;
 };
 
 struct BarSegment
@@ -322,6 +322,7 @@ struct WindowManagerState
     int floatWindowMovement;
     enum WindowRoutingMode currentWindowRoutingMode;
     BOOL (*useOldMoveLogicFunc) (Client *client);
+    TextStyle *textStyle;
 };
 
 typedef struct DragDropState

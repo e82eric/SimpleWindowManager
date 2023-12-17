@@ -4050,10 +4050,10 @@ void bar_trigger_selected_window_paint(Bar *self)
             FALSE);
 }
 
-void bar_render_selected_window_description(WindowManagerState *windowManagerState, Bar *bar, HDC hdc)
+void bar_render_selected_window_description(Bar *bar, HDC hdc)
 {
     TCHAR* windowRoutingMode = L"UNKNOWN";
-    switch(windowManagerState->currentWindowRoutingMode)
+    switch(bar->windowManager->currentWindowRoutingMode)
     {
         case FilteredAndRoutedToWorkspace:
             windowRoutingMode = L"1";
@@ -4069,14 +4069,14 @@ void bar_render_selected_window_description(WindowManagerState *windowManagerSta
             break;
     }
 
-    HWND foregroundHwnd = windowManagerState->eventForegroundHwnd;
-    Client* focusedClient = windowManager_find_client_in_workspaces_by_hwnd(windowManagerState, foregroundHwnd);
+    HWND foregroundHwnd = bar->windowManager->eventForegroundHwnd;
+    Client* focusedClient = windowManager_find_client_in_workspaces_by_hwnd(bar->windowManager, foregroundHwnd);
     Client* clientToRender;
 
     TCHAR *isManagedIndicator = L"\0";
     if(focusedClient)
     {
-        if(windowManagerState->isForegroundWindowSameAsSelectMonitorSelected)
+        if(bar->windowManager->isForegroundWindowSameAsSelectMonitorSelected)
         {
             isManagedIndicator = L"";
         }
@@ -4130,8 +4130,8 @@ void bar_render_selected_window_description(WindowManagerState *windowManagerSta
 
     RECT clientRect = {0};
     GetClientRect(bar->hwnd, &clientRect);
-    COLORREF oldTextColor = SetTextColor(hdc, bar->textStyle->textColor);
-    HFONT oldFont = (HFONT)SelectObject(hdc, bar->textStyle->font);
+    COLORREF oldTextColor = SetTextColor(hdc, bar->windowManager->textStyle->textColor);
+    HFONT oldFont = (HFONT)SelectObject(hdc, bar->windowManager->textStyle->font);
     DrawText(
             hdc,
             workspaceInfoBuf,
@@ -4153,11 +4153,11 @@ HBRUSH bar_get_background_brush(Bar *self)
     HBRUSH brush;
     if(self->monitor->selected)
     {
-        brush = self->textStyle->_focusBackgroundBrush;
+        brush = self->windowManager->textStyle->_focusBackgroundBrush;
     }
     else
     {
-        brush = self->textStyle->_backgroundBrush;
+        brush = self->windowManager->textStyle->_backgroundBrush;
     }
 
     return brush;
@@ -4223,10 +4223,10 @@ void bar_segment_initalize_rectangles(BarSegment *self, HDC hdc, int right, Bar 
             L"%*ls",
             (int)self->variable->textLength,
             variableValueBuff);
-    HFONT hFont = bar->textStyle->font;
+    HFONT hFont = bar->windowManager->textStyle->font;
     if(self->variable->isIcon)
     {
-        hFont = bar->textStyle->iconFont;
+        hFont = bar->windowManager->textStyle->iconFont;
     }
     HFONT oldFont = (HFONT)SelectObject(hdc, hFont);
     DrawText(hdc, variableTextBuff, variableTextLen, &variableTextRect, DT_CALCRECT);
@@ -4244,10 +4244,10 @@ void bar_segment_initalize_rectangles(BarSegment *self, HDC hdc, int right, Bar 
     int headerLeft = variableLeft;
     if(self->header)
     {
-        HFONT headerFont = bar->textStyle->font;
+        HFONT headerFont = bar->windowManager->textStyle->font;
         if(self->header->isIcon)
         {
-            headerFont = bar->textStyle->iconFont;
+            headerFont = bar->windowManager->textStyle->iconFont;
         }
         RECT headerTextRect = { 0, 0, 0, 0 };
         HFONT headerOldFont = (HFONT)SelectObject(hdc, headerFont);
@@ -4266,10 +4266,10 @@ void bar_segment_initalize_rectangles(BarSegment *self, HDC hdc, int right, Bar 
     if(self->separator)
     {
         RECT separatorRect = { 0, 0, 0, 0 };
-        HFONT separatorFont = bar->textStyle->font;
+        HFONT separatorFont = bar->windowManager->textStyle->font;
         if(self->separator->isIcon)
         {
-            separatorFont = bar->textStyle->iconFont;
+            separatorFont = bar->windowManager->textStyle->iconFont;
         }
         HFONT separatorOldFont = (HFONT)SelectObject(hdc, separatorFont);
         DrawText(hdc, self->separator->text, (int)self->separator->textLength, &separatorRect, DT_CALCRECT);
@@ -4313,7 +4313,7 @@ void bar_render_headers(Bar *bar, HDC hdc)
 {
     for(int i = 0; i < bar->numberOfSegments; i++)
     {
-        bar_segment_render_header(bar->segments[i], hdc, bar->textStyle);
+        bar_segment_render_header(bar->segments[i], hdc, bar->windowManager->textStyle);
     }
 }
 
@@ -4321,7 +4321,7 @@ void bar_render_times(Bar *bar, HDC hdc)
 {
     for(int i = 0; i < bar->numberOfSegments; i++)
     {
-        bar_segment_render_variable_text(bar->segments[i], hdc, bar->textStyle);
+        bar_segment_render_variable_text(bar->segments[i], hdc, bar->windowManager->textStyle);
     }
 }
 
@@ -4385,7 +4385,7 @@ LRESULT CALLBACK bar_message_loop(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPa
                 FillRect(hNewDC, msgBar->selectedWindowDescRect, brush);
                 if(ps.rcPaint.left == msgBar->selectedWindowDescRect->left && ps.rcPaint.right == msgBar->selectedWindowDescRect->right)
                 {
-                    bar_render_selected_window_description(&g_windowManagerState, msgBar, hNewDC);
+                    bar_render_selected_window_description(msgBar, hNewDC);
                 }
                 else if(ps.rcPaint.left == msgBar->timesRect->left)
                 {
@@ -4394,7 +4394,7 @@ LRESULT CALLBACK bar_message_loop(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPa
                 }
                 else
                 {
-                    bar_render_selected_window_description(&g_windowManagerState, msgBar, hNewDC);
+                    bar_render_selected_window_description(msgBar, hNewDC);
                     bar_render_headers(msgBar, hNewDC);
                     bar_render_times(msgBar, hNewDC);
                 }
@@ -4726,7 +4726,7 @@ LRESULT CALLBACK button_message_loop(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM
 
             GetClientRect(hWnd, &rc);
 
-            TextStyle *textStyle = button->bar->textStyle;
+            TextStyle *textStyle = button->bar->windowManager->textStyle;
             COLORREF textColor = textStyle->textColor;
             COLORREF backgroundColor = textStyle->backgroundColor;
             HBRUSH buttonBackgroundBrush = textStyle->_backgroundBrush;
@@ -4775,7 +4775,7 @@ LRESULT CALLBACK button_message_loop(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM
         }
         case WM_LBUTTONDOWN:
         {
-            button_press_handle(&g_windowManagerState, button);
+            button_press_handle(button->bar->windowManager, button);
             break;
         }
         default:
@@ -4892,31 +4892,35 @@ static LRESULT dcomp_border_window_message_loop(HWND window, UINT message, WPARA
     switch (message)
     {
         case WM_CREATE:
-            CREATESTRUCT *pCreate = (CREATESTRUCT *)lparam;
-            TextStyle *textStyle = (TextStyle*)pCreate->lpCreateParams;
-            dcomp_border_window_init(window, textStyle->focusColor2, textStyle->lostFocusColor);
-            break;
+            {
+                CREATESTRUCT *pCreate = (CREATESTRUCT *)lparam;
+                WindowManagerState *windowManager = (WindowManagerState*)pCreate->lpCreateParams;
+                dcomp_border_window_init(window, windowManager->textStyle->focusColor2, windowManager->textStyle->lostFocusColor);
+                SetWindowLongPtr(window, GWLP_USERDATA, (LONG_PTR)windowManager);
+                break;
+            }
         case WM_WINDOWPOSCHANGING:
             {
+                WindowManagerState *windowManager = (WindowManagerState*)GetWindowLongPtr(window, GWLP_USERDATA);
                 WINDOWPOS* windowPos = (WINDOWPOS*)lparam;
-                if(g_windowManagerState.menuVisible)
+                if(windowManager->menuVisible)
                 {
-                    windowPos->hwndInsertAfter = g_windowManagerState.menuView->hwnd;
+                    windowPos->hwndInsertAfter = windowManager->menuView->hwnd;
                 }
-                else if(!g_windowManagerState.selectedMonitor->scratchWindow)
+                else if(!windowManager->selectedMonitor->scratchWindow)
                 {
-                    if(g_windowManagerState.selectedMonitor->workspace->selected)
+                    if(windowManager->selectedMonitor->workspace->selected)
                     {
                         windowPos->hwndInsertAfter = HWND_BOTTOM;
                     }
                 }
                 else
                 {
-                    if(g_windowManagerState.selectedMonitor->scratchWindow->client)
+                    if(windowManager->selectedMonitor->scratchWindow->client)
                     {
-                        if(g_windowManagerState.selectedMonitor->workspace->selected)
+                        if(windowManager->selectedMonitor->workspace->selected)
                         {
-                            windowPos->hwndInsertAfter = g_windowManagerState.selectedMonitor->scratchWindow->client->data->hwnd;
+                            windowPos->hwndInsertAfter = windowManager->selectedMonitor->scratchWindow->client->data->hwnd;
                         }
                     }
                 }
@@ -4926,17 +4930,19 @@ static LRESULT dcomp_border_window_message_loop(HWND window, UINT message, WPARA
             {
                 UINT width = LOWORD(lparam);
                 UINT height = HIWORD(lparam);
-                dcomp_border_window_draw(width, height, !g_windowManagerState.isForegroundWindowSameAsSelectMonitorSelected);
+                WindowManagerState *windowManager = (WindowManagerState*)GetWindowLongPtr(window, GWLP_USERDATA);
+                dcomp_border_window_draw(width, height, !windowManager->isForegroundWindowSameAsSelectMonitorSelected);
             }
             break;
         case WM_PAINT:
             {
+                WindowManagerState *windowManager = (WindowManagerState*)GetWindowLongPtr(window, GWLP_USERDATA);
                 RECT rcWindow;
                 GetClientRect(window, &rcWindow);
 
                 UINT width = rcWindow.right - rcWindow.left;
                 UINT height = rcWindow.bottom - rcWindow.top;
-                dcomp_border_window_draw(width, height, !g_windowManagerState.isForegroundWindowSameAsSelectMonitorSelected);
+                dcomp_border_window_draw(width, height, !windowManager->isForegroundWindowSameAsSelectMonitorSelected);
             }
             break;
         case WM_ERASEBKGND:
@@ -4955,10 +4961,17 @@ static LRESULT drop_target_window_message_loop(HWND h, UINT msg, WPARAM wp, LPAR
 {
     switch(msg)
     {
+        case WM_CREATE:
+            {
+                CREATESTRUCT *pCreate = (CREATESTRUCT *)lp;
+                WindowManagerState *windowManager = (WindowManagerState*)pCreate->lpCreateParams;
+                SetWindowLongPtr(h, GWLP_USERDATA, (LONG_PTR)windowManager);
+            }
         case WM_PAINT:
-        {
-            drop_target_window_paint(h, &g_windowManagerState);
-        } break;
+            {
+                WindowManagerState *windowManager = (WindowManagerState*)GetWindowLongPtr(h, GWLP_USERDATA);
+                drop_target_window_paint(h, windowManager);
+            } break;
 
         default:
             return DefWindowProc(h, msg, wp, lp);
@@ -4989,7 +5002,7 @@ WNDCLASSEX* drop_target_window_register_class(void)
     return wc;
 }
 
-void dcomp_border_run(WindowManagerState *windowManager, HINSTANCE module, TextStyle *textStyle)
+void dcomp_border_run(WindowManagerState *windowManager, HINSTANCE module)
 {
     WNDCLASS wc = {0};
     wc.hCursor = LoadCursor(NULL, IDC_ARROW);
@@ -5011,11 +5024,11 @@ void dcomp_border_run(WindowManagerState *windowManager, HINSTANCE module, TextS
             NULL,
             NULL,
             module,
-            textStyle);
+            windowManager);
     SetWindowLong(windowManager->borderWindowHwnd, GWL_STYLE, 0);
 }
 
-void drop_target_window_run(WNDCLASSEX *windowClass)
+void drop_target_window_run(WNDCLASSEX *windowClass, WindowManagerState *windowManager)
 {
     HWND hwnd = CreateWindowEx(
         WS_EX_PALETTEWINDOW | WS_EX_NOACTIVATE | WS_EX_LAYERED,
@@ -5029,7 +5042,7 @@ void drop_target_window_run(WNDCLASSEX *windowClass)
         NULL,
         NULL,
         GetModuleHandle(0),
-        NULL);
+        windowManager);
     SetLayeredWindowAttributes(hwnd, RGB(255, 255, 255), (255 * 50) / 100, LWA_ALPHA);
     g_dragDropState.dropTargetHwnd = hwnd;
 }
@@ -5995,17 +6008,17 @@ void configuration_add_bar_segment(
 
 BOOL CALLBACK enum_display_monitors_callback(HMONITOR hMonitor, HDC hdcMonitor, LPRECT lprcMonitor, LPARAM dwData)
 {
+    WindowManagerState *windowManager = (WindowManagerState*)dwData;
     UNREFERENCED_PARAMETER(hMonitor);
     UNREFERENCED_PARAMETER(hdcMonitor);
     UNREFERENCED_PARAMETER(lprcMonitor);
-    UNREFERENCED_PARAMETER(dwData);
-    g_windowManagerState.numberOfDisplayMonitors++;
+    windowManager->numberOfDisplayMonitors++;
     return TRUE;
 }
 
-void discover_monitors(void)
+void discover_monitors(WindowManagerState *windowManager)
 {
-    EnumDisplayMonitors(NULL, NULL, enum_display_monitors_callback, (LPARAM)NULL);
+    EnumDisplayMonitors(NULL, NULL, enum_display_monitors_callback, (LPARAM)windowManager);
 }
 
 int run (void)
@@ -6029,7 +6042,7 @@ int run (void)
          return 0;
     }
 
-    discover_monitors();
+    discover_monitors(&g_windowManagerState);
 
     g_windowManagerState.workspaces = calloc(MAX_WORKSPACES, sizeof(Workspace*));
     for(int i = 0; i < MAX_WORKSPACES; i++)
@@ -6054,6 +6067,7 @@ int run (void)
     configuration = calloc(1, sizeof(Configuration));
     assert(configuration);
     configuration->textStyle = calloc(1, sizeof(TextStyle));
+    g_windowManagerState.textStyle = configuration->textStyle;
     assert(configuration->textStyle);
 
     WorkspaceStyle *workspaceStyle = calloc(1, sizeof(WorkspaceStyle));
@@ -6114,7 +6128,7 @@ int run (void)
         {
             Bar *bar = calloc(1, sizeof(Bar));
             assert(bar);
-            bar->textStyle = configuration->textStyle;
+            bar->windowManager = &g_windowManagerState;
             bar->numberOfButtons = g_windowManagerState.numberOfWorkspaces;
             bar->buttons = calloc(bar->numberOfButtons, sizeof(Button*));
             assert(bar->buttons);
@@ -6287,8 +6301,8 @@ int run (void)
         EndDeferWindowPos(hdwp);
     }
 
-    dcomp_border_run(&g_windowManagerState, moduleHandle, configuration->textStyle);
-    drop_target_window_run(dropTargetWindowClass);
+    dcomp_border_run(&g_windowManagerState, moduleHandle);
+    drop_target_window_run(dropTargetWindowClass, &g_windowManagerState);
 
     g_mouse_hook = SetWindowsHookEx(WH_KEYBOARD_LL, &handle_key_press, moduleHandle, 0);
     g_kb_hook = SetWindowsHookEx(WH_MOUSE_LL, &handle_mouse, moduleHandle, 0);
