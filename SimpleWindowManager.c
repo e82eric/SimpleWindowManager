@@ -4377,7 +4377,10 @@ LRESULT CALLBACK bar_message_loop(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPa
             {
                 HDC hNewDC;
                 HPAINTBUFFER hBufferedPaint = BeginBufferedPaint(hdc, &ps.rcPaint, BPBF_COMPATIBLEBITMAP, NULL, &hNewDC);
-                assert(hBufferedPaint);
+                if(!hBufferedPaint)
+                {
+                    return -1;
+                }
                 HBRUSH brush = bar_get_background_brush(msgBar);
 
                 SetBkMode(hNewDC, TRANSPARENT);
