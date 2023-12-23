@@ -1769,6 +1769,7 @@ LRESULT CALLBACK Menu_MessageProcessor(
                 GetClientRect(hWnd, &rect);
                 HBRUSH oldBrush = SelectObject(hdc, highlightedBackgroundBrush);
                 HPEN oldPen = SelectObject(hdc, g_textStyle->_focusPen2);
+                FillRect(hdc, &rect, g_textStyle->_backgroundBrush);
                 Rectangle(hdc, rect.left, rect.top, rect.right, rect.bottom);
                 SelectObject(hdc, oldPen);
                 SelectObject(hdc, oldBrush );
@@ -1776,6 +1777,8 @@ LRESULT CALLBACK Menu_MessageProcessor(
                 EndPaint(hWnd, &ps);
             }
             break;
+        case WM_ERASEBKGND:
+            return 1;
         case WM_CTLCOLOREDIT:
             {
                 HDC hdcStatic = (HDC)wParam;
@@ -2175,6 +2178,7 @@ void menu_set_text_style(MenuView *self, TextStyle *textStyle)
 MenuView *menu_create_with_size(int left, int top, int width, int height, TCHAR *title, TextStyle *textStyle)
 {
     g_textStyle = textStyle;
+    highlightedBackgroundBrush = CreateSolidBrush(g_textStyle->focusBackgroundColor);
     MenuView *menuView = calloc(1, sizeof(MenuView));
     assert(menuView);
 

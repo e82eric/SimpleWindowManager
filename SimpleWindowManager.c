@@ -3583,7 +3583,6 @@ void menu_focus(WindowManagerState *windowManagerState, MenuView *self)
     {
         windowManagerState->menuVisible = TRUE;
         border_window_hide(windowManagerState->borderWindowHwnd);
-        ShowWindow(self->hwnd, SW_SHOW);
         SetForegroundWindow(self->hwnd);
         HDWP hdwp = BeginDeferWindowPos(1);
         DeferWindowPos(
@@ -3777,8 +3776,8 @@ void menu_run(MenuDefinition *definition)
     }
 
     definition->onEscape = menu_on_escape;
-    menu_run_definition(g_windowManagerState.menuView, definition);
     menu_focus(&g_windowManagerState, g_windowManagerState.menuView);
+    menu_run_definition(g_windowManagerState.menuView, definition);
 }
 
 BOOL terminal_with_uniqueStr_filter(ScratchWindow *self, Client *client)
