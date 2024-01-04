@@ -1685,10 +1685,6 @@ BOOL window_manager_try_handle_show_event(WindowManagerState *self, HWND hwnd, L
     Workspace *workspace = windowManager_find_client_workspace_using_filters(self, client);
     if(workspace)
     {
-        if(GetAsyncKeyState(VK_LBUTTON) & 0x8000)
-        {
-            return true;
-        }
         workspace_add_client(workspace, client);
         workspace_arrange_windows(workspace, self);
         workspace_focus_selected_window(self, workspace);
@@ -6087,7 +6083,7 @@ int run (void)
     configuration->windowRoutingMode = FilteredAndRoutedToWorkspace;
     configuration->alwaysRedraw = FALSE;
     configuration->nonFloatWindowHeightMinimum = 500;
-    configuration->floatUwpWindows = TRUE;
+    configuration->floatUwpWindows = FALSE;
     configuration->easyResizeModifiers = LWin | LCtl | LAlt;
     configuration->dragDropFloatModifier = LAlt;
     configuration->floatWindowMovement = 75;
