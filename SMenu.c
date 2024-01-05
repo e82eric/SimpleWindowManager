@@ -39,7 +39,6 @@
 
 #define WM_REDRAW_DISPLAY_LIST    (WM_USER + 1)
 
-bool g_borderSet = FALSE;
 HBRUSH highlightedBackgroundBrush;
 SRWLOCK itemsRwLock;
 UINT currentSearchNumber = 0;
@@ -1584,6 +1583,7 @@ void MenuView_FitChildControls(MenuView *self)
 
     int cmdResultHeight = 90;
 
+    UpdateWindow(self->hwnd);
     MoveWindow(self->searchView->hwnd, padding, searchTop, searchWidth, searchHeight, TRUE);
     MoveWindow(self->itemsView->summaryHwnd, summaryLeft, searchTop, summaryWidth, searchHeight, TRUE);
 
@@ -1763,60 +1763,19 @@ LRESULT CALLBACK Menu_MessageProcessor(
     {
         case WM_PAINT:
             {
-PAINTSTRUCT ps;
-HDC hdc = BeginPaint(hWnd, &ps);
+                PAINTSTRUCT ps;
+                HDC hdc = BeginPaint(hWnd, &ps);
 
-// Create a memory device context compatible with the screen
-HDC memDC = CreateCompatibleDC(hdc);
-RECT rect;
-GetClientRect(hWnd, &rect);
+                RECT rect;
+                GetClientRect(hWnd, &rect);
+                HBRUSH oldBrush = SelectObject(hdc, highlightedBackgroundBrush);
+                HPEN oldPen = SelectObject(hdc, g_textStyle->_focusPen2);
+                FillRect(hdc, &rect, g_textStyle->_backgroundBrush);
+                Rectangle(hdc, rect.left, rect.top, rect.right, rect.bottom);
+                SelectObject(hdc, oldPen);
+                SelectObject(hdc, oldBrush );
 
-// Create a bitmap compatible with the window's client area
-HBITMAP memBitmap = CreateCompatibleBitmap(hdc, rect.right - rect.left, rect.bottom - rect.top);
-HBITMAP oldBitmap = SelectObject(memDC, memBitmap);
-
-            RECT updateRect = ps.rcPaint;
-
-            /* if (IntersectRect(&updateRect, &ps.rcPaint, &yourBorderRect)) */
-            /* { */
-            /*     FrameRect(hdc, &yourBorderRect, yourBorderBrush); */
-            /* } */
-
-// Perform drawing operations on the memory device context
-HBRUSH oldBrush = SelectObject(memDC, highlightedBackgroundBrush);
-HPEN oldPen = SelectObject(memDC, g_textStyle->_focusPen2);
-            if (IntersectRect(&rect, &ps.rcPaint, &rect) && !g_borderSet)
-            {
-                g_borderSet = TRUE;
-FillRect(memDC, &rect, g_textStyle->_backgroundBrush);
-Rectangle(memDC, rect.left, rect.top, rect.right, rect.bottom);
-            }
-
-// Copy the memory device context to the screen
-BitBlt(hdc, 0, 0, rect.right - rect.left, rect.bottom - rect.top, memDC, 0, 0, SRCCOPY);
-
-// Cleanup
-SelectObject(memDC, oldPen);
-SelectObject(memDC, oldBrush);
-SelectObject(memDC, oldBitmap);
-DeleteObject(memBitmap);
-DeleteDC(memDC);
-
-EndPaint(hWnd, &ps);
-
-                /* PAINTSTRUCT ps; */
-                /* HDC hdc = BeginPaint(hWnd, &ps); */
-
-                /* RECT rect; */
-                /* GetClientRect(hWnd, &rect); */
-                /* HBRUSH oldBrush = SelectObject(hdc, highlightedBackgroundBrush); */
-                /* HPEN oldPen = SelectObject(hdc, g_textStyle->_focusPen2); */
-                /* FillRect(hdc, &rect, g_textStyle->_backgroundBrush); */
-                /* Rectangle(hdc, rect.left, rect.top, rect.right, rect.bottom); */
-                /* SelectObject(hdc, oldPen); */
-                /* SelectObject(hdc, oldBrush ); */
-
-                /* EndPaint(hWnd, &ps); */
+                EndPaint(hWnd, &ps);
             }
             break;
         case WM_ERASEBKGND:
