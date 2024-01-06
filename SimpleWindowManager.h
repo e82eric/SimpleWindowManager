@@ -185,6 +185,7 @@ struct ScratchWindow
     ScratchFilter scratchFilter;
     ScratchWindow *next;
     void (*runFunc) (ScratchWindow *, Monitor *monitor, int);
+    void (*beforeCmd) (ScratchWindow *, WindowManagerState *, CHAR *, size_t);
     ULONGLONG timeout;
 };
 

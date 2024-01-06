@@ -3793,12 +3793,17 @@ BOOL terminal_with_uniqueStr_filter(ScratchWindow *self, Client *client)
     return FALSE;
 }
 
+void set_windows_terminal_cmd(ScratchWindow *self, WindowManagerState *windowManager, CHAR *toFill, size_t size)
+{
+    int x = windowManager->selectedMonitor->xOffset + windowManager->selectedMonitor->workspaceStyle->scratchWindowsScreenPadding;
+    int y = windowManager->selectedMonitor->workspaceStyle->scratchWindowsScreenPadding;
+    sprintf_s(toFill, size, "wtd.exe --pos \"%d,%d\" --title \"Scratch Window %ls\" %s", x, y, self->uniqueStr, self->cmd);
+}
+
 ScratchWindow *register_windows_terminal_scratch_with_unique_string(CHAR *name, char *cmd, TCHAR *uniqueStr)
 {
-    CHAR buff[4096];
-    sprintf_s(buff, 4096, "wtd.exe --title \"Scratch Window %ls\" %s", uniqueStr, cmd);
-
-    ScratchWindow *result = register_scratch_with_unique_string(L"WindowsTerminal.exe", name, buff, uniqueStr);
+    ScratchWindow *result = register_scratch_with_unique_string(L"WindowsTerminal.exe", name, cmd, uniqueStr);
+    result->beforeCmd = set_windows_terminal_cmd;
     return result;
 }
 
@@ -3890,13 +3895,22 @@ void scratch_window_toggle(WindowManagerState *windowManager, ScratchWindow *sel
                 self->runFunc(self, windowManager->selectedMonitor, windowManager->selectedMonitor->workspaceStyle->scratchWindowsScreenPadding);
                 return;
             }
-            if(self->stdOutCallback)
+            CHAR cmdToRun[4096];
+            if(self->beforeCmd)
             {
-                process_with_stdout_start(self->cmd, self->stdOutCallback);
+                self->beforeCmd(self, windowManager, cmdToRun, 4096);
             }
             else
             {
-                start_process(NULL, self->cmd, CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS);
+                strncpy_s(cmdToRun, sizeof(cmdToRun), self->cmd, _TRUNCATE);
+            }
+            if(self->stdOutCallback)
+            {
+                process_with_stdout_start(cmdToRun, self->stdOutCallback);
+            }
+            else
+            {
+                start_process(NULL, cmdToRun, CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS);
             }
         }
     }
