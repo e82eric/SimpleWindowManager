@@ -283,6 +283,12 @@ int commands_list(int maxItems, CHAR **lines, void *state)
             }
 
             unsigned int scanCode = MapVirtualKey(command->keyBinding->key, MAPVK_VK_TO_VSC);
+            unsigned int scanCode2 = MapVirtualKey(VK_F14, MAPVK_VK_TO_VSC);
+            CHAR keyStrBuff2[MAX_PATH];
+            GetKeyNameTextA(scanCode2 << 16, keyStrBuff2, MAX_PATH);
+
+            BOOL keySet = false;
+            CHAR keyStrBuff[MAX_PATH];
 
             switch (command->keyBinding->key)
             {
@@ -296,10 +302,40 @@ int commands_list(int maxItems, CHAR **lines, void *state)
                         scanCode |= 0x100;
                         break;
                     }
+                case 0x7C:
+                    strcpy_s(keyStrBuff, MAX_PATH, "F13");
+                    keySet = true;
+                    break;
+                case 0x7D:
+                    strcpy_s(keyStrBuff, MAX_PATH, "F14");
+                    keySet = true;
+                    break;
+                case 0x7E:
+                    strcpy_s(keyStrBuff, MAX_PATH, "F15");
+                    keySet = true;
+                    break;
+                case 0x7F:
+                    strcpy_s(keyStrBuff, MAX_PATH, "F16");
+                    keySet = true;
+                    break;
+                case 0x80:
+                    strcpy_s(keyStrBuff, MAX_PATH, "F17");
+                    keySet = true;
+                    break;
+                case 0x81:
+                    strcpy_s(keyStrBuff, MAX_PATH, "F18");
+                    keySet = true;
+                    break;
+                case 0x82:
+                    keySet = true;
+                    strcpy_s(keyStrBuff, MAX_PATH, "F19");
+                    break;
             }
 
-            CHAR keyStrBuff[MAX_PATH];
-            GetKeyNameTextA(scanCode << 16, keyStrBuff, MAX_PATH);
+            if(!keySet)
+            {
+                GetKeyNameTextA(scanCode << 16, keyStrBuff, MAX_PATH);
+            }
 
             sprintf_s(
                     keyBindingStr,
@@ -3812,8 +3848,11 @@ ScratchWindow *register_scratch_with_unique_string(TCHAR *processImageName, CHAR
     ScratchWindow *sWindow = calloc(1, sizeof(ScratchWindow));
     assert(sWindow);
     sWindow->name = _strdup(name);
+    assert(sWindow->name);
     sWindow->cmd = _strdup(cmd);
+    assert(sWindow->cmd);
     sWindow->uniqueStr = _wcsdup(uniqueStr);
+    assert(sWindow->uniqueStr);
     sWindow->scratchFilter = terminal_with_uniqueStr_filter;
     sWindow->processImageName = _wcsdup(processImageName);
     sWindow->next = NULL;
