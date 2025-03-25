@@ -31,6 +31,7 @@
 #include "ListServices.h"
 #include "SimpleWindowManager.h"
 #include "dcomp_border_window.h"
+#include "nfm_menu.h"
 
 #define MAX_WORKSPACES 10
 
@@ -215,6 +216,167 @@ IWbemServices *services = NULL;
 
 Configuration *configuration;
 
+char **globalCommandLines = NULL;
+int globalCommandCount = 0;
+int globalCommandCapacity = 0;
+
+void add_command_line(const char *line)
+{
+    if (globalCommandCount >= globalCommandCapacity)
+    {
+        globalCommandCapacity = globalCommandCapacity == 0 ? 10 : globalCommandCapacity * 2;
+        char **newArray = (char **)realloc(globalCommandLines, globalCommandCapacity * sizeof(char *));
+        if (!newArray) {
+            fprintf(stderr, "Failed to reallocate memory for command lines.\n");
+            exit(EXIT_FAILURE);
+        }
+        globalCommandLines = newArray;
+    }
+
+    globalCommandLines[globalCommandCount++] = _strdup(line);
+}
+
+int populate_commands_list(void *state)
+{
+    WindowManagerState *windowManagerState = (WindowManagerState *)state;
+    size_t nameWidth = windowManagerState->longestCommandName;
+    const int typeWidth = 25;
+    const int keyBindingWidth = 30;
+
+    for (int i = 0; i < windowManagerState->numberOfCommands; i++) {
+        Command *command = windowManagerState->commands[i];
+        char keyBindingStr[MAX_PATH] = {0};
+
+        if (command->keyBinding) {
+            char modifiersKeyName[MAX_PATH] = {0};
+            if (command->keyBinding->modifiers & LAlt) {
+                strcat_s(modifiersKeyName, MAX_PATH, "+ALT");
+            }
+            if (command->keyBinding->modifiers & LCtl) {
+                strcat_s(modifiersKeyName, MAX_PATH, "+CTL");
+            }
+            if (command->keyBinding->modifiers & LWin) {
+                strcat_s(modifiersKeyName, MAX_PATH, "+WIN");
+            }
+            if (command->keyBinding->modifiers & LShift) {
+                strcat_s(modifiersKeyName, MAX_PATH, "+SHIFT");
+            }
+
+            unsigned int scanCode = MapVirtualKey(command->keyBinding->key, MAPVK_VK_TO_VSC);
+            char keyStrBuff[MAX_PATH] = {0};
+            BOOL keySet = FALSE;
+
+            switch (command->keyBinding->key) {
+                case VK_LEFT: case VK_UP: case VK_RIGHT: case VK_DOWN:
+                case VK_PRIOR: case VK_NEXT:
+                case VK_END: case VK_HOME:
+                case VK_INSERT: case VK_DELETE:
+                case VK_DIVIDE:
+                case VK_NUMLOCK:
+                    scanCode |= 0x100;
+                    break;
+                case 0x7C: strcpy_s(keyStrBuff, MAX_PATH, "F13"); keySet = TRUE; break;
+                case 0x7D: strcpy_s(keyStrBuff, MAX_PATH, "F14"); keySet = TRUE; break;
+                case 0x7E: strcpy_s(keyStrBuff, MAX_PATH, "F15"); keySet = TRUE; break;
+                case 0x7F: strcpy_s(keyStrBuff, MAX_PATH, "F16"); keySet = TRUE; break;
+                case 0x80: strcpy_s(keyStrBuff, MAX_PATH, "F17"); keySet = TRUE; break;
+                case 0x81: strcpy_s(keyStrBuff, MAX_PATH, "F18"); keySet = TRUE; break;
+                case 0x82: strcpy_s(keyStrBuff, MAX_PATH, "F19"); keySet = TRUE; break;
+            }
+
+            if (!keySet) {
+                GetKeyNameTextA(scanCode << 16, keyStrBuff, MAX_PATH);
+            }
+
+            sprintf_s(
+                keyBindingStr,
+                MAX_PATH,
+                "%s+%s",
+                modifiersKeyName + 1,
+                keyStrBuff);
+        }
+
+        char stringToAdd[1024];
+        char commandDescription[MAX_PATH];
+        command->getDescription(command, MAX_PATH, commandDescription);
+
+        sprintf_s(
+            stringToAdd,
+            1024,
+            "%-*s %-*s %-*s %s",
+            (int)nameWidth,
+            command->name,
+            typeWidth,
+            command->type,
+            keyBindingWidth,
+            keyBindingStr,
+            commandDescription);
+
+        add_command_line(stringToAdd);
+    }
+
+    add_command_line(NULL);
+
+    return globalCommandCount;
+}
+
+void menu_on_closed(void)
+{
+    g_windowManagerState.menuVisible = false;
+}
+
+void noop(char* output, void* state)
+{
+    UNREFERENCED_PARAMETER(output);
+    UNREFERENCED_PARAMETER(state);
+    nfm_hide();
+}
+
+void run_new_last_definition_menu(WindowManagerState *state)
+{
+    nfm_run_last_definition();
+    g_windowManagerState.menuVisible = true;
+}
+
+void run_new_process_menu(WindowManagerState *state)
+{
+    nfm_show_processes_list(noop, menu_on_closed, state);
+    g_windowManagerState.menuVisible = true;
+}
+
+void run_new_windows_menu(WindowManagerState *state)
+{
+    nfm_show_windows_list(open_windows_scratch_exit_callback, menu_on_closed, state);
+    g_windowManagerState.menuVisible = true;
+}
+
+void run_new_programs_not_elevated_menu(WindowManagerState *state)
+{
+    nfm_show_programs_list(open_program_scratch_callback_not_elevated, menu_on_closed, state);
+    g_windowManagerState.menuVisible = true;
+}
+
+void run_new_programs_elevated_menu(WindowManagerState *state)
+{
+    nfm_show_programs_list(open_program_scratch_callback, menu_on_closed, state);
+    g_windowManagerState.menuVisible = true;
+}
+
+void run_new_file_system_menu(WindowManagerState *state)
+{
+    nfm_show_file_system(open_program_scratch_callback_not_elevated, menu_on_closed, state);
+    g_windowManagerState.menuVisible = true;
+}
+
+char** list_commands_for_menu(WindowManagerState *state)
+{
+    if(!globalCommandLines)
+    {
+        populate_commands_list(state);
+    }
+    return globalCommandLines;
+}
+
 void run_command_from_menu(char *stdOut, void *state)
 {
     WindowManagerState *windowManagerState = (WindowManagerState*)state;
@@ -230,152 +392,34 @@ void run_command_from_menu(char *stdOut, void *state)
             return;
         }
     }
+    nfm_hide();
 }
 
-int commands_list(int maxItems, CHAR **lines, void *state)
+void run_new_commands_menu(WindowManagerState *state)
 {
-    WindowManagerState *windowManagerState = (WindowManagerState*)state;
-    size_t nameWidth = windowManagerState->longestCommandName;
+    size_t nameWidth = state->longestCommandName;
     const int typeWidth = 25;
     const int keyBindingWidth = 30;
-    CHAR header[1024];
+
+    char header[1024];
     sprintf_s(
-            header,
-            1024,
-            "%-*s %-*s %-*s %s",
-            (int)nameWidth,
-            "Name",
-            typeWidth,
-            "Type",
-            keyBindingWidth,
-            "KeyBinding",
-            "Description");
-
-    lines[0] = _strdup(header);
-
-    int numberOfBindings = 1;
-
-    for(int i = 0; i < windowManagerState->numberOfCommands && windowManagerState->numberOfCommands < maxItems; i++)
-    {
-        Command *command = windowManagerState->commands[i];
-        CHAR keyBindingStr[MAX_PATH];
-        keyBindingStr[0] = '\0';
-
-        if(command->keyBinding)
-        {
-            CHAR modifiersKeyName[MAX_PATH];
-            modifiersKeyName[0] = '\0';
-            if(command->keyBinding->modifiers & LAlt)
-            {
-                strcat_s(modifiersKeyName, MAX_PATH, "+ALT");
-            }
-            if(command->keyBinding->modifiers & LCtl)
-            {
-                strcat_s(modifiersKeyName, MAX_PATH, "+CTL");
-            }
-            if(command->keyBinding->modifiers & LWin)
-            {
-                strcat_s(modifiersKeyName, MAX_PATH, "+WIN");
-            }
-            if(command->keyBinding->modifiers & LShift)
-            {
-                strcat_s(modifiersKeyName, MAX_PATH, "+SHIFT");
-            }
-
-            unsigned int scanCode = MapVirtualKey(command->keyBinding->key, MAPVK_VK_TO_VSC);
-            unsigned int scanCode2 = MapVirtualKey(VK_F14, MAPVK_VK_TO_VSC);
-            CHAR keyStrBuff2[MAX_PATH];
-            GetKeyNameTextA(scanCode2 << 16, keyStrBuff2, MAX_PATH);
-
-            BOOL keySet = false;
-            CHAR keyStrBuff[MAX_PATH];
-
-            switch (command->keyBinding->key)
-            {
-                case VK_LEFT: case VK_UP: case VK_RIGHT: case VK_DOWN:
-                case VK_PRIOR: case VK_NEXT:
-                case VK_END: case VK_HOME:
-                case VK_INSERT: case VK_DELETE:
-                case VK_DIVIDE:
-                case VK_NUMLOCK:
-                    {
-                        scanCode |= 0x100;
-                        break;
-                    }
-                case 0x7C:
-                    strcpy_s(keyStrBuff, MAX_PATH, "F13");
-                    keySet = true;
-                    break;
-                case 0x7D:
-                    strcpy_s(keyStrBuff, MAX_PATH, "F14");
-                    keySet = true;
-                    break;
-                case 0x7E:
-                    strcpy_s(keyStrBuff, MAX_PATH, "F15");
-                    keySet = true;
-                    break;
-                case 0x7F:
-                    strcpy_s(keyStrBuff, MAX_PATH, "F16");
-                    keySet = true;
-                    break;
-                case 0x80:
-                    strcpy_s(keyStrBuff, MAX_PATH, "F17");
-                    keySet = true;
-                    break;
-                case 0x81:
-                    strcpy_s(keyStrBuff, MAX_PATH, "F18");
-                    keySet = true;
-                    break;
-                case 0x82:
-                    keySet = true;
-                    strcpy_s(keyStrBuff, MAX_PATH, "F19");
-                    break;
-            }
-
-            if(!keySet)
-            {
-                GetKeyNameTextA(scanCode << 16, keyStrBuff, MAX_PATH);
-            }
-
-            sprintf_s(
-                    keyBindingStr,
-                    50,
-                    "%s+%s",
-                    //+1 is hack to remove first + from concatentation
-                    modifiersKeyName + 1,
-                    keyStrBuff);
-        }
-
-        CHAR stringToAdd[1024];
-        CHAR commandDescription[MAX_PATH];
-        command->getDescription(command, MAX_PATH, commandDescription);
-
-        sprintf_s(
-                stringToAdd,
-                1024,
-                "%-*s %-*s %-*s %s",
-                (int)nameWidth,
-                command->name,
-                typeWidth,
-                command->type,
-                keyBindingWidth,
-                keyBindingStr,
-                commandDescription);
-
-        lines[numberOfBindings] = _strdup(stringToAdd);
-        numberOfBindings++;
-    }
-
-    return numberOfBindings;
+        header,
+        1024,
+        "%-*s %-*s %-*s %s",
+        (int)nameWidth,
+        "Name",
+        typeWidth,
+        "Type",
+        keyBindingWidth,
+        "KeyBinding",
+        "Description");
+    nfm_show_items_list(header, list_commands_for_menu, run_command_from_menu, menu_on_closed, state);
+    g_windowManagerState.menuVisible = true;
 }
 
 void register_keybindings_menu_with_modifiers(int modifiers, int virtualKey)
 {
-    MenuDefinition *definition = menu_create_and_register();
-    definition->itemsAction = commands_list;
-    definition->hasHeader = TRUE;
-    definition->onSelection = run_command_from_menu;
-    keybinding_create_with_menu_arg("ListKeyBindings", modifiers, virtualKey, menu_run, definition);
+    keybinding_create_with_no_arg("ListKeyBindings", modifiers, virtualKey, run_new_commands_menu);
 }
 
 void register_keybindings_menu(void)
@@ -383,35 +427,24 @@ void register_keybindings_menu(void)
     register_keybindings_menu_with_modifiers(LAlt, VK_OEM_2);
 }
 
+void register_last_definition_menu(int modifiers, int virtualKey)
+{
+    keybinding_create_with_no_arg("LastMenu", modifiers, virtualKey, run_new_last_definition_menu);
+}
+
 void register_list_processes_menu(int modifiers, int virtualKey)
 {
-    MenuDefinition *listProcessMenu = menu_create_and_register();
-    menu_definition_set_load_action(listProcessMenu, list_processes_run_no_sort);
-    NamedCommand *killProcessCommand = MenuDefinition_AddNamedCommand(listProcessMenu, "procKill:cmd /c taskkill /f /pid {}", TRUE, FALSE);
-    NamedCommand_SetTextRange(killProcessCommand, 76, 8, TRUE);
-    NamedCommand *windbgCommand = MenuDefinition_AddNamedCommand(listProcessMenu, "windbg:windbgx -p {}", FALSE, TRUE);
-    NamedCommand_SetTextRange(windbgCommand, 76, 8, TRUE);
-    NamedCommand *procDumpNamedCommand = MenuDefinition_AddNamedCommand(listProcessMenu, "procdump:cmd /c procdump -accepteula -ma {} %USERPROFILE%\\memory_dumps", FALSE, FALSE);
-    NamedCommand_SetTextRange(procDumpNamedCommand, 76, 8, TRUE);
-    MenuDefinition_AddLoadActionKeyBinding(listProcessMenu, VK_CONTROL, VK_1, list_processes_run_sorted_by_private_bytes, "Sort Pvt Bytes");
-    MenuDefinition_AddLoadActionKeyBinding(listProcessMenu, VK_CONTROL, VK_2, list_processes_run_sorted_by_working_set, "Sort Wrk Set");
-    MenuDefinition_AddLoadActionKeyBinding(listProcessMenu, VK_CONTROL, VK_3, list_processes_run_sorted_by_cpu, "Sort Cpu");
-    MenuDefinition_AddLoadActionKeyBinding(listProcessMenu, VK_CONTROL, VK_4, list_processes_run_sorted_by_pid, "Sort Pid");
-    MenuDefinition_ParseAndSetRange(listProcessMenu, "76,8");
-    MenuDefinition_ParseAndAddKeyBinding(listProcessMenu, "ctl-k:procKill", FALSE);
-    MenuDefinition_ParseAndAddKeyBinding(listProcessMenu, "ctl-d:windbg", FALSE);
-    MenuDefinition_ParseAndAddKeyBinding(listProcessMenu, "ctl-m:procdump", FALSE);
-    listProcessMenu->hasHeader = TRUE;
-    keybinding_create_with_menu_arg("ProcessListMenu", modifiers, virtualKey, menu_run, listProcessMenu);
+    keybinding_create_with_no_arg("ProcessListMenu", modifiers, virtualKey, run_new_process_menu);
 }
 
 void register_list_windows_memu(int modifiers, int virtualKey)
 {
-    MenuDefinition *listWindowsMenu = menu_create_and_register();
-    listWindowsMenu->hasHeader = TRUE;
-    menu_definition_set_load_action(listWindowsMenu, list_windows_run);
-    listWindowsMenu->onSelection = open_windows_scratch_exit_callback;
-    keybinding_create_with_menu_arg("ListWindowsMenu", modifiers, virtualKey, menu_run, listWindowsMenu);
+    keybinding_create_with_no_arg("ListWindowsMenu", modifiers, virtualKey, run_new_windows_menu);
+}
+
+void register_file_sytem_memu(int modifiers, int virtualKey)
+{
+    keybinding_create_with_no_arg("FileSystemMenu", modifiers, virtualKey, run_new_file_system_menu);
 }
 
 void register_list_services_menu(int modifiers, int virtualKey)
@@ -428,39 +461,17 @@ void register_list_services_menu(int modifiers, int virtualKey)
     keybinding_create_with_menu_arg("ListServicesMenu", modifiers, virtualKey, menu_run, listServicesMenu);
 }
 
-void build_list_directories_cmd(char* buffer, size_t bufferSize, char* strings[], size_t numStrings)
-{
-    buffer[0] = '\0';
-
-    strcat_s(buffer, bufferSize, "ld:cmd /c dir /s /b");
-    strcat_s(buffer, bufferSize, " ");
-
-    for (size_t i = 0; i < numStrings; i++) {
-        strcat_s(buffer, bufferSize, "\"");
-        strcat_s(buffer, bufferSize, strings[i]);
-        strcat_s(buffer, bufferSize, "\" ");
-    }
-    strcat_s(buffer, bufferSize, " | findstr /i \"\\.lnk$ \\.exe$\"");
-}
-
 void register_program_launcher_menu(int modifiers, int virtualKey, CHAR** directories, size_t numberOfDirectories, BOOL isElevated)
 {
-    CHAR cmdBuf[4096];
-
-    build_list_directories_cmd(cmdBuf, 4096, directories, numberOfDirectories);
-
-    MenuDefinition *programLauncher = menu_create_and_register();
-    MenuDefinition_AddNamedCommand(programLauncher, cmdBuf, FALSE, FALSE);
-    MenuDefinition_ParseAndAddLoadCommand(programLauncher, "ld", TRUE);
+    UNREFERENCED_PARAMETER(numberOfDirectories);
+    UNREFERENCED_PARAMETER(directories);
     if(isElevated)
     {
-        programLauncher->onSelection = open_program_scratch_callback;
-        keybinding_create_with_menu_arg("ProgramLauncherMenu", modifiers, virtualKey, menu_run, programLauncher);
+        keybinding_create_with_no_arg("ProgramLauncherMenu", modifiers, virtualKey, run_new_programs_elevated_menu);
     }
     else
     {
-        programLauncher->onSelection = open_program_scratch_callback_not_elevated;
-        keybinding_create_with_menu_arg("ProgramLauncherNotElevatedMenu", modifiers, virtualKey, menu_run, programLauncher);
+        keybinding_create_with_no_arg("ProgramLauncherNotElevatedMenu", modifiers, virtualKey, run_new_programs_not_elevated_menu);
     }
 }
 
@@ -2942,7 +2953,6 @@ void workspace_focus_selected_window(WindowManagerState *windowManagerState, Wor
 
     if(windowManagerState->menuVisible)
     {
-        SetForegroundWindow(windowManagerState->menuView->hwnd);
         return;
     }
 
@@ -3784,7 +3794,6 @@ MenuDefinition* menu_create_and_register(void)
 void menu_hide(WindowManagerState *windowManagerState)
 {
     windowManagerState->menuVisible = FALSE;
-    ShowWindow(windowManagerState->menuView->hwnd, SW_HIDE);
     bar_trigger_selected_window_paint(windowManagerState->selectedMonitor->bar);
     border_window_update(windowManagerState);
 }
@@ -3802,14 +3811,11 @@ void menu_on_escape(void *state)
 
 void menu_run(MenuDefinition *definition)
 {
+    UNREFERENCED_PARAMETER(definition);
     if(g_windowManagerState.selectedMonitor->scratchWindow)
     {
         scratch_window_hide(&g_windowManagerState, g_windowManagerState.selectedMonitor->scratchWindow);
     }
-
-    definition->onEscape = menu_on_escape;
-    menu_focus(&g_windowManagerState, g_windowManagerState.menuView);
-    menu_run_definition(g_windowManagerState.menuView, definition);
 }
 
 BOOL terminal_with_uniqueStr_filter(ScratchWindow *self, Client *client)
@@ -5460,7 +5466,7 @@ void keybindings_register_defaults_with_modifiers(int modifiers)
 
     keybinding_create_with_no_arg("swap_selected_monitor_to_monacle_layout", modifiers, VK_M, swap_selected_monitor_to_monacle_layout);
     keybinding_create_with_no_arg("swap_selected_monitor_to_deck_layout", modifiers, VK_Y, swap_selected_monitor_to_deck_layout);
-    keybinding_create_with_no_arg("swap_selected_monitor_to_horizontaldeck_layout", modifiers, VK_H, swap_selected_monitor_to_horizontaldeck_layout);
+    /* keybinding_create_with_no_arg("swap_selected_monitor_to_horizontaldeck_layout", modifiers, VK_H, swap_selected_monitor_to_horizontaldeck_layout); */
     keybinding_create_with_no_arg("swap_selected_monitor_to_tile_layout", modifiers, VK_U, swap_selected_monitor_to_tile_layout);
     keybinding_create_with_no_arg("redraw_focused_window", modifiers, VK_I, redraw_focused_window);
 
@@ -5857,10 +5863,12 @@ void open_program_scratch_callback(char *stdOut, void *state)
 
     sprintf_s(str, 1024, "/c start \"\" \"%s\"", stdOut);
     start_launcher(str);
+    nfm_hide();
 }
 
 void open_program_scratch_callback_not_elevated(char *stdOut, void *state)
 {
+    printf(stdout);
     WindowManagerState *windowManagerState = (WindowManagerState*)state;
     menu_hide(windowManagerState);
     /* border_window_hide(g_windowManagerState.borderWindowHwnd); */
@@ -5868,6 +5876,7 @@ void open_program_scratch_callback_not_elevated(char *stdOut, void *state)
 
     sprintf_s(str, 1024, "/c start \"\" \"%s\"", stdOut);
     start_scratch_not_elevated(str);
+    nfm_hide();
 }
 
 void open_process_list_scratch_callback(char *stdOut)
@@ -5875,12 +5884,10 @@ void open_process_list_scratch_callback(char *stdOut)
     UNREFERENCED_PARAMETER(stdOut);
 }
 
-void open_windows_scratch_exit_callback(char *stdOut, void *state)
+void open_windows_scratch_exit_callback(HWND hwnd, void *state)
 {
     WindowManagerState *windowManagerState = (WindowManagerState*)state;
     menu_hide(windowManagerState);
-    char* lastCharRead;
-    HWND hwnd = (HWND)strtoll(stdOut, &lastCharRead, 16);
 
     Client *client = windowManager_find_client_in_workspaces_by_hwnd(windowManagerState, hwnd);
     if(client)
@@ -5927,6 +5934,8 @@ void open_windows_scratch_exit_callback(char *stdOut, void *state)
                     TRUE);
         }
     }
+
+    nfm_hide();
 }
 
 HFONT initalize_font(LPCWSTR fontName, int size)
@@ -6074,6 +6083,7 @@ void discover_monitors(WindowManagerState *windowManager)
 
 int run (void)
 {
+
     SetProcessDPIAware();
     g_windowManagerState.numberOfCommands = 0;
     memset(&g_dragDropState, 0, sizeof(DragDropState));
@@ -6412,6 +6422,7 @@ int run (void)
         WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
 
     workspace_focus_selected_window(&g_windowManagerState, g_windowManagerState.selectedMonitor->workspace);
+    nfm_load_library(L"LibNfm.dll");
 
     MSG msg;
     while (GetMessage(&msg, NULL, 0, 0))
@@ -6445,7 +6456,7 @@ int WINAPI WinMain(
     return run();
 }
 
-/* int main (void) */
-/* { */
-/*     return run(); */
-/* } */
+/*int main (void) */
+/*{ */
+/*    return run(); */
+/*} */

@@ -2039,7 +2039,6 @@ void MenuDefinition_ParseAndSetRange(MenuDefinition *self, char *argText)
     if (sscanf_s(argText, "%d,%d", &num1, &num2) == 2) {
         self->returnRangeStart = num1;
         self->returnRangeEnd = num2;
-        printf("num1 = %d, num2 = %d\n", num1, num2);
     } else {
         assert(false);
     }

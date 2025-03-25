@@ -2,6 +2,7 @@ INCLUDE props.mk
 publishdir = bin
 winlibs = Gdi32.lib user32.lib ComCtl32.lib
 nowarncflags = /c /EHsc /nologo /DUNICODE /D_UNICODE /Zi
+nfmPublishDir = $(nfmSourceDir)\bin\LibNfm
 LFLAGS = /DEBUG
 
 CONFIG = DEBUG
@@ -32,6 +33,14 @@ clean:
 outdir:
 	if not exist "$(outdir)" mkdir "$(outdir)"
 
+copy_nfm_menu_binaries: outdir
+	if not exist "$(outdir)" mkdir "$(outdir)"
+	xcopy /Y "$(nfmPublishDir)\*.dll" "$(outdir)\"
+	xcopy /Y "$(nfmPublishDir)\*.pdb" "$(outdir)\"
+
+nfm_menu.obj:
+	CL $(DEBUG_FLAGS) $(cflags) /I ./ /Ifzf nfm_menu.c /Fd"$(outdir)\nfm_menu.pdb" /Fo"$(outdir)\nfm_menu.obj"
+
 Config.obj:
 	CL $(DEBUG_FLAGS) $(cflags) /I ./ /Ifzf $(configFile) /Fd"$(outdir)\Config.pdb" /Fo"$(outdir)\Config.obj"
 
@@ -44,8 +53,8 @@ dcomp_border_window.obj:
 .c.obj:
 	CL $(DEBUG_FLAGS) /analyze /c $(cflags) $*.c /Fd"$(outdir)\$*.pdb" /Fo"$(outdir)\$*.obj"
 
-SimpleWindowManager.exe: outdir RestoreMovedWindows.exe ListServices.obj ListProcesses.obj ListWindows.obj fzf.obj SMenu.obj SimpleWindowManager.obj Config.obj dcomp_border_window.obj
-	LINK $(LFLAGS) $(outdir)\ListServices.obj $(outdir)\ListProcesses.obj $(outdir)\ListWindows.obj $(outdir)\fzf.obj $(outdir)\SMenu.obj $(outdir)\dcomp_border_window.obj $(outdir)\SimpleWindowManager.obj $(outdir)\Config.obj $(winlibs) Oleacc.lib Shlwapi.lib OLE32.lib Advapi32.lib Dwmapi.lib Shell32.lib OleAut32.lib uxtheme.lib dxgi.lib d3d11.lib d2d1.lib dcomp.lib /OUT:$(outdir)\SimpleWindowManager.exe
+SimpleWindowManager.exe: outdir copy_nfm_menu_binaries nfm_menu.obj RestoreMovedWindows.exe ListServices.obj ListProcesses.obj ListWindows.obj fzf.obj SMenu.obj SimpleWindowManager.obj Config.obj dcomp_border_window.obj
+	LINK $(LFLAGS) $(outdir)\ListServices.obj $(outdir)\ListProcesses.obj $(outdir)\ListWindows.obj $(outdir)\fzf.obj $(outdir)\nfm_menu.obj $(outdir)\SMenu.obj $(outdir)\dcomp_border_window.obj $(outdir)\SimpleWindowManager.obj $(outdir)\Config.obj $(winlibs) Oleacc.lib Shlwapi.lib OLE32.lib Advapi32.lib Dwmapi.lib Shell32.lib OleAut32.lib uxtheme.lib dxgi.lib d3d11.lib d2d1.lib dcomp.lib /OUT:$(outdir)\SimpleWindowManager.exe
 !IF "$(requireAdmin)" == "TRUE"
 	mt -manifest SimpleWindowManager.manifest -outputresource:$(outdir)\SimpleWindowManager.exe;1
 !ENDIF
