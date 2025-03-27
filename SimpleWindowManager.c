@@ -32,6 +32,7 @@
 #include "SimpleWindowManager.h"
 #include "dcomp_border_window.h"
 #include "nfm_menu.h"
+#include "cloak.h"
 
 #define MAX_WORKSPACES 10
 
@@ -1081,10 +1082,10 @@ BOOL is_root_window(HWND hwnd, LONG styles, LONG exStyles)
 {
     HWND desktopWindow = GetDesktopWindow();
 
-    if(is_window_cloaked(hwnd))
-    {
-        return FALSE;
-    }
+    /*if(is_window_cloaked(hwnd))*/
+    /*{*/
+    /*    return FALSE;*/
+    /*}*/
 
     if(hwnd == desktopWindow)
     {
@@ -1926,6 +1927,7 @@ void CALLBACK handle_windows_event(
                 return;
             }
         }
+        //Move to cloak
         else if(event == EVENT_SYSTEM_MINIMIZESTART)
         {
             Client* client = windowManager_find_client_in_workspaces_by_hwnd(&g_windowManagerState, hwnd);
@@ -2360,6 +2362,7 @@ void client_move_to_location_on_screen(
     long targetHeight = client->data->h + topBorderWidth + bottomBorderWidth;
     long targetLeft = client->data->x - leftBorderWidth;
     long targetWidth = client->data->w + leftBorderWidth + rightBorderWidth;
+    BOOL isCloaked = is_window_cloaked(client->data->hwnd);
 
     if(!client->isVisible)
     {
@@ -2369,7 +2372,8 @@ void client_move_to_location_on_screen(
     if( targetTop == wrect.top &&
             targetLeft == wrect.left &&
             targetTop + targetHeight == wrect.bottom &&
-            targetLeft + targetWidth == wrect.right)
+            targetLeft + targetWidth == wrect.right &&
+            !isCloaked)
     {
         return;
     }
@@ -2403,7 +2407,8 @@ void client_move_to_location_on_screen(
         {
             if(client->workspace->monitor->isHidden || !client->isVisible)
             {
-                ShowWindow(client->data->hwnd, SW_MINIMIZE);
+                SetCloakForWindow(client->data->hwnd, AVCT_UNKNOWN1, 2);
+                //ShowWindow(client->data->hwnd, SW_MINIMIZE);
                 return;
             }
         }
@@ -2428,7 +2433,8 @@ void client_move_to_location_on_screen(
         {
             if(!client->workspace->monitor->isHidden)
             {
-                ShowWindow(client->data->hwnd, SW_NORMAL);
+                SetCloakForWindow(client->data->hwnd, AVCT_UNKNOWN1, 0);
+                //ShowWindow(client->data->hwnd, SW_NORMAL);
                 return;
             }
         }
