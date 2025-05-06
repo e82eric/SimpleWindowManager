@@ -133,7 +133,7 @@ static void button_redraw(Button *button);
 static void bar_apply_workspace_change(Bar *bar, Workspace *previousWorkspace, Workspace *newWorkspace);
 static void bar_trigger_paint(Bar *bar);
 static void bar_trigger_selected_window_paint(Bar *self);
-static void bar_run(Bar *bar, WNDCLASSEX *barWindowClass, int barHeight);
+static void bar_run(Bar *bar, WNDCLASSEX *barWindowClass, int barHeight, int gapWidth);
 static void border_window_update(WindowManagerState *windowManagerState);
 static void border_window_update_with_defer(WindowManagerState *windowManagerState, HDWP hdwp);
 static void border_window_hide(HWND self);
@@ -4517,15 +4517,17 @@ WNDCLASSEX* bar_register_window_class(void)
     return wc;
 }
 
-void bar_run(Bar *bar, WNDCLASSEX *barWindowClass, int barHeight)
+void bar_run(Bar *bar, WNDCLASSEX *barWindowClass, int barHeight, int gapWidth)
 {
     HWND hwnd = CreateWindowEx(
         WS_EX_TOOLWINDOW | WS_EX_CONTROLPARENT | WS_EX_COMPOSITED,
         barWindowClass->lpszClassName,
         L"SimpleWM Bar",
         (DWORD) ~ (WS_CAPTION | WS_THICKFRAME | WS_MINIMIZE | WS_MAXIMIZE | WS_SYSMENU | WS_DISABLED | WS_BORDER | WS_DLGFRAME | WS_SIZEBOX),
+        //bar->monitor->xOffset + gapWidth - 5,
         bar->monitor->xOffset,
         0,
+        //bar->monitor->w - (gapWidth * 2) + 10,
         bar->monitor->w,
         barHeight,
         NULL,
@@ -4875,10 +4877,10 @@ void border_window_update_with_defer(WindowManagerState *windowManagerState, HDW
             RECT currentPosition;
             GetWindowRect(windowManagerState->borderWindowHwnd, &currentPosition);
 
-            int targetLeft = selectedClientData->x - 4;
-            int targetTop = selectedClientData->y - 4;
-            int targetWidth = selectedClientData->w + 8;
-            int targetHeight = selectedClientData->h + 8;
+            int targetLeft = selectedClientData->x - 4 - 5;
+            int targetTop = selectedClientData->y - 4 - 5;
+            int targetWidth = selectedClientData->w + 8 + 10;
+            int targetHeight = selectedClientData->h + 8 + 10;
 
             int currentWidth = currentPosition.right - currentPosition.left;
             int currentHeight = currentPosition.bottom - currentPosition.top;
@@ -5982,8 +5984,9 @@ void configuration_register_default_text_style(Configuration *self, TCHAR *fontN
     COLORREF normalTextColor = RGB(235, 219, 178);
     COLORREF disabledColor = 0x504945;
     COLORREF focusTextColor = RGB(204, 36, 29);
-    COLORREF focusColor2 = RGB(250, 189, 47);
+    //COLORREF focusColor2 = RGB(250, 189, 47);
     COLORREF lostFocusColor = RGB(142, 192, 124);
+    COLORREF focusColor2 = 0x00888545;;//RGB(131, 165, 152);
 
     self->textStyle->font = textFont;
     self->textStyle->iconFont = iconFont;
@@ -6235,7 +6238,7 @@ int run (void)
             RECT *timesRect = malloc(sizeof(RECT));
             assert(timesRect);
             timesRect->left = (g_windowManagerState.monitors[i]->w / 2);
-            timesRect->right = g_windowManagerState.monitors[i]->w - 10;
+            timesRect->right = g_windowManagerState.monitors[i]->w;
             timesRect->top = barTop;
             timesRect->bottom = barBottom;
 
@@ -6350,7 +6353,7 @@ int run (void)
 
     for(int i = 0; i < g_windowManagerState.numberOfDisplayMonitors; i++)
     {
-        bar_run(g_windowManagerState.monitors[i]->bar, barWindowClass, barHeight);
+        bar_run(g_windowManagerState.monitors[i]->bar, barWindowClass, barHeight, workspaceStyle->gapWidth);
         HDC barHdc = GetDC(g_windowManagerState.monitors[i]->bar->hwnd);
         bar_add_segments_from_configuration(g_windowManagerState.monitors[i]->bar, barHdc, configuration);
         DeleteDC(barHdc);

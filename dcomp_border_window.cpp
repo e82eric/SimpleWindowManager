@@ -82,15 +82,41 @@ void Draw(ComPtr<ID2D1SolidColorBrush> brush)
     g_dc->SetTarget(g_bitmap.Get());
     g_dc->BeginDraw();
 
-    D2D1_COLOR_F const brushColor = D2D1::ColorF(0.0f,
-            0.0f,
-            0.0f,
-            0.5f);
+    /*D2D1_COLOR_F const brushColor = D2D1::ColorF(0.0f,*/
+    /*        0.0f,*/
+    /*        0.0f,*/
+    /*        0.5f);*/
 
-    g_dc->Clear(brushColor);
-    D2D1_RECT_F rect2 = D2D1::RectF(0.0f, 0.0f, static_cast<float>(rect.right), static_cast<float>(rect.bottom));
-    FLOAT borderThickness = 10.0f;
-    g_dc->DrawRectangle(&rect2, brush.Get(), borderThickness);
+    //g_dc->Clear(brushColor);
+
+
+D2D1_RECT_F rect2 = D2D1::RectF(7.0f, 7.0f, static_cast<float>(rect.right - 7), static_cast<float>(rect.bottom - 7));
+FLOAT borderThickness = 5.0f;
+D2D1_ROUNDED_RECT roundedRect = D2D1::RoundedRect(rect2, 7.0f, 7.0f);
+D2D1_STROKE_STYLE_PROPERTIES strokeStyleProperties =
+    D2D1::StrokeStyleProperties(
+            D2D1_CAP_STYLE_FLAT,    // startCap
+            D2D1_CAP_STYLE_FLAT,    // endCap
+            D2D1_CAP_STYLE_FLAT,    // dashCap
+            D2D1_LINE_JOIN_ROUND,   // lineJoin <-- IMPORTANT
+            20.0f,                  // miterLimit
+            D2D1_DASH_STYLE_SOLID,  // dashStyle
+            0.0f                    // dashOffset
+            );
+
+ComPtr<ID2D1StrokeStyle> strokeStyle;
+HR(g_d2Factory->CreateStrokeStyle(
+            strokeStyleProperties,
+            nullptr,      // no custom dashes
+            0,            // dash count
+            &strokeStyle
+            ));
+
+g_dc->DrawRoundedRectangle(roundedRect, brush.Get(), borderThickness, strokeStyle.Get());
+
+    /*D2D1_RECT_F rect2 = D2D1::RectF(0.0f, 0.0f, static_cast<float>(rect.right), static_cast<float>(rect.bottom));*/
+    /*FLOAT borderThickness = 10.0f;*/
+    /*g_dc->DrawRectangle(&rect2, brush.Get(), borderThickness);*/
 
     HR(g_dc->EndDraw());
     HR(g_swapChain->Present(1, 0));
