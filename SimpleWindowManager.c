@@ -4020,21 +4020,10 @@ void monitor_calulate_coordinates(WindowManagerState *windowManager, Monitor *mo
     else
     {
         monitor->isHidden = FALSE;
-        HWND taskbarHwnd = FindWindow(TASKBAR_CLASS, NULL);
-        monitor_calculate_height(monitor, taskbarHwnd);
     }
 
-    HWND taskBarHwnd;
-    if(monitorNumber == 0)
-    {
-        taskBarHwnd = FindWindow(TASKBAR_CLASS, NULL);
-    }
-    else
-    {
-        taskBarHwnd = FindWindow(TASKBAR2_CLASS, NULL);
-    }
-
-    monitor_calculate_height(monitor, taskBarHwnd);
+    HWND taskbarHwnd = FindWindow(TASKBAR_CLASS, NULL);
+    monitor_calculate_height(monitor, taskbarHwnd);
 }
 
 void monitor_select_next(WindowManagerState *self)
