@@ -5450,7 +5450,7 @@ void keybindings_register_defaults_with_modifiers(int modifiers)
     keybinding_create_with_workspace_arg("move_focused_window_to_workspace[9]", LShift | modifiers, VK_9, move_focused_window_to_workspace, g_windowManagerState.workspaces[8]);
     keybinding_create_with_no_arg("move_focused_window_to_selected_monitor_workspace", LShift | modifiers, VK_0, move_focused_window_to_selected_monitor_workspace);
 
-    keybinding_create_with_no_arg("goto_last_workspace", modifiers, VK_O, goto_last_workspace);
+    //keybinding_create_with_no_arg("goto_last_workspace", modifiers, VK_O, goto_last_workspace);
 
     keybinding_create_with_no_arg("close_focused_window", modifiers, VK_C, close_focused_window);
     keybinding_create_with_no_arg("kill_focused_window", LShift | modifiers, VK_C, kill_focused_window);
