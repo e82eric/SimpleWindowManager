@@ -5,6 +5,7 @@
 #include <strsafe.h>
 
 #include "ListWindows.h"
+#include "RestoreMovedWindows.h"
 
 typedef struct CallbackParams
 {
@@ -12,7 +13,7 @@ typedef struct CallbackParams
     int screenRight;
 } CallbackParams;
 
-static BOOL CALLBACK enum_windows_callback(HWND hwnd, LPARAM lparam)
+BOOL restore_moved_windows_callback(HWND hwnd, LPARAM lparam)
 {
     CallbackParams *params = (CallbackParams*)lparam;
 
@@ -67,18 +68,15 @@ static BOOL CALLBACK enum_windows_callback(HWND hwnd, LPARAM lparam)
     return TRUE;
 }
 
-int main(int argc, char *argv[])
+static BOOL CALLBACK enum_windows_callback(HWND hwnd, LPARAM lparam)
 {
-    CallbackParams params = { FALSE, 0 };
-    if (argc >= 2 && strcmp(argv[1], "--NoRestore") == 0)
-    {
-        params.noRestore = TRUE;
-    }
-
-    params.screenRight = GetSystemMetrics(SM_CXMAXTRACK);
-    printf("Params: screenRight: %d, noRestore: %d\n", params.screenRight, params.noRestore);
-
-    EnumWindows(enum_windows_callback, (LPARAM)&params);
-
-    return 0;
+    return restore_moved_windows_callback(hwnd, lparam);
 }
+
+void restore_moved_windows_to_screen(BOOL noRestore)
+{
+    CallbackParams params = { noRestore, 0 };
+    params.screenRight = GetSystemMetrics(SM_CXMAXTRACK);
+    EnumWindows(enum_windows_callback, (LPARAM)&params);
+}
+
