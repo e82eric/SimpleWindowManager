@@ -75,6 +75,30 @@ static BOOL CALLBACK enum_windows_callback(HWND hwnd, LPARAM lparam)
 
 void restore_moved_windows_to_screen(BOOL noRestore)
 {
+    HWND primaryTaskbar = FindWindow(L"Shell_TrayWnd", NULL);
+    if (primaryTaskbar && !IsWindowVisible(primaryTaskbar))
+    {
+        printf("Unhiding primary taskbar\n");
+        if (!noRestore)
+        {
+            ShowWindow(primaryTaskbar, SW_SHOW);
+        }
+    }
+
+    HWND secondaryTaskbar = FindWindow(L"Shell_SecondaryTrayWnd", NULL);
+    while (secondaryTaskbar)
+    {
+        if (!IsWindowVisible(secondaryTaskbar))
+        {
+            printf("Unhiding secondary taskbar\n");
+            if (!noRestore)
+            {
+                ShowWindow(secondaryTaskbar, SW_SHOW);
+            }
+        }
+        secondaryTaskbar = FindWindowEx(NULL, secondaryTaskbar, L"Shell_SecondaryTrayWnd", NULL);
+    }
+
     CallbackParams params = { noRestore, 0 };
     params.screenRight = GetSystemMetrics(SM_CXMAXTRACK);
     EnumWindows(enum_windows_callback, (LPARAM)&params);
