@@ -123,6 +123,7 @@ struct Configuration
     int dragDropFloatModifier;
     int floatWindowMovement;
     int borderWindowBackgroundTransparency;
+    int barRightPadding;
     TextStyle *textStyle;
     WorkspaceStyle *workspaceStyle;
 };

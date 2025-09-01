@@ -4235,6 +4235,7 @@ void text_style_render_text(TextStyle *self, HDC hdc, RECT *rect, TCHAR *text, s
     SelectObject(hdc, oldFont);
 }
 
+
 void text_style_render_normal_text(TextStyle *self, HDC hdc, RECT *rect, TCHAR *text, size_t textLength, bool isIcon)
 {
     text_style_render_text(self,hdc, rect, text, textLength, self->textColor, isIcon);
@@ -4263,12 +4264,13 @@ void bar_segment_set_variable_text(BarSegment *self)
     self->variable->textLength = _tcslen(self->variable->text);
 }
 
+
 void bar_segment_render_variable_text(BarSegment *self, HDC hdc, TextStyle *textStyle)
 {
     text_style_render_normal_text(textStyle, hdc, &self->variable->rect, self->variable->text, self->variable->textLength, self->variable->isIcon);
 }
 
-void bar_segment_initalize_rectangles(BarSegment *self, HDC hdc, int right, Bar *bar)
+void bar_segment_initalize_rectangles(BarSegment *self, HDC hdc, int right, Bar *bar, int rightPadding)
 {
     RECT variableTextRect = { 0, 0, 0, 0 };
     TCHAR variableValueBuff[MAX_PATH];
@@ -4290,7 +4292,8 @@ void bar_segment_initalize_rectangles(BarSegment *self, HDC hdc, int right, Bar 
     SelectObject(hdc, oldFont);
 
     int variableWidth = variableTextRect.right - variableTextRect.left;
-    int variableLeft = right - variableWidth;
+    int effectiveRight = right - rightPadding;
+    int variableLeft = effectiveRight - variableWidth;
     
     self->variable->rect.right = right;
     self->variable->rect.left = variableLeft;
@@ -4358,7 +4361,8 @@ void bar_add_segments_from_configuration(Bar *self, HDC hdc, Configuration *conf
         segment->variableTextFunc = config->barSegments[i]->variableTextFunc;
         self->segments[i] = segment;
 
-        bar_segment_initalize_rectangles(segment, hdc, segmentRightEdge, self);
+        int padding = (i == 0) ? config->barRightPadding : 0;
+        bar_segment_initalize_rectangles(segment, hdc, segmentRightEdge, self, padding);
         segmentRightEdge = segment->separator->rect.left;
 
         self->selectedWindowDescRect->right = self->segments[i]->separator->rect.left;
@@ -6165,6 +6169,7 @@ int run (void)
     configuration->dragDropFloatModifier = LAlt;
     configuration->floatWindowMovement = 75;
     configuration->borderWindowBackgroundTransparency = (128 << 24);
+    configuration->barRightPadding = 10;
     configuration->workspaceStyle = workspaceStyle;
     configure(configuration);
     g_windowManagerState.currentWindowRoutingMode = configuration->windowRoutingMode;
