@@ -4467,6 +4467,13 @@ LRESULT CALLBACK bar_message_loop(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPa
               msgBar->timesRect,
               FALSE);
             return 0;
+        case WM_RBUTTONDOWN:
+            msgBar = (Bar *) GetWindowLongPtr(hwnd, GWLP_USERDATA);
+            if(msgBar && msgBar->windowManager)
+            {
+                run_new_commands_menu(msgBar->windowManager);
+            }
+            return 0;
         case WM_CLOSE:
             DestroyWindow(hwnd);
             break;
@@ -5416,6 +5423,8 @@ KeyBinding* keybindings_find_existing_or_create(WindowManagerState *windowManage
 
 void keybindings_register_defaults_with_modifiers(int modifiers)
 {
+    keybinding_create_with_no_arg("quit", modifiers | LShift, VK_F9, quit);
+    
     keybinding_create_with_no_arg("select_next_window", modifiers, VK_J, select_next_window);
     keybinding_create_with_no_arg("select_previous_window", modifiers, VK_K, select_previous_window);
     keybinding_create_with_no_arg("monitor_select_next", modifiers, VK_OEM_COMMA, monitor_select_next);
@@ -5466,8 +5475,6 @@ void keybindings_register_defaults_with_modifiers(int modifiers)
     /* keybinding_create_with_no_arg("swap_selected_monitor_to_horizontaldeck_layout", modifiers, VK_H, swap_selected_monitor_to_horizontaldeck_layout); */
     keybinding_create_with_no_arg("swap_selected_monitor_to_tile_layout", modifiers, VK_U, swap_selected_monitor_to_tile_layout);
     keybinding_create_with_no_arg("redraw_focused_window", modifiers, VK_I, redraw_focused_window);
-
-    keybinding_create_with_no_arg("quit", modifiers | LShift, VK_F9, quit);
 }
 
 void keybindings_register_defaults(void)
