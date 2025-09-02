@@ -5435,8 +5435,8 @@ KeyBinding* keybindings_find_existing_or_create(WindowManagerState *windowManage
 
 void keybindings_register_defaults_with_modifiers(int modifiers)
 {
-    keybinding_create_with_no_arg("quit", modifiers | LShift, VK_F9, quit);
     keybinding_create_with_no_arg("quit_and_restore_windows", modifiers | LShift, VK_F10, quit_and_restore_windows);
+    keybinding_create_with_no_arg("quit", modifiers | LShift, VK_F9, quit);
     
     keybinding_create_with_no_arg("select_next_window", modifiers, VK_J, select_next_window);
     keybinding_create_with_no_arg("select_previous_window", modifiers, VK_K, select_previous_window);
