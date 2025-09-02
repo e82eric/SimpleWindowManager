@@ -15,11 +15,14 @@ typedef struct ScratchWindow ScratchWindow;
 typedef struct Configuration Configuration;
 typedef struct BarSegment BarSegment;
 typedef struct BarSegmentConfiguration BarSegmentConfiguration;
+typedef struct FloatLogEntry FloatLogEntry;
+typedef struct FloatLogBuffer FloatLogBuffer;
 
 typedef BOOL (*WindowFilter)(Client *client);
 typedef BOOL (*ScratchFilter)(ScratchWindow *self, Client *client);
 
 #define MAX_COMMANDS 256
+#define FLOAT_LOG_BUFFER_SIZE 100
 
 #define VK_A 0x41
 #define VK_B 0x42
@@ -299,6 +302,29 @@ struct KeyBinding
     KeyBinding *next;
 };
 
+struct FloatLogEntry
+{
+    SYSTEMTIME timestamp;
+    HWND hwnd;
+    DWORD processId;
+    TCHAR processImageName[MAX_PATH];
+    TCHAR className[MAX_PATH];
+    TCHAR title[256];
+    BOOL isFloated;
+    TCHAR reason[512];
+    LONG_PTR styles;
+    LONG_PTR exStyles;
+    int windowWidth;
+    int windowHeight;
+};
+
+struct FloatLogBuffer
+{
+    FloatLogEntry entries[FLOAT_LOG_BUFFER_SIZE];
+    int head;
+    int count;
+};
+
 struct WindowManagerState
 {
     Monitor *primaryMonitor;
@@ -325,6 +351,7 @@ struct WindowManagerState
     enum WindowRoutingMode currentWindowRoutingMode;
     BOOL (*useOldMoveLogicFunc) (Client *client);
     TextStyle *textStyle;
+    FloatLogBuffer floatLogBuffer;
 };
 
 typedef struct DragDropState
@@ -470,4 +497,9 @@ void register_secondary_monitor_default_bindings(Monitor *pMonitor, Monitor *sMo
 void register_secondary_monitor_default_bindings_with_modifiers(int modifiers, Monitor *pMonitor, Monitor *sMonitor, Workspace **spaces);
 BOOL should_use_old_move_logic(Client* client);
 BOOL is_float_window(Client *client, LONG_PTR styles, LONG_PTR exStyles);
+void log_float_decision(WindowManagerState *windowManager, Client *client, LONG_PTR styles, LONG_PTR exStyles, BOOL isFloated, const TCHAR *reason);
+void initialize_float_log_buffer(FloatLogBuffer *buffer);
+void register_float_logs_menu_with_modifiers(int modifiers, int virtualKey);
+void register_float_logs_menu(void);
+void run_float_logs_menu(WindowManagerState *state);
 HFONT initalize_font();

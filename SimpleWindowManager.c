@@ -370,6 +370,88 @@ void run_new_file_system_menu(WindowManagerState *state)
     g_windowManagerState.menuVisible = true;
 }
 
+char** globalFloatLogLines = NULL;
+
+char** list_float_logs_for_menu(void *state)
+{
+    WindowManagerState *windowManager = (WindowManagerState*)state;
+    FloatLogBuffer *buffer = &windowManager->floatLogBuffer;
+    
+    if (globalFloatLogLines)
+    {
+        for (int i = 0; globalFloatLogLines[i] != NULL; i++)
+        {
+            free(globalFloatLogLines[i]);
+        }
+        free(globalFloatLogLines);
+    }
+    
+    if (buffer->count == 0)
+    {
+        globalFloatLogLines = (char**)calloc(2, sizeof(char*));
+        globalFloatLogLines[0] = (char*)calloc(256, sizeof(char));
+        sprintf_s(globalFloatLogLines[0], 256, "No float decisions logged yet");
+        return globalFloatLogLines;
+    }
+    
+    globalFloatLogLines = (char**)calloc(buffer->count + 1, sizeof(char*));
+    
+    int current = (buffer->head - buffer->count + FLOAT_LOG_BUFFER_SIZE) % FLOAT_LOG_BUFFER_SIZE;
+    
+    for (int i = 0; i < buffer->count; i++)
+    {
+        FloatLogEntry *entry = &buffer->entries[current];
+        globalFloatLogLines[i] = (char*)calloc(1024, sizeof(char));
+        
+        char timeStr[32];
+        sprintf_s(timeStr, 32, "%02d:%02d:%02d", 
+                 entry->timestamp.wHour, 
+                 entry->timestamp.wMinute, 
+                 entry->timestamp.wSecond);
+        
+        char processName[MAX_PATH];
+        wcstombs_s(NULL, processName, MAX_PATH, entry->processImageName, _TRUNCATE);
+        
+        char className[MAX_PATH];
+        wcstombs_s(NULL, className, MAX_PATH, entry->className, _TRUNCATE);
+        
+        char title[256];
+        wcstombs_s(NULL, title, 256, entry->title, _TRUNCATE);
+        
+        char reason[512];
+        wcstombs_s(NULL, reason, 512, entry->reason, _TRUNCATE);
+        
+        sprintf_s(globalFloatLogLines[i], 1024, 
+                 "%-8s %-7s %-20.20s %-25.25s %-30.30s %s",
+                 timeStr,
+                 entry->isFloated ? "FLOAT" : "TILE",
+                 processName,
+                 className,
+                 title,
+                 reason);
+        
+        current = (current + 1) % FLOAT_LOG_BUFFER_SIZE;
+    }
+    
+    return globalFloatLogLines;
+}
+
+void run_float_logs_menu(WindowManagerState *state)
+{
+    char header[512];
+    sprintf_s(header, 512, 
+             "%-8s %-7s %-20s %-25s %-30s %s",
+             "Time",
+             "Action", 
+             "Process",
+             "Class",
+             "Title",
+             "Reason");
+             
+    nfm_show_items_list(header, list_float_logs_for_menu, NULL, menu_on_closed, state);
+    g_windowManagerState.menuVisible = true;
+}
+
 char** list_commands_for_menu(WindowManagerState *state)
 {
     if(!globalCommandLines)
@@ -427,6 +509,16 @@ void register_keybindings_menu_with_modifiers(int modifiers, int virtualKey)
 void register_keybindings_menu(void)
 {
     register_keybindings_menu_with_modifiers(LAlt, VK_OEM_2);
+}
+
+void register_float_logs_menu_with_modifiers(int modifiers, int virtualKey)
+{
+    keybinding_create_with_no_arg("FloatLogsMenu", modifiers, virtualKey, run_float_logs_menu);
+}
+
+void register_float_logs_menu(void)
+{
+    register_float_logs_menu_with_modifiers(LAlt, VK_F8);
 }
 
 void register_last_definition_menu(int modifiers, int virtualKey)
@@ -957,10 +1049,16 @@ BOOL has_float_styles(LONG_PTR styles, LONG_PTR exStyles)
 
 BOOL is_float_window(Client *client, LONG_PTR styles, LONG_PTR exStyles)
 {
+    TCHAR reason[512] = {0};
+    BOOL shouldFloat = FALSE;
+    
     if(configuration->windowsThatShouldNotFloatFunc)
     {
         if(!configuration->windowsThatShouldNotFloatFunc(client, styles, exStyles))
         {
+            _tcscpy_s(reason, 512, _T("Configuration function explicitly prevents floating"));
+            shouldFloat = FALSE;
+            log_float_decision(&g_windowManagerState, client, styles, exStyles, shouldFloat, reason);
             return FALSE;
         }
     }
@@ -969,12 +1067,16 @@ BOOL is_float_window(Client *client, LONG_PTR styles, LONG_PTR exStyles)
     {
         if(configuration->floatUwpWindows)
         {
-            return TRUE;
+            _stprintf_s(reason, 512, _T("UWP window and floatUwpWindows=TRUE (className: %s)"), client->data->className);
+            shouldFloat = TRUE;
         }
         else
         {
-            return FALSE;
+            _stprintf_s(reason, 512, _T("UWP window but floatUwpWindows=FALSE (className: %s)"), client->data->className);
+            shouldFloat = FALSE;
         }
+        log_float_decision(&g_windowManagerState, client, styles, exStyles, shouldFloat, reason);
+        return shouldFloat;
     }
 
     WINDOWPLACEMENT placement = {0};
@@ -983,16 +1085,93 @@ BOOL is_float_window(Client *client, LONG_PTR styles, LONG_PTR exStyles)
         int height = placement.rcNormalPosition.bottom - placement.rcNormalPosition.top;
         if(height < configuration->nonFloatWindowHeightMinimum)
         {
+            _stprintf_s(reason, 512, _T("Window height (%d) below minimum (%d)"), 
+                       height, configuration->nonFloatWindowHeightMinimum);
+            shouldFloat = TRUE;
+            log_float_decision(&g_windowManagerState, client, styles, exStyles, shouldFloat, reason);
             return TRUE;
         }
     }
 
     if(has_float_styles(styles, exStyles))
     {
+        _stprintf_s(reason, 512, _T("Has float styles - styles:0x%08X exStyles:0x%08X "), 
+                   (DWORD)styles, (DWORD)exStyles);
+        
+        if(exStyles & WS_EX_TOOLWINDOW)
+            _tcscat_s(reason, 512, _T("[TOOLWINDOW] "));
+        if(!(styles & WS_SIZEBOX))
+            _tcscat_s(reason, 512, _T("[NO_SIZEBOX] "));
+        if(exStyles & WS_EX_APPWINDOW)
+            _tcscat_s(reason, 512, _T("[APPWINDOW_OVERRIDE] "));
+            
+        shouldFloat = TRUE;
+        log_float_decision(&g_windowManagerState, client, styles, exStyles, shouldFloat, reason);
         return TRUE;
     }
 
+    _stprintf_s(reason, 512, _T("No floating criteria met - will be tiled (styles:0x%08X exStyles:0x%08X)"), 
+               (DWORD)styles, (DWORD)exStyles);
+    shouldFloat = FALSE;
+    log_float_decision(&g_windowManagerState, client, styles, exStyles, shouldFloat, reason);
     return FALSE;
+}
+
+void initialize_float_log_buffer(FloatLogBuffer *buffer)
+{
+    if (!buffer) return;
+    
+    memset(buffer->entries, 0, sizeof(buffer->entries));
+    buffer->head = 0;
+    buffer->count = 0;
+}
+
+void log_float_decision(WindowManagerState *windowManager, Client *client, LONG_PTR styles, LONG_PTR exStyles, BOOL isFloated, const TCHAR *reason)
+{
+    if (!windowManager || !client || !reason) return;
+    
+    FloatLogBuffer *buffer = &windowManager->floatLogBuffer;
+    FloatLogEntry *entry = &buffer->entries[buffer->head];
+    
+    GetLocalTime(&entry->timestamp);
+    entry->hwnd = client->data->hwnd;
+    entry->processId = client->data->processId;
+    entry->isFloated = isFloated;
+    entry->styles = styles;
+    entry->exStyles = exStyles;
+    
+    if (client->data->processImageName)
+        _tcscpy_s(entry->processImageName, MAX_PATH, client->data->processImageName);
+    else
+        _tcscpy_s(entry->processImageName, MAX_PATH, _T("Unknown"));
+    
+    if (client->data->className)
+        _tcscpy_s(entry->className, MAX_PATH, client->data->className);
+    else
+        _tcscpy_s(entry->className, MAX_PATH, _T("Unknown"));
+    
+    if (client->data->title)
+        _tcsncpy_s(entry->title, 256, client->data->title, _TRUNCATE);
+    else
+        _tcscpy_s(entry->title, 256, _T("Unknown"));
+    
+    _tcsncpy_s(entry->reason, 512, reason, _TRUNCATE);
+    
+    RECT windowRect;
+    if (GetWindowRect(client->data->hwnd, &windowRect))
+    {
+        entry->windowWidth = windowRect.right - windowRect.left;
+        entry->windowHeight = windowRect.bottom - windowRect.top;
+    }
+    else
+    {
+        entry->windowWidth = 0;
+        entry->windowHeight = 0;
+    }
+    
+    buffer->head = (buffer->head + 1) % FLOAT_LOG_BUFFER_SIZE;
+    if (buffer->count < FLOAT_LOG_BUFFER_SIZE)
+        buffer->count++;
 }
 
 static BOOL CALLBACK enum_windows_callback(HWND hwnd, LPARAM lparam)
@@ -6108,6 +6287,7 @@ int run (void)
     memset(&g_resizeState, 0, sizeof(ResizeState));
     g_resizeState.windowManager = &g_windowManagerState;
     g_dragDropState.windowManager = &g_windowManagerState;
+    initialize_float_log_buffer(&g_windowManagerState.floatLogBuffer);
     HANDLE hMutex;
     hMutex = CreateMutex(NULL, TRUE, TEXT("SimpleWindowManagerSingleInstanceLock"));
     if (GetLastError() == ERROR_ALREADY_EXISTS)

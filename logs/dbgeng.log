@@ -1,0 +1,7 @@
+2025-09-01 21:36:14.567 -07:00 [INF] TryCreateMcpServer dbgeng.dll loaded from: C:\Users\eric\Tools\WinDbgX\amd64\dbgeng.dll
+2025-09-01 21:36:14.647 -07:00 [INF] ModelContextProtocol.Server.McpServer Server (DbgEngServer 1.0.0) method 'initialize' request handler called.
+2025-09-01 21:36:14.654 -07:00 [INF] ModelContextProtocol.Server.McpServer Server (DbgEngServer 1.0.0), Client (claude-code 1.0.100) method 'initialize' request handler completed.
+2025-09-01 21:36:14.667 -07:00 [INF] ModelContextProtocol.Server.McpServer Server (DbgEngServer 1.0.0), Client (claude-code 1.0.100) method 'tools/list' request handler called.
+2025-09-01 21:36:14.668 -07:00 [INF] DbgEngMcp.DbgEngMcpServer HandleListTools called
+2025-09-01 21:36:14.686 -07:00 [INF] DbgEngMcp.DbgEngMcpServer Returning 3 tools
+2025-09-01 21:36:14.687 -07:00 [INF] ModelContextProtocol.Server.McpServer Server (DbgEngServer 1.0.0), Client (claude-code 1.0.100) method 'tools/list' request handler completed.
