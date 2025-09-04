@@ -370,85 +370,177 @@ void run_new_file_system_menu(WindowManagerState *state)
     g_windowManagerState.menuVisible = true;
 }
 
-char** globalFloatLogLines = NULL;
 
-char** list_float_logs_for_menu(void *state)
+void run_float_logs_menu(WindowManagerState *state)
 {
-    WindowManagerState *windowManager = (WindowManagerState*)state;
-    FloatLogBuffer *buffer = &windowManager->floatLogBuffer;
+    FloatLogBuffer *buffer = &state->floatLogBuffer;
     
-    if (globalFloatLogLines)
-    {
-        for (int i = 0; globalFloatLogLines[i] != NULL; i++)
-        {
-            free(globalFloatLogLines[i]);
-        }
-        free(globalFloatLogLines);
-    }
+    static char* column_names[] = {"Time", "Action", "Process", "Class", "Title", "Reason"};
     
     if (buffer->count == 0)
     {
-        globalFloatLogLines = (char**)calloc(2, sizeof(char*));
-        globalFloatLogLines[0] = (char*)calloc(256, sizeof(char));
-        sprintf_s(globalFloatLogLines[0], 256, "No float decisions logged yet");
-        return globalFloatLogLines;
+        static char time_str[] = "";
+        static char action_str[] = "";
+        static char process_str[] = "No float decisions logged yet";
+        static char class_str[] = "";
+        static char title_str[] = "";
+        static char reason_str[] = "";
+        
+        static char* row_data[] = {time_str, action_str, process_str, class_str, title_str, reason_str};
+        static char** row_ptrs[] = {row_data};
+        
+        nfm_show_array_columns(
+            (char***)row_ptrs,
+            1,
+            6,
+            column_names,
+            6,
+            1,
+            noop,
+            menu_on_closed,
+            state
+        );
+        g_windowManagerState.menuVisible = true;
+        return;
     }
     
-    globalFloatLogLines = (char**)calloc(buffer->count + 1, sizeof(char*));
+    static char time_buffers[FLOAT_LOG_BUFFER_SIZE][32];
+    static char action_buffers[FLOAT_LOG_BUFFER_SIZE][8];
+    static char process_buffers[FLOAT_LOG_BUFFER_SIZE][MAX_PATH];
+    static char class_buffers[FLOAT_LOG_BUFFER_SIZE][MAX_PATH];
+    static char title_buffers[FLOAT_LOG_BUFFER_SIZE][256];
+    static char reason_buffers[FLOAT_LOG_BUFFER_SIZE][512];
+    static char* row_data[FLOAT_LOG_BUFFER_SIZE][6];
+    static char** row_ptrs[FLOAT_LOG_BUFFER_SIZE];
     
     int current = (buffer->head - buffer->count + FLOAT_LOG_BUFFER_SIZE) % FLOAT_LOG_BUFFER_SIZE;
     
     for (int i = 0; i < buffer->count; i++)
     {
         FloatLogEntry *entry = &buffer->entries[current];
-        globalFloatLogLines[i] = (char*)calloc(1024, sizeof(char));
         
-        char timeStr[32];
-        sprintf_s(timeStr, 32, "%02d:%02d:%02d", 
+        sprintf_s(time_buffers[i], 32, "%02d:%02d:%02d", 
                  entry->timestamp.wHour, 
                  entry->timestamp.wMinute, 
                  entry->timestamp.wSecond);
         
-        char processName[MAX_PATH];
-        wcstombs_s(NULL, processName, MAX_PATH, entry->processImageName, _TRUNCATE);
+        strcpy_s(action_buffers[i], 8, entry->isFloated ? "FLOAT" : "TILE");
         
-        char className[MAX_PATH];
-        wcstombs_s(NULL, className, MAX_PATH, entry->className, _TRUNCATE);
+        wcstombs_s(NULL, process_buffers[i], MAX_PATH, entry->processImageName, _TRUNCATE);
+        wcstombs_s(NULL, class_buffers[i], MAX_PATH, entry->className, _TRUNCATE);
+        wcstombs_s(NULL, title_buffers[i], 256, entry->title, _TRUNCATE);
+        wcstombs_s(NULL, reason_buffers[i], 512, entry->reason, _TRUNCATE);
         
-        char title[256];
-        wcstombs_s(NULL, title, 256, entry->title, _TRUNCATE);
+        row_data[i][0] = time_buffers[i];
+        row_data[i][1] = action_buffers[i];
+        row_data[i][2] = process_buffers[i];
+        row_data[i][3] = class_buffers[i];
+        row_data[i][4] = title_buffers[i];
+        row_data[i][5] = reason_buffers[i];
         
-        char reason[512];
-        wcstombs_s(NULL, reason, 512, entry->reason, _TRUNCATE);
-        
-        sprintf_s(globalFloatLogLines[i], 1024, 
-                 "%-8s %-7s %-20.20s %-25.25s %-30.30s %s",
-                 timeStr,
-                 entry->isFloated ? "FLOAT" : "TILE",
-                 processName,
-                 className,
-                 title,
-                 reason);
-        
+        row_ptrs[i] = row_data[i];
         current = (current + 1) % FLOAT_LOG_BUFFER_SIZE;
     }
     
-    return globalFloatLogLines;
+    nfm_show_array_columns(
+        (char***)row_ptrs,          // arrayData
+        buffer->count,              // rowCount
+        6,                          // columnCount
+        column_names,               // columnNames
+        6,                          // columnNamesCount
+        1,                          // showPreview (enabled)
+        noop,                       // onSelect callback (just hide menu)
+        menu_on_closed,             // onClosed callback
+        state                       // state
+    );
+    
+    g_windowManagerState.menuVisible = true;
 }
 
-void run_float_logs_menu(WindowManagerState *state)
+void run_client_logs_menu(WindowManagerState *state)
 {
-    char header[512];
-    sprintf_s(header, 512, 
-             "%-8s %-7s %-20s %-25s %-30s %s",
-             "Time",
-             "Action", 
-             "Process",
-             "Class",
-             "Title",
-             "Reason");
-             
-    nfm_show_items_list(header, list_float_logs_for_menu, NULL, menu_on_closed, state);
+    static char time_buffers[CLIENT_LOG_BUFFER_SIZE][32];
+    static char state_buffers[CLIENT_LOG_BUFFER_SIZE][8];
+    static char layout_buffers[CLIENT_LOG_BUFFER_SIZE][8];
+    static char process_buffers[CLIENT_LOG_BUFFER_SIZE][MAX_PATH];
+    static char class_buffers[CLIENT_LOG_BUFFER_SIZE][MAX_PATH];
+    static char workspace_buffers[CLIENT_LOG_BUFFER_SIZE][256];
+    static char title_buffers[CLIENT_LOG_BUFFER_SIZE][256];
+    
+    static char* row_data[CLIENT_LOG_BUFFER_SIZE][7];
+    static char** row_ptrs[CLIENT_LOG_BUFFER_SIZE];
+    
+    ClientLogBuffer *buffer = &state->clientLogBuffer;
+    int rowCount = buffer->count > 0 ? buffer->count : 1;
+    
+    if (buffer->count == 0)
+    {
+        strcpy_s(time_buffers[0], sizeof(time_buffers[0]), "No clients logged yet");
+        strcpy_s(state_buffers[0], sizeof(state_buffers[0]), "");
+        strcpy_s(layout_buffers[0], sizeof(layout_buffers[0]), "");
+        strcpy_s(process_buffers[0], sizeof(process_buffers[0]), "");
+        strcpy_s(class_buffers[0], sizeof(class_buffers[0]), "");
+        strcpy_s(workspace_buffers[0], sizeof(workspace_buffers[0]), "");
+        strcpy_s(title_buffers[0], sizeof(title_buffers[0]), "");
+        
+        row_data[0][0] = time_buffers[0];
+        row_data[0][1] = state_buffers[0];
+        row_data[0][2] = layout_buffers[0];
+        row_data[0][3] = process_buffers[0];
+        row_data[0][4] = class_buffers[0];
+        row_data[0][5] = workspace_buffers[0];
+        row_data[0][6] = title_buffers[0];
+        row_ptrs[0] = row_data[0];
+    }
+    else
+    {
+        int current = (buffer->head - buffer->count + CLIENT_LOG_BUFFER_SIZE) % CLIENT_LOG_BUFFER_SIZE;
+        
+        for (int i = 0; i < buffer->count; i++)
+        {
+            ClientLogEntry *entry = &buffer->entries[current];
+            
+            sprintf_s(time_buffers[i], sizeof(time_buffers[i]), "%02d:%02d:%02d", 
+                     entry->timestamp.wHour, 
+                     entry->timestamp.wMinute, 
+                     entry->timestamp.wSecond);
+            
+            strcpy_s(state_buffers[i], sizeof(state_buffers[i]), entry->wasMinimized ? "MIN" : "NORM");
+            
+            strcpy_s(layout_buffers[i], sizeof(layout_buffers[i]), entry->isFloated ? "FLOAT" : "TILE");
+            
+            wcstombs_s(NULL, process_buffers[i], sizeof(process_buffers[i]), entry->processImageName, _TRUNCATE);
+            wcstombs_s(NULL, class_buffers[i], sizeof(class_buffers[i]), entry->className, _TRUNCATE);
+            wcstombs_s(NULL, workspace_buffers[i], sizeof(workspace_buffers[i]), entry->workspaceName, _TRUNCATE);
+            wcstombs_s(NULL, title_buffers[i], sizeof(title_buffers[i]), entry->title, _TRUNCATE);
+            
+            row_data[i][0] = time_buffers[i];
+            row_data[i][1] = state_buffers[i];
+            row_data[i][2] = layout_buffers[i];
+            row_data[i][3] = process_buffers[i];
+            row_data[i][4] = class_buffers[i];
+            row_data[i][5] = workspace_buffers[i];
+            row_data[i][6] = title_buffers[i];
+            row_ptrs[i] = row_data[i];
+            
+            current = (current + 1) % CLIENT_LOG_BUFFER_SIZE;
+        }
+    }
+    
+    static char* column_names[] = {"Time", "State", "Layout", "Process", "Class", "Workspace", "Title"};
+    
+    nfm_show_array_columns(
+        (char***)row_ptrs,
+        rowCount,
+        7,
+        column_names,
+        7,
+        1,
+        noop,
+        menu_on_closed,
+        state
+    );
+    
     g_windowManagerState.menuVisible = true;
 }
 
@@ -521,6 +613,16 @@ void register_float_logs_menu(void)
     register_float_logs_menu_with_modifiers(LAlt, VK_F8);
 }
 
+void register_client_logs_menu_with_modifiers(int modifiers, int virtualKey)
+{
+    keybinding_create_with_no_arg("ClientLogsMenu", modifiers, virtualKey, run_client_logs_menu);
+}
+
+void register_client_logs_menu(void)
+{
+    register_client_logs_menu_with_modifiers(LAlt, VK_F9);
+}
+
 void register_last_definition_menu(int modifiers, int virtualKey)
 {
     keybinding_create_with_no_arg("LastMenu", modifiers, virtualKey, run_new_last_definition_menu);
@@ -540,6 +642,7 @@ void register_file_sytem_memu(int modifiers, int virtualKey)
 {
     keybinding_create_with_no_arg("FileSystemMenu", modifiers, virtualKey, run_new_file_system_menu);
 }
+
 
 void register_list_services_menu(int modifiers, int virtualKey)
 {
@@ -1099,11 +1202,17 @@ BOOL is_float_window(Client *client, LONG_PTR styles, LONG_PTR exStyles)
                    (DWORD)styles, (DWORD)exStyles);
         
         if(exStyles & WS_EX_TOOLWINDOW)
+        {
             _tcscat_s(reason, 512, _T("[TOOLWINDOW] "));
+        }
         if(!(styles & WS_SIZEBOX))
+        {
             _tcscat_s(reason, 512, _T("[NO_SIZEBOX] "));
+        }
         if(exStyles & WS_EX_APPWINDOW)
+        {
             _tcscat_s(reason, 512, _T("[APPWINDOW_OVERRIDE] "));
+        }
             
         shouldFloat = TRUE;
         log_float_decision(&g_windowManagerState, client, styles, exStyles, shouldFloat, reason);
@@ -1128,7 +1237,10 @@ void initialize_float_log_buffer(FloatLogBuffer *buffer)
 
 void log_float_decision(WindowManagerState *windowManager, Client *client, LONG_PTR styles, LONG_PTR exStyles, BOOL isFloated, const TCHAR *reason)
 {
-    if (!windowManager || !client || !reason) return;
+    if (!windowManager || !client || !reason)
+    {
+        return;
+    }
     
     FloatLogBuffer *buffer = &windowManager->floatLogBuffer;
     FloatLogEntry *entry = &buffer->entries[buffer->head];
@@ -1141,19 +1253,31 @@ void log_float_decision(WindowManagerState *windowManager, Client *client, LONG_
     entry->exStyles = exStyles;
     
     if (client->data->processImageName)
+    {
         _tcscpy_s(entry->processImageName, MAX_PATH, client->data->processImageName);
+    }
     else
+    {
         _tcscpy_s(entry->processImageName, MAX_PATH, _T("Unknown"));
+    }
     
     if (client->data->className)
+    {
         _tcscpy_s(entry->className, MAX_PATH, client->data->className);
+    }
     else
+    {
         _tcscpy_s(entry->className, MAX_PATH, _T("Unknown"));
+    }
     
     if (client->data->title)
+    {
         _tcsncpy_s(entry->title, 256, client->data->title, _TRUNCATE);
+    }
     else
+    {
         _tcscpy_s(entry->title, 256, _T("Unknown"));
+    }
     
     _tcsncpy_s(entry->reason, 512, reason, _TRUNCATE);
     
@@ -1171,6 +1295,72 @@ void log_float_decision(WindowManagerState *windowManager, Client *client, LONG_
     
     buffer->head = (buffer->head + 1) % FLOAT_LOG_BUFFER_SIZE;
     if (buffer->count < FLOAT_LOG_BUFFER_SIZE)
+    {
+        buffer->count++;
+    }
+}
+
+void initialize_client_log_buffer(ClientLogBuffer *buffer)
+{
+    if (!buffer) return;
+    
+    memset(buffer->entries, 0, sizeof(buffer->entries));
+    buffer->head = 0;
+    buffer->count = 0;
+}
+
+void log_client_addition(WindowManagerState *windowManager, Client *client, Workspace *workspace, BOOL wasMinimized)
+{
+    if (!windowManager || !client || !workspace) return;
+    
+    ClientLogBuffer *buffer = &windowManager->clientLogBuffer;
+    ClientLogEntry *entry = &buffer->entries[buffer->head];
+    
+    GetLocalTime(&entry->timestamp);
+    entry->hwnd = client->data->hwnd;
+    entry->processId = client->data->processId;
+    entry->wasMinimized = wasMinimized;
+    
+    LONG styles = GetWindowLong(client->data->hwnd, GWL_STYLE);
+    LONG exStyles = GetWindowLong(client->data->hwnd, GWL_EXSTYLE);
+    entry->styles = styles;
+    entry->exStyles = exStyles;
+    entry->isFloated = is_float_window(client, styles, exStyles);
+    
+    if (client->data->processImageName)
+        _tcscpy_s(entry->processImageName, MAX_PATH, client->data->processImageName);
+    else
+        _tcscpy_s(entry->processImageName, MAX_PATH, _T("Unknown"));
+    
+    if (client->data->className)
+        _tcscpy_s(entry->className, MAX_PATH, client->data->className);
+    else
+        _tcscpy_s(entry->className, MAX_PATH, _T("Unknown"));
+    
+    if (client->data->title)
+        _tcsncpy_s(entry->title, 256, client->data->title, _TRUNCATE);
+    else
+        _tcscpy_s(entry->title, 256, _T("Unknown"));
+    
+    if (workspace->name)
+        _tcsncpy_s(entry->workspaceName, 256, workspace->name, _TRUNCATE);
+    else
+        _tcscpy_s(entry->workspaceName, 256, _T("Unknown"));
+    
+    RECT windowRect;
+    if (GetWindowRect(client->data->hwnd, &windowRect))
+    {
+        entry->windowWidth = windowRect.right - windowRect.left;
+        entry->windowHeight = windowRect.bottom - windowRect.top;
+    }
+    else
+    {
+        entry->windowWidth = 0;
+        entry->windowHeight = 0;
+    }
+    
+    buffer->head = (buffer->head + 1) % CLIENT_LOG_BUFFER_SIZE;
+    if (buffer->count < CLIENT_LOG_BUFFER_SIZE)
         buffer->count++;
 }
 
@@ -2779,6 +2969,8 @@ void workspace_add_unminimized_client(Workspace *workspace, Client *client)
 void workspace_add_client(Workspace *workspace, Client *client)
 {
     client->workspace = workspace;
+    BOOL wasMinimized = client->data->isMinimized;
+    
     if(client->data->isMinimized)
     {
         workspace_add_minimized_client(workspace, client);
@@ -2789,6 +2981,8 @@ void workspace_add_client(Workspace *workspace, Client *client)
     }
 
     workspace_update_client_counts(workspace);
+    
+    log_client_addition(&g_windowManagerState, client, workspace, wasMinimized);
 }
 
 void workspace_remove_client_and_arrange(WindowManagerState *windowManagerState, Workspace *workspace, Client *client)
@@ -6288,6 +6482,7 @@ int run (void)
     g_resizeState.windowManager = &g_windowManagerState;
     g_dragDropState.windowManager = &g_windowManagerState;
     initialize_float_log_buffer(&g_windowManagerState.floatLogBuffer);
+    initialize_client_log_buffer(&g_windowManagerState.clientLogBuffer);
     HANDLE hMutex;
     hMutex = CreateMutex(NULL, TRUE, TEXT("SimpleWindowManagerSingleInstanceLock"));
     if (GetLastError() == ERROR_ALREADY_EXISTS)

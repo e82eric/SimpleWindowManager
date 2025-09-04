@@ -17,12 +17,15 @@ typedef struct BarSegment BarSegment;
 typedef struct BarSegmentConfiguration BarSegmentConfiguration;
 typedef struct FloatLogEntry FloatLogEntry;
 typedef struct FloatLogBuffer FloatLogBuffer;
+typedef struct ClientLogEntry ClientLogEntry;
+typedef struct ClientLogBuffer ClientLogBuffer;
 
 typedef BOOL (*WindowFilter)(Client *client);
 typedef BOOL (*ScratchFilter)(ScratchWindow *self, Client *client);
 
 #define MAX_COMMANDS 256
 #define FLOAT_LOG_BUFFER_SIZE 100
+#define CLIENT_LOG_BUFFER_SIZE 100
 
 #define VK_A 0x41
 #define VK_B 0x42
@@ -325,6 +328,30 @@ struct FloatLogBuffer
     int count;
 };
 
+struct ClientLogEntry
+{
+    SYSTEMTIME timestamp;
+    HWND hwnd;
+    DWORD processId;
+    TCHAR processImageName[MAX_PATH];
+    TCHAR className[MAX_PATH];
+    TCHAR title[256];
+    TCHAR workspaceName[256];
+    BOOL wasMinimized;
+    BOOL isFloated;
+    LONG_PTR styles;
+    LONG_PTR exStyles;
+    int windowWidth;
+    int windowHeight;
+};
+
+struct ClientLogBuffer
+{
+    ClientLogEntry entries[CLIENT_LOG_BUFFER_SIZE];
+    int head;
+    int count;
+};
+
 struct WindowManagerState
 {
     Monitor *primaryMonitor;
@@ -352,6 +379,7 @@ struct WindowManagerState
     BOOL (*useOldMoveLogicFunc) (Client *client);
     TextStyle *textStyle;
     FloatLogBuffer floatLogBuffer;
+    ClientLogBuffer clientLogBuffer;
 };
 
 typedef struct DragDropState
@@ -502,4 +530,9 @@ void initialize_float_log_buffer(FloatLogBuffer *buffer);
 void register_float_logs_menu_with_modifiers(int modifiers, int virtualKey);
 void register_float_logs_menu(void);
 void run_float_logs_menu(WindowManagerState *state);
+void log_client_addition(WindowManagerState *windowManager, Client *client, Workspace *workspace, BOOL wasMinimized);
+void initialize_client_log_buffer(ClientLogBuffer *buffer);
+void register_client_logs_menu_with_modifiers(int modifiers, int virtualKey);
+void register_client_logs_menu(void);
+void run_client_logs_menu(WindowManagerState *state);
 HFONT initalize_font();

@@ -7,6 +7,7 @@ nfm_show_programs_list_func nfm_show_programs_list = NULL;
 nfm_show_windows_list_func nfm_show_windows_list = NULL;
 nfm_show_processes_list_func nfm_show_processes_list = NULL;
 nfm_show_items_list_func nfm_show_items_list = NULL;
+nfm_show_array_columns_func nfm_show_array_columns = NULL;
 nfm_hide_func nfm_hide = NULL;
 nfm_run_last_definition_func nfm_run_last_definition = NULL;
 
@@ -23,11 +24,12 @@ HMODULE nfm_load_library(const char* dllPath) {
     nfm_show_windows_list = (nfm_show_windows_list_func)GetProcAddress(hModule, "ShowWindowsList");
     nfm_show_processes_list = (nfm_show_processes_list_func)GetProcAddress(hModule, "ShowProcessesList");
     nfm_show_items_list = (nfm_show_items_list_func)GetProcAddress(hModule, "ShowItemsList");
+    nfm_show_array_columns = (nfm_show_array_columns_func)GetProcAddress(hModule, "ShowArrayColumns");
     nfm_hide = (nfm_hide_func)GetProcAddress(hModule, "Hide");
     nfm_run_last_definition = (nfm_run_last_definition_func)GetProcAddress(hModule, "RunLastDefinition");
 
     if (!nfm_initialize || !nfm_show_file_system || !nfm_show_programs_list || !nfm_show_windows_list ||
-        !nfm_show_processes_list || !nfm_show_items_list || !nfm_hide || !nfm_run_last_definition) {
+        !nfm_show_processes_list || !nfm_show_items_list || !nfm_show_array_columns || !nfm_hide || !nfm_run_last_definition) {
         fprintf(stderr, "Failed to resolve one or more functions in DLL.\n");
         FreeLibrary(hModule);
         return NULL;

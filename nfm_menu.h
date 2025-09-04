@@ -38,6 +38,17 @@ typedef void (*nfm_show_items_list_func)(
     nfm_on_closed_callback onClosed,
     void* state
 );
+typedef void (*nfm_show_array_columns_func)(
+    char*** arrayData,
+    int rowCount,
+    int columnCount,
+    char** columnNames,
+    int columnNamesCount,
+    int showPreview,
+    nfm_on_select_string_callback onSelect,
+    nfm_on_closed_callback onClosed,
+    void* state
+);
 typedef void (*nfm_hide_func)();
 typedef void (*nfm_run_last_definition_func)();
 
@@ -50,6 +61,7 @@ extern nfm_show_programs_list_func nfm_show_programs_list;
 extern nfm_show_windows_list_func nfm_show_windows_list;
 extern nfm_show_processes_list_func nfm_show_processes_list;
 extern nfm_show_items_list_func nfm_show_items_list;
+extern nfm_show_array_columns_func nfm_show_array_columns;
 extern nfm_hide_func nfm_hide;
 extern nfm_run_last_definition_func nfm_run_last_definition;
 
