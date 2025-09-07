@@ -113,6 +113,8 @@ static int workspace_get_number_of_clients(Workspace *workspace);
 static KeyBinding* keybindings_find_existing_or_create(WindowManagerState *windowManager, CHAR* name, int modifiers, unsigned int key);
 static ScratchWindow* scratch_windows_find_from_client(WindowManagerState *self, Client *client);
 static ScratchWindow* scratch_windows_find_from_hwnd(WindowManagerState *self, HWND hwnd);
+static void format_window_styles(LONG_PTR styles, TCHAR* buffer, size_t bufferSize);
+static void format_extended_styles(LONG_PTR exStyles, TCHAR* buffer, size_t bufferSize);
 static void scratch_window_toggle(WindowManagerState *windowManager, ScratchWindow *self);
 static void scratch_window_show(WindowManagerState *windowManagerState, ScratchWindow *self);
 static void scratch_window_hide(WindowManagerState *windowManager, ScratchWindow *self);
@@ -375,7 +377,7 @@ void run_float_logs_menu(WindowManagerState *state)
 {
     FloatLogBuffer *buffer = &state->floatLogBuffer;
     
-    static char* column_names[] = {"Time", "Action", "Process", "Class", "Title", "Reason"};
+    static char* column_names[] = {"Time", "Action", "Process", "Class", "Title", "Styles", "ExStyles", "Reason"};
     
     if (buffer->count == 0)
     {
@@ -384,17 +386,19 @@ void run_float_logs_menu(WindowManagerState *state)
         static char process_str[] = "No float decisions logged yet";
         static char class_str[] = "";
         static char title_str[] = "";
+        static char styles_str[] = "";
+        static char exstyles_str[] = "";
         static char reason_str[] = "";
         
-        static char* row_data[] = {time_str, action_str, process_str, class_str, title_str, reason_str};
+        static char* row_data[] = {time_str, action_str, process_str, class_str, title_str, styles_str, exstyles_str, reason_str};
         static char** row_ptrs[] = {row_data};
         
         nfm_show_array_columns(
             (char***)row_ptrs,
             1,
-            6,
+            8,
             column_names,
-            6,
+            8,
             1,
             noop,
             menu_on_closed,
@@ -409,8 +413,10 @@ void run_float_logs_menu(WindowManagerState *state)
     static char process_buffers[FLOAT_LOG_BUFFER_SIZE][MAX_PATH];
     static char class_buffers[FLOAT_LOG_BUFFER_SIZE][MAX_PATH];
     static char title_buffers[FLOAT_LOG_BUFFER_SIZE][256];
+    static char styles_buffers[FLOAT_LOG_BUFFER_SIZE][512];
+    static char exstyles_buffers[FLOAT_LOG_BUFFER_SIZE][512];
     static char reason_buffers[FLOAT_LOG_BUFFER_SIZE][512];
-    static char* row_data[FLOAT_LOG_BUFFER_SIZE][6];
+    static char* row_data[FLOAT_LOG_BUFFER_SIZE][8];
     static char** row_ptrs[FLOAT_LOG_BUFFER_SIZE];
     
     int current = (buffer->head - buffer->count + FLOAT_LOG_BUFFER_SIZE) % FLOAT_LOG_BUFFER_SIZE;
@@ -429,6 +435,15 @@ void run_float_logs_menu(WindowManagerState *state)
         wcstombs_s(NULL, process_buffers[i], MAX_PATH, entry->processImageName, _TRUNCATE);
         wcstombs_s(NULL, class_buffers[i], MAX_PATH, entry->className, _TRUNCATE);
         wcstombs_s(NULL, title_buffers[i], 256, entry->title, _TRUNCATE);
+        
+        // Format styles and extended styles
+        TCHAR stylesTemp[512];
+        TCHAR exStylesTemp[512];
+        format_window_styles(entry->styles, stylesTemp, 512);
+        format_extended_styles(entry->exStyles, exStylesTemp, 512);
+        wcstombs_s(NULL, styles_buffers[i], 512, stylesTemp, _TRUNCATE);
+        wcstombs_s(NULL, exstyles_buffers[i], 512, exStylesTemp, _TRUNCATE);
+        
         wcstombs_s(NULL, reason_buffers[i], 512, entry->reason, _TRUNCATE);
         
         row_data[i][0] = time_buffers[i];
@@ -436,7 +451,9 @@ void run_float_logs_menu(WindowManagerState *state)
         row_data[i][2] = process_buffers[i];
         row_data[i][3] = class_buffers[i];
         row_data[i][4] = title_buffers[i];
-        row_data[i][5] = reason_buffers[i];
+        row_data[i][5] = styles_buffers[i];
+        row_data[i][6] = exstyles_buffers[i];
+        row_data[i][7] = reason_buffers[i];
         
         row_ptrs[i] = row_data[i];
         current = (current + 1) % FLOAT_LOG_BUFFER_SIZE;
@@ -445,9 +462,9 @@ void run_float_logs_menu(WindowManagerState *state)
     nfm_show_array_columns(
         (char***)row_ptrs,          // arrayData
         buffer->count,              // rowCount
-        6,                          // columnCount
+        8,                          // columnCount
         column_names,               // columnNames
-        6,                          // columnNamesCount
+        8,                          // columnNamesCount
         1,                          // showPreview (enabled)
         noop,                       // onSelect callback (just hide menu)
         menu_on_closed,             // onClosed callback
@@ -1130,6 +1147,72 @@ void quit_and_restore_windows(WindowManagerState *self)
     ExitProcess(0);
 }
 
+static void format_window_styles(LONG_PTR styles, TCHAR* buffer, size_t bufferSize)
+{
+    buffer[0] = _T('\0');
+    BOOL first = TRUE;
+    
+    if (styles & WS_OVERLAPPED) { if (!first) _tcscat_s(buffer, bufferSize, _T("\n    ")); _tcscat_s(buffer, bufferSize, _T("WS_OVERLAPPED")); first = FALSE; }
+    if (styles & WS_POPUP) { if (!first) _tcscat_s(buffer, bufferSize, _T("\n    ")); _tcscat_s(buffer, bufferSize, _T("WS_POPUP")); first = FALSE; }
+    if (styles & WS_CHILD) { if (!first) _tcscat_s(buffer, bufferSize, _T("\n    ")); _tcscat_s(buffer, bufferSize, _T("WS_CHILD")); first = FALSE; }
+    if (styles & WS_MINIMIZE) { if (!first) _tcscat_s(buffer, bufferSize, _T("\n    ")); _tcscat_s(buffer, bufferSize, _T("WS_MINIMIZE")); first = FALSE; }
+    if (styles & WS_VISIBLE) { if (!first) _tcscat_s(buffer, bufferSize, _T("\n    ")); _tcscat_s(buffer, bufferSize, _T("WS_VISIBLE")); first = FALSE; }
+    if (styles & WS_DISABLED) { if (!first) _tcscat_s(buffer, bufferSize, _T("\n    ")); _tcscat_s(buffer, bufferSize, _T("WS_DISABLED")); first = FALSE; }
+    if (styles & WS_CLIPSIBLINGS) { if (!first) _tcscat_s(buffer, bufferSize, _T("\n    ")); _tcscat_s(buffer, bufferSize, _T("WS_CLIPSIBLINGS")); first = FALSE; }
+    if (styles & WS_CLIPCHILDREN) { if (!first) _tcscat_s(buffer, bufferSize, _T("\n    ")); _tcscat_s(buffer, bufferSize, _T("WS_CLIPCHILDREN")); first = FALSE; }
+    if (styles & WS_MAXIMIZE) { if (!first) _tcscat_s(buffer, bufferSize, _T("\n    ")); _tcscat_s(buffer, bufferSize, _T("WS_MAXIMIZE")); first = FALSE; }
+    if (styles & WS_CAPTION) { if (!first) _tcscat_s(buffer, bufferSize, _T("\n    ")); _tcscat_s(buffer, bufferSize, _T("WS_CAPTION")); first = FALSE; }
+    if (styles & WS_BORDER) { if (!first) _tcscat_s(buffer, bufferSize, _T("\n    ")); _tcscat_s(buffer, bufferSize, _T("WS_BORDER")); first = FALSE; }
+    if (styles & WS_DLGFRAME) { if (!first) _tcscat_s(buffer, bufferSize, _T("\n    ")); _tcscat_s(buffer, bufferSize, _T("WS_DLGFRAME")); first = FALSE; }
+    if (styles & WS_VSCROLL) { if (!first) _tcscat_s(buffer, bufferSize, _T("\n    ")); _tcscat_s(buffer, bufferSize, _T("WS_VSCROLL")); first = FALSE; }
+    if (styles & WS_HSCROLL) { if (!first) _tcscat_s(buffer, bufferSize, _T("\n    ")); _tcscat_s(buffer, bufferSize, _T("WS_HSCROLL")); first = FALSE; }
+    if (styles & WS_SYSMENU) { if (!first) _tcscat_s(buffer, bufferSize, _T("\n    ")); _tcscat_s(buffer, bufferSize, _T("WS_SYSMENU")); first = FALSE; }
+    if (styles & WS_THICKFRAME) { if (!first) _tcscat_s(buffer, bufferSize, _T("\n    ")); _tcscat_s(buffer, bufferSize, _T("WS_THICKFRAME")); first = FALSE; }
+    if (styles & WS_MINIMIZEBOX) { if (!first) _tcscat_s(buffer, bufferSize, _T("\n    ")); _tcscat_s(buffer, bufferSize, _T("WS_MINIMIZEBOX")); first = FALSE; }
+    if (styles & WS_MAXIMIZEBOX) { if (!first) _tcscat_s(buffer, bufferSize, _T("\n    ")); _tcscat_s(buffer, bufferSize, _T("WS_MAXIMIZEBOX")); first = FALSE; }
+    if (styles & WS_TABSTOP) { if (!first) _tcscat_s(buffer, bufferSize, _T("\n    ")); _tcscat_s(buffer, bufferSize, _T("WS_TABSTOP")); first = FALSE; }
+    if (styles & WS_GROUP) { if (!first) _tcscat_s(buffer, bufferSize, _T("\n    ")); _tcscat_s(buffer, bufferSize, _T("WS_GROUP")); first = FALSE; }
+    
+    if (buffer[0] == _T('\0'))
+    {
+        _tcscpy_s(buffer, bufferSize, _T("NONE"));
+    }
+}
+
+static void format_extended_styles(LONG_PTR exStyles, TCHAR* buffer, size_t bufferSize)
+{
+    buffer[0] = _T('\0');
+    BOOL first = TRUE;
+    
+    if (exStyles & WS_EX_DLGMODALFRAME) { if (!first) _tcscat_s(buffer, bufferSize, _T("\n    ")); _tcscat_s(buffer, bufferSize, _T("WS_EX_DLGMODALFRAME")); first = FALSE; }
+    if (exStyles & WS_EX_NOPARENTNOTIFY) { if (!first) _tcscat_s(buffer, bufferSize, _T("\n    ")); _tcscat_s(buffer, bufferSize, _T("WS_EX_NOPARENTNOTIFY")); first = FALSE; }
+    if (exStyles & WS_EX_TOPMOST) { if (!first) _tcscat_s(buffer, bufferSize, _T("\n    ")); _tcscat_s(buffer, bufferSize, _T("WS_EX_TOPMOST")); first = FALSE; }
+    if (exStyles & WS_EX_ACCEPTFILES) { if (!first) _tcscat_s(buffer, bufferSize, _T("\n    ")); _tcscat_s(buffer, bufferSize, _T("WS_EX_ACCEPTFILES")); first = FALSE; }
+    if (exStyles & WS_EX_TRANSPARENT) { if (!first) _tcscat_s(buffer, bufferSize, _T("\n    ")); _tcscat_s(buffer, bufferSize, _T("WS_EX_TRANSPARENT")); first = FALSE; }
+    if (exStyles & WS_EX_MDICHILD) { if (!first) _tcscat_s(buffer, bufferSize, _T("\n    ")); _tcscat_s(buffer, bufferSize, _T("WS_EX_MDICHILD")); first = FALSE; }
+    if (exStyles & WS_EX_TOOLWINDOW) { if (!first) _tcscat_s(buffer, bufferSize, _T("\n    ")); _tcscat_s(buffer, bufferSize, _T("WS_EX_TOOLWINDOW")); first = FALSE; }
+    if (exStyles & WS_EX_WINDOWEDGE) { if (!first) _tcscat_s(buffer, bufferSize, _T("\n    ")); _tcscat_s(buffer, bufferSize, _T("WS_EX_WINDOWEDGE")); first = FALSE; }
+    if (exStyles & WS_EX_CLIENTEDGE) { if (!first) _tcscat_s(buffer, bufferSize, _T("\n    ")); _tcscat_s(buffer, bufferSize, _T("WS_EX_CLIENTEDGE")); first = FALSE; }
+    if (exStyles & WS_EX_CONTEXTHELP) { if (!first) _tcscat_s(buffer, bufferSize, _T("\n    ")); _tcscat_s(buffer, bufferSize, _T("WS_EX_CONTEXTHELP")); first = FALSE; }
+    if (exStyles & WS_EX_RIGHT) { if (!first) _tcscat_s(buffer, bufferSize, _T("\n    ")); _tcscat_s(buffer, bufferSize, _T("WS_EX_RIGHT")); first = FALSE; }
+    if (exStyles & WS_EX_RTLREADING) { if (!first) _tcscat_s(buffer, bufferSize, _T("\n    ")); _tcscat_s(buffer, bufferSize, _T("WS_EX_RTLREADING")); first = FALSE; }
+    if (exStyles & WS_EX_LEFTSCROLLBAR) { if (!first) _tcscat_s(buffer, bufferSize, _T("\n    ")); _tcscat_s(buffer, bufferSize, _T("WS_EX_LEFTSCROLLBAR")); first = FALSE; }
+    if (exStyles & WS_EX_CONTROLPARENT) { if (!first) _tcscat_s(buffer, bufferSize, _T("\n    ")); _tcscat_s(buffer, bufferSize, _T("WS_EX_CONTROLPARENT")); first = FALSE; }
+    if (exStyles & WS_EX_STATICEDGE) { if (!first) _tcscat_s(buffer, bufferSize, _T("\n    ")); _tcscat_s(buffer, bufferSize, _T("WS_EX_STATICEDGE")); first = FALSE; }
+    if (exStyles & WS_EX_APPWINDOW) { if (!first) _tcscat_s(buffer, bufferSize, _T("\n    ")); _tcscat_s(buffer, bufferSize, _T("WS_EX_APPWINDOW")); first = FALSE; }
+    if (exStyles & WS_EX_LAYERED) { if (!first) _tcscat_s(buffer, bufferSize, _T("\n    ")); _tcscat_s(buffer, bufferSize, _T("WS_EX_LAYERED")); first = FALSE; }
+    if (exStyles & WS_EX_NOINHERITLAYOUT) { if (!first) _tcscat_s(buffer, bufferSize, _T("\n    ")); _tcscat_s(buffer, bufferSize, _T("WS_EX_NOINHERITLAYOUT")); first = FALSE; }
+    if (exStyles & WS_EX_NOREDIRECTIONBITMAP) { if (!first) _tcscat_s(buffer, bufferSize, _T("\n    ")); _tcscat_s(buffer, bufferSize, _T("WS_EX_NOREDIRECTIONBITMAP")); first = FALSE; }
+    if (exStyles & WS_EX_LAYOUTRTL) { if (!first) _tcscat_s(buffer, bufferSize, _T("\n    ")); _tcscat_s(buffer, bufferSize, _T("WS_EX_LAYOUTRTL")); first = FALSE; }
+    if (exStyles & WS_EX_COMPOSITED) { if (!first) _tcscat_s(buffer, bufferSize, _T("\n    ")); _tcscat_s(buffer, bufferSize, _T("WS_EX_COMPOSITED")); first = FALSE; }
+    if (exStyles & WS_EX_NOACTIVATE) { if (!first) _tcscat_s(buffer, bufferSize, _T("\n    ")); _tcscat_s(buffer, bufferSize, _T("WS_EX_NOACTIVATE")); first = FALSE; }
+    
+    if (buffer[0] == _T('\0'))
+    {
+        _tcscpy_s(buffer, bufferSize, _T("NONE"));
+    }
+}
+
 BOOL has_float_styles(LONG_PTR styles, LONG_PTR exStyles)
 {
     if(exStyles & WS_EX_APPWINDOW)
@@ -1198,20 +1281,19 @@ BOOL is_float_window(Client *client, LONG_PTR styles, LONG_PTR exStyles)
 
     if(has_float_styles(styles, exStyles))
     {
-        _stprintf_s(reason, 512, _T("Has float styles - styles:0x%08X exStyles:0x%08X "), 
-                   (DWORD)styles, (DWORD)exStyles);
+        _tcscpy_s(reason, 512, _T("Has float styles: "));
         
         if(exStyles & WS_EX_TOOLWINDOW)
         {
-            _tcscat_s(reason, 512, _T("[TOOLWINDOW] "));
+            _tcscat_s(reason, 512, _T("TOOLWINDOW "));
         }
         if(!(styles & WS_SIZEBOX))
         {
-            _tcscat_s(reason, 512, _T("[NO_SIZEBOX] "));
+            _tcscat_s(reason, 512, _T("NO_SIZEBOX "));
         }
         if(exStyles & WS_EX_APPWINDOW)
         {
-            _tcscat_s(reason, 512, _T("[APPWINDOW_OVERRIDE] "));
+            _tcscat_s(reason, 512, _T("(APPWINDOW_OVERRIDE) "));
         }
             
         shouldFloat = TRUE;
@@ -1219,8 +1301,7 @@ BOOL is_float_window(Client *client, LONG_PTR styles, LONG_PTR exStyles)
         return TRUE;
     }
 
-    _stprintf_s(reason, 512, _T("No floating criteria met - will be tiled (styles:0x%08X exStyles:0x%08X)"), 
-               (DWORD)styles, (DWORD)exStyles);
+    _stprintf_s(reason, 512, _T("No floating criteria met - will be tiled"));
     shouldFloat = FALSE;
     log_float_decision(&g_windowManagerState, client, styles, exStyles, shouldFloat, reason);
     return FALSE;
