@@ -6555,7 +6555,6 @@ void discover_monitors(WindowManagerState *windowManager)
 
 int run (void)
 {
-
     SetProcessDPIAware();
     g_windowManagerState.numberOfCommands = 0;
     memset(&g_dragDropState, 0, sizeof(DragDropState));
