@@ -377,7 +377,12 @@ void run_float_logs_menu(WindowManagerState *state)
 {
     FloatLogBuffer *buffer = &state->floatLogBuffer;
     
-    static char* column_names[] = {"Time", "Action", "Process", "Class", "Title", "Styles", "ExStyles", "Reason"};
+    static char* column_names[] = {
+        "Time", "Action", "Process", "Class", "Title", "Styles", "ExStyles", "Reason",
+        "HWND", "ProcessId", "Width", "Height"
+    };
+    
+    static int display_column_indices[] = {0, 1, 2, 3, 4, 7};
     
     if (buffer->count == 0)
     {
@@ -389,16 +394,22 @@ void run_float_logs_menu(WindowManagerState *state)
         static char styles_str[] = "";
         static char exstyles_str[] = "";
         static char reason_str[] = "";
+        static char hwnd_str[] = "";
+        static char processid_str[] = "";
+        static char width_str[] = "";
+        static char height_str[] = "";
         
-        static char* row_data[] = {time_str, action_str, process_str, class_str, title_str, styles_str, exstyles_str, reason_str};
+        static char* row_data[] = {time_str, action_str, process_str, class_str, title_str, styles_str, exstyles_str, reason_str, hwnd_str, processid_str, width_str, height_str};
         static char** row_ptrs[] = {row_data};
         
-        nfm_show_array_columns(
+        nfm_show_array_columns_menu(
             (char***)row_ptrs,
             1,
-            8,
+            12,
             column_names,
-            8,
+            12,
+            display_column_indices,
+            6,
             1,
             noop,
             menu_on_closed,
@@ -416,7 +427,12 @@ void run_float_logs_menu(WindowManagerState *state)
     static char styles_buffers[FLOAT_LOG_BUFFER_SIZE][512];
     static char exstyles_buffers[FLOAT_LOG_BUFFER_SIZE][512];
     static char reason_buffers[FLOAT_LOG_BUFFER_SIZE][512];
-    static char* row_data[FLOAT_LOG_BUFFER_SIZE][8];
+    static char hwnd_buffers[FLOAT_LOG_BUFFER_SIZE][32];
+    static char processid_buffers[FLOAT_LOG_BUFFER_SIZE][16];
+    static char width_buffers[FLOAT_LOG_BUFFER_SIZE][16];
+    static char height_buffers[FLOAT_LOG_BUFFER_SIZE][16];
+    
+    static char* row_data[FLOAT_LOG_BUFFER_SIZE][12];
     static char** row_ptrs[FLOAT_LOG_BUFFER_SIZE];
     
     int current = (buffer->head - buffer->count + FLOAT_LOG_BUFFER_SIZE) % FLOAT_LOG_BUFFER_SIZE;
@@ -436,7 +452,6 @@ void run_float_logs_menu(WindowManagerState *state)
         wcstombs_s(NULL, class_buffers[i], MAX_PATH, entry->className, _TRUNCATE);
         wcstombs_s(NULL, title_buffers[i], 256, entry->title, _TRUNCATE);
         
-        // Format styles and extended styles
         TCHAR stylesTemp[512];
         TCHAR exStylesTemp[512];
         format_window_styles(entry->styles, stylesTemp, 512);
@@ -446,6 +461,11 @@ void run_float_logs_menu(WindowManagerState *state)
         
         wcstombs_s(NULL, reason_buffers[i], 512, entry->reason, _TRUNCATE);
         
+        sprintf_s(hwnd_buffers[i], sizeof(hwnd_buffers[i]), "0x%p", entry->hwnd);
+        sprintf_s(processid_buffers[i], sizeof(processid_buffers[i]), "%lu", entry->processId);
+        sprintf_s(width_buffers[i], sizeof(width_buffers[i]), "%d", entry->windowWidth);
+        sprintf_s(height_buffers[i], sizeof(height_buffers[i]), "%d", entry->windowHeight);
+        
         row_data[i][0] = time_buffers[i];
         row_data[i][1] = action_buffers[i];
         row_data[i][2] = process_buffers[i];
@@ -454,21 +474,27 @@ void run_float_logs_menu(WindowManagerState *state)
         row_data[i][5] = styles_buffers[i];
         row_data[i][6] = exstyles_buffers[i];
         row_data[i][7] = reason_buffers[i];
+        row_data[i][8] = hwnd_buffers[i];
+        row_data[i][9] = processid_buffers[i];
+        row_data[i][10] = width_buffers[i];
+        row_data[i][11] = height_buffers[i];
         
         row_ptrs[i] = row_data[i];
         current = (current + 1) % FLOAT_LOG_BUFFER_SIZE;
     }
     
-    nfm_show_array_columns(
-        (char***)row_ptrs,          // arrayData
-        buffer->count,              // rowCount
-        8,                          // columnCount
-        column_names,               // columnNames
-        8,                          // columnNamesCount
-        1,                          // showPreview (enabled)
-        noop,                       // onSelect callback (just hide menu)
-        menu_on_closed,             // onClosed callback
-        state                       // state
+    nfm_show_array_columns_menu(
+        (char***)row_ptrs,
+        buffer->count,
+        12,
+        column_names,
+        12,
+        display_column_indices,
+        6,
+        1,
+        noop,
+        menu_on_closed,
+        state
     );
     
     g_windowManagerState.menuVisible = true;
@@ -483,8 +509,16 @@ void run_client_logs_menu(WindowManagerState *state)
     static char class_buffers[CLIENT_LOG_BUFFER_SIZE][MAX_PATH];
     static char workspace_buffers[CLIENT_LOG_BUFFER_SIZE][256];
     static char title_buffers[CLIENT_LOG_BUFFER_SIZE][256];
+    static char hwnd_buffers[CLIENT_LOG_BUFFER_SIZE][32];
+    static char processid_buffers[CLIENT_LOG_BUFFER_SIZE][16];
+    static char wasminimized_buffers[CLIENT_LOG_BUFFER_SIZE][8];
+    static char isfloated_buffers[CLIENT_LOG_BUFFER_SIZE][8];
+    static char styles_buffers[CLIENT_LOG_BUFFER_SIZE][512];
+    static char exstyles_buffers[CLIENT_LOG_BUFFER_SIZE][512];
+    static char width_buffers[CLIENT_LOG_BUFFER_SIZE][16];
+    static char height_buffers[CLIENT_LOG_BUFFER_SIZE][16];
     
-    static char* row_data[CLIENT_LOG_BUFFER_SIZE][7];
+    static char* row_data[CLIENT_LOG_BUFFER_SIZE][15];  // All fields (7 current + 8 additional)
     static char** row_ptrs[CLIENT_LOG_BUFFER_SIZE];
     
     ClientLogBuffer *buffer = &state->clientLogBuffer;
@@ -499,6 +533,14 @@ void run_client_logs_menu(WindowManagerState *state)
         strcpy_s(class_buffers[0], sizeof(class_buffers[0]), "");
         strcpy_s(workspace_buffers[0], sizeof(workspace_buffers[0]), "");
         strcpy_s(title_buffers[0], sizeof(title_buffers[0]), "");
+        strcpy_s(hwnd_buffers[0], sizeof(hwnd_buffers[0]), "");
+        strcpy_s(processid_buffers[0], sizeof(processid_buffers[0]), "");
+        strcpy_s(wasminimized_buffers[0], sizeof(wasminimized_buffers[0]), "");
+        strcpy_s(isfloated_buffers[0], sizeof(isfloated_buffers[0]), "");
+        strcpy_s(styles_buffers[0], sizeof(styles_buffers[0]), "");
+        strcpy_s(exstyles_buffers[0], sizeof(exstyles_buffers[0]), "");
+        strcpy_s(width_buffers[0], sizeof(width_buffers[0]), "");
+        strcpy_s(height_buffers[0], sizeof(height_buffers[0]), "");
         
         row_data[0][0] = time_buffers[0];
         row_data[0][1] = state_buffers[0];
@@ -507,6 +549,14 @@ void run_client_logs_menu(WindowManagerState *state)
         row_data[0][4] = class_buffers[0];
         row_data[0][5] = workspace_buffers[0];
         row_data[0][6] = title_buffers[0];
+        row_data[0][7] = hwnd_buffers[0];
+        row_data[0][8] = processid_buffers[0];
+        row_data[0][9] = wasminimized_buffers[0];
+        row_data[0][10] = isfloated_buffers[0];
+        row_data[0][11] = styles_buffers[0];
+        row_data[0][12] = exstyles_buffers[0];
+        row_data[0][13] = width_buffers[0];
+        row_data[0][14] = height_buffers[0];
         row_ptrs[0] = row_data[0];
     }
     else
@@ -531,6 +581,23 @@ void run_client_logs_menu(WindowManagerState *state)
             wcstombs_s(NULL, workspace_buffers[i], sizeof(workspace_buffers[i]), entry->workspaceName, _TRUNCATE);
             wcstombs_s(NULL, title_buffers[i], sizeof(title_buffers[i]), entry->title, _TRUNCATE);
             
+            // Additional fields
+            sprintf_s(hwnd_buffers[i], sizeof(hwnd_buffers[i]), "0x%p", entry->hwnd);
+            sprintf_s(processid_buffers[i], sizeof(processid_buffers[i]), "%lu", entry->processId);
+            strcpy_s(wasminimized_buffers[i], sizeof(wasminimized_buffers[i]), entry->wasMinimized ? "TRUE" : "FALSE");
+            strcpy_s(isfloated_buffers[i], sizeof(isfloated_buffers[i]), entry->isFloated ? "TRUE" : "FALSE");
+            
+            // Format styles and extended styles using the same functions as FloatMenu
+            TCHAR stylesTemp[512];
+            TCHAR exStylesTemp[512];
+            format_window_styles(entry->styles, stylesTemp, 512);
+            format_extended_styles(entry->exStyles, exStylesTemp, 512);
+            wcstombs_s(NULL, styles_buffers[i], 512, stylesTemp, _TRUNCATE);
+            wcstombs_s(NULL, exstyles_buffers[i], 512, exStylesTemp, _TRUNCATE);
+            
+            sprintf_s(width_buffers[i], sizeof(width_buffers[i]), "%d", entry->windowWidth);
+            sprintf_s(height_buffers[i], sizeof(height_buffers[i]), "%d", entry->windowHeight);
+            
             row_data[i][0] = time_buffers[i];
             row_data[i][1] = state_buffers[i];
             row_data[i][2] = layout_buffers[i];
@@ -538,19 +605,34 @@ void run_client_logs_menu(WindowManagerState *state)
             row_data[i][4] = class_buffers[i];
             row_data[i][5] = workspace_buffers[i];
             row_data[i][6] = title_buffers[i];
+            row_data[i][7] = hwnd_buffers[i];
+            row_data[i][8] = processid_buffers[i];
+            row_data[i][9] = wasminimized_buffers[i];
+            row_data[i][10] = isfloated_buffers[i];
+            row_data[i][11] = styles_buffers[i];
+            row_data[i][12] = exstyles_buffers[i];
+            row_data[i][13] = width_buffers[i];
+            row_data[i][14] = height_buffers[i];
             row_ptrs[i] = row_data[i];
             
             current = (current + 1) % CLIENT_LOG_BUFFER_SIZE;
         }
     }
     
-    static char* column_names[] = {"Time", "State", "Layout", "Process", "Class", "Workspace", "Title"};
+    static char* all_column_names[] = {
+        "Time", "State", "Layout", "Process", "Class", "Workspace", "Title",
+        "HWND", "ProcessId", "WasMinimized", "IsFloated", "Styles", "ExStyles", "Width", "Height"
+    };
     
-    nfm_show_array_columns(
+    static int display_column_indices[] = {0, 1, 2, 3, 4, 5, 6};
+    
+    nfm_show_array_columns_menu(
         (char***)row_ptrs,
         rowCount,
-        7,
-        column_names,
+        15,
+        all_column_names,
+        15,
+        display_column_indices,
         7,
         1,
         noop,
@@ -4261,6 +4343,7 @@ MenuDefinition* menu_create_and_register(void)
 
 void menu_hide(WindowManagerState *windowManagerState)
 {
+    nfm_hide();
     windowManagerState->menuVisible = FALSE;
     bar_trigger_selected_window_paint(windowManagerState->selectedMonitor->bar);
     border_window_update(windowManagerState);
