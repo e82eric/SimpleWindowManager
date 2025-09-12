@@ -380,6 +380,8 @@ struct WindowManagerState
     TextStyle *textStyle;
     FloatLogBuffer floatLogBuffer;
     ClientLogBuffer clientLogBuffer;
+    CHAR **programLauncherDirectories;
+    size_t programLauncherDirectoryCount;
 };
 
 typedef struct DragDropState

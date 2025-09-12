@@ -161,6 +161,7 @@ static WindowManagerState g_windowManagerState;
 static ResizeState g_resizeState;
 static DragDropState g_dragDropState;
 
+
 Layout deckLayout = {
     .select_next_window = deckLayout_select_next_window,
     //using the same function for next and previous since there will only be 2 windows to swicth between.
@@ -356,15 +357,17 @@ void run_new_windows_menu(WindowManagerState *state)
 
 void run_new_programs_not_elevated_menu(WindowManagerState *state)
 {
-    nfm_show_programs_list(open_program_scratch_callback_not_elevated, menu_on_closed, state);
+    nfm_show_programs_list(state->programLauncherDirectories, (int)state->programLauncherDirectoryCount, open_program_scratch_callback_not_elevated, menu_on_closed, state);
     g_windowManagerState.menuVisible = true;
 }
 
 void run_new_programs_elevated_menu(WindowManagerState *state)
 {
-    nfm_show_programs_list(open_program_scratch_callback, menu_on_closed, state);
+    nfm_show_programs_list(state->programLauncherDirectories, (int)state->programLauncherDirectoryCount, open_program_scratch_callback, menu_on_closed, state);
     g_windowManagerState.menuVisible = true;
 }
+
+
 
 void run_new_file_system_menu(WindowManagerState *state)
 {
@@ -759,8 +762,33 @@ void register_list_services_menu(int modifiers, int virtualKey)
 
 void register_program_launcher_menu(int modifiers, int virtualKey, CHAR** directories, size_t numberOfDirectories, BOOL isElevated)
 {
-    UNREFERENCED_PARAMETER(numberOfDirectories);
-    UNREFERENCED_PARAMETER(directories);
+    if (g_windowManagerState.programLauncherDirectories != NULL)
+    {
+        for (size_t i = 0; i < g_windowManagerState.programLauncherDirectoryCount; i++)
+        {
+            free(g_windowManagerState.programLauncherDirectories[i]);
+        }
+        free(g_windowManagerState.programLauncherDirectories);
+    }
+    
+    g_windowManagerState.programLauncherDirectories = malloc(numberOfDirectories * sizeof(CHAR*));
+    if (g_windowManagerState.programLauncherDirectories == NULL)
+    {
+        g_windowManagerState.programLauncherDirectoryCount = 0;
+        return;
+    }
+    
+    g_windowManagerState.programLauncherDirectoryCount = numberOfDirectories;
+    for (size_t i = 0; i < numberOfDirectories; i++)
+    {
+        size_t len = strlen(directories[i]) + 1;
+        g_windowManagerState.programLauncherDirectories[i] = malloc(len);
+        if (g_windowManagerState.programLauncherDirectories[i] != NULL)
+        {
+            strcpy_s(g_windowManagerState.programLauncherDirectories[i], len, directories[i]);
+        }
+    }
+    
     if(isElevated)
     {
         keybinding_create_with_no_arg("ProgramLauncherMenu", modifiers, virtualKey, run_new_programs_elevated_menu);

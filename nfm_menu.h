@@ -17,6 +17,8 @@ typedef void (*nfm_show_file_system_func)(
     void* state
 );
 typedef void (*nfm_show_programs_list_func)(
+    char** directories,
+    int directoryCount,
     nfm_on_select_string_callback onSelect,
     nfm_on_closed_callback onClosed,
     void* state
