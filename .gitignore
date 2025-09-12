@@ -6,3 +6,4 @@ Config.c
 tmp
 props.mk.local
 .claude
+logs

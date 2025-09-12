@@ -25,7 +25,7 @@ release:
 
 both: debug release
 
-all: clean SimpleWindowManager.exe ListWindows.exe ListProcesses.exe
+all: clean SimpleWindowManager.exe
 
 clean:
 	if exist "$(outdir)" rd /s /q $(outdir)
@@ -56,29 +56,14 @@ dcomp_border_window.obj:
 .c.obj:
 	CL $(DEBUG_FLAGS) /analyze /c $(cflags) $*.c /Fd"$(outdir)\$*.pdb" /Fo"$(outdir)\$*.obj"
 
-SimpleWindowManager.exe: outdir copy_nfm_menu_binaries nfm_menu.obj RestoreMovedWindows.exe ListServices.obj ListProcesses.obj ListWindows.obj fzf.obj SMenu.obj RestoreMovedWindows.obj SimpleWindowManager.obj Config.obj dcomp_border_window.obj cloak.obj
-	LINK $(outdir)\cloak.obj $(LFLAGS) $(outdir)\RestoreMovedWindows.obj $(outdir)\ListServices.obj $(outdir)\ListProcesses.obj $(outdir)\ListWindows.obj $(outdir)\fzf.obj $(outdir)\nfm_menu.obj $(outdir)\SMenu.obj $(outdir)\dcomp_border_window.obj $(outdir)\SimpleWindowManager.obj $(outdir)\Config.obj $(winlibs) Oleacc.lib Shlwapi.lib OLE32.lib Advapi32.lib Dwmapi.lib Shell32.lib OleAut32.lib uxtheme.lib dxgi.lib d3d11.lib d2d1.lib dcomp.lib /OUT:$(outdir)\SimpleWindowManager.exe
+SimpleWindowManager.exe: outdir copy_nfm_menu_binaries nfm_menu.obj RestoreMovedWindows.exe RestoreMovedWindows.obj SimpleWindowManager.obj Config.obj dcomp_border_window.obj cloak.obj
+	LINK $(outdir)\cloak.obj $(LFLAGS) $(outdir)\ListWindows.obj $(outdir)\RestoreMovedWindows.obj $(outdir)\nfm_menu.obj $(outdir)\dcomp_border_window.obj $(outdir)\SimpleWindowManager.obj $(outdir)\Config.obj $(winlibs) Oleacc.lib Shlwapi.lib OLE32.lib Advapi32.lib Dwmapi.lib Shell32.lib OleAut32.lib uxtheme.lib dxgi.lib d3d11.lib d2d1.lib dcomp.lib /OUT:$(outdir)\SimpleWindowManager.exe
 !IF "$(requireAdmin)" == "TRUE"
 	mt -manifest SimpleWindowManager.manifest -outputresource:$(outdir)\SimpleWindowManager.exe;1
 !ENDIF
 
-ListWindows.exe: outdir ListWindowsConsole.obj ListWindows.obj
-	LINK $(LFLAGS) $(outdir)\ListWindowsConsole.obj $(outdir)\ListWindows.obj $(winlibs) Shlwapi.lib /OUT:$(outdir)\ListWindows.exe
-
 RestoreMovedWindows.exe: outdir RestoreMovedWindowsConsole.obj ListWindows.obj
 	LINK $(LFLAGS) $(outdir)\RestoreMovedWindows.obj $(outdir)\RestoreMovedWindowsConsole.obj $(outdir)\ListWindows.obj $(winlibs) Shlwapi.lib Dwmapi.lib /OUT:$(outdir)\RestoreMovedWindows.exe
-
-SMenu.exe: outdir SMenu.obj SMenuConsole.obj fzf.obj
-	LINK $(LFLAGS) $(outdir)\SMenuConsole.obj $(outdir)\SMenu.obj $(outdir)\fzf.obj $(winlibs) /OUT:$(outdir)\SMenu.exe
-
-ListProcesses.exe: outdir ListProcesses.obj ListProcessesConsole.obj
-	LINK $(LFLAGS) $(outdir)\ListProcessesConsole.obj $(outdir)\ListProcesses.obj $(winlibs) Shlwapi.lib /OUT:$(outdir)\ListProcesses.exe
-
-ListServices.exe: oubdir ListServices.obj ListServicesConsole.obj
-	LINK $(LFLAGS) $(outdir)\ListServicesConsole.obj $(outdir)\ListServices.obj $(winlibs) Shlwapi.lib Advapi32.lib /OUT:$(outdir)\ListServices.exe
-
-KeyBindingSystem.exe: Process.obj ScratchWindow.obj KeyBindingSystem.obj KeyBindingSystemConsole.obj
-	LINK $(LFLAGS) $(outdir)\ScratchWindow.obj $(outdir)\Process.obj $(outdir)\KeyBindingSystemConsole.obj $(outdir)\KeyBindingSystem.obj $(winlibs) Shlwapi.lib /OUT:$(outdir)\KeyBindingSystem.exe Shell32.lib wbemuuid.lib Oleacc.lib OLE32.lib Advapi32.lib Dwmapi.lib OleAut32.lib
 
 publish:
 	rd /s /q $(publishdir)

@@ -1,6 +1,9 @@
 #ifndef COMMON_TYPES_H
 #define COMMON_TYPES_H
 
+#include <windows.h>
+#include <stdbool.h>
+
 typedef struct TextStyle
 {
     HFONT font;
@@ -21,4 +24,4 @@ typedef struct TextStyle
     int borderWidth;
 } TextStyle;
 
-#endif // COMMON_TYPES_H
+#endif

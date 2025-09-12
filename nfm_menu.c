@@ -14,7 +14,7 @@ nfm_run_last_definition_func nfm_run_last_definition = NULL;
 HMODULE nfm_load_library(const char* dllPath) {
     HMODULE hModule = LoadLibrary(dllPath);
     if (!hModule) {
-        fprintf(stderr, "Failed to load DLL: %s\n", dllPath);
+        fprintf(stderr, "Failed to load DLL: %ls\n", dllPath);
         return NULL;
     }
 

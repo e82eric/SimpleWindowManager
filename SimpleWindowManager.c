@@ -24,11 +24,7 @@
 #include <oleauto.h>
 #include <uxtheme.h>
 
-#include "fzf\\fzf.h"
-#include "SMenu.h"
-#include "ListProcesses.h"
 #include "ListWindows.h"
-#include "ListServices.h"
 #include "SimpleWindowManager.h"
 #include "dcomp_border_window.h"
 #include "nfm_menu.h"
@@ -339,6 +335,7 @@ void noop(char* output, void* state)
 
 void run_new_last_definition_menu(WindowManagerState *state)
 {
+    UNREFERENCED_PARAMETER(state);
     nfm_run_last_definition();
     g_windowManagerState.menuVisible = true;
 }
@@ -367,14 +364,11 @@ void run_new_programs_elevated_menu(WindowManagerState *state)
     g_windowManagerState.menuVisible = true;
 }
 
-
-
 void run_new_file_system_menu(WindowManagerState *state)
 {
     nfm_show_file_system(open_program_scratch_callback_not_elevated, menu_on_closed, state);
     g_windowManagerState.menuVisible = true;
 }
-
 
 void run_float_logs_menu(WindowManagerState *state)
 {
@@ -743,21 +737,6 @@ void register_list_windows_memu(int modifiers, int virtualKey)
 void register_file_sytem_memu(int modifiers, int virtualKey)
 {
     keybinding_create_with_no_arg("FileSystemMenu", modifiers, virtualKey, run_new_file_system_menu);
-}
-
-
-void register_list_services_menu(int modifiers, int virtualKey)
-{
-    MenuDefinition *listServicesMenu = menu_create_and_register();
-    listServicesMenu->hasHeader = TRUE;
-    menu_definition_set_load_action(listServicesMenu, list_services_run_no_sort);
-    NamedCommand *serviceStartCommand = MenuDefinition_AddNamedCommand(listServicesMenu, "start:sc start \"\"{}\"\"", TRUE, FALSE);
-    NamedCommand *serviceStopCommand = MenuDefinition_AddNamedCommand(listServicesMenu, "stop:sc stop \"\"{}\"\"", TRUE, FALSE);
-    NamedCommand_SetTextRange(serviceStartCommand, 0, 45, TRUE);
-    NamedCommand_SetTextRange(serviceStopCommand, 0, 45, TRUE);
-    MenuDefinition_ParseAndAddKeyBinding(listServicesMenu, "ctl-s:start", FALSE);
-    MenuDefinition_ParseAndAddKeyBinding(listServicesMenu, "ctl-x:stop", FALSE);
-    keybinding_create_with_menu_arg("ListServicesMenu", modifiers, virtualKey, menu_run, listServicesMenu);
 }
 
 void register_program_launcher_menu(int modifiers, int virtualKey, CHAR** directories, size_t numberOfDirectories, BOOL isElevated)
@@ -1262,7 +1241,7 @@ static void format_window_styles(LONG_PTR styles, TCHAR* buffer, size_t bufferSi
     buffer[0] = _T('\0');
     BOOL first = TRUE;
     
-    if (styles & WS_OVERLAPPED) { if (!first) _tcscat_s(buffer, bufferSize, _T("\n    ")); _tcscat_s(buffer, bufferSize, _T("WS_OVERLAPPED")); first = FALSE; }
+    if ((styles & (WS_POPUP | WS_CHILD)) == 0) { if (!first) _tcscat_s(buffer, bufferSize, _T("\n    ")); _tcscat_s(buffer, bufferSize, _T("WS_OVERLAPPED")); first = FALSE; }
     if (styles & WS_POPUP) { if (!first) _tcscat_s(buffer, bufferSize, _T("\n    ")); _tcscat_s(buffer, bufferSize, _T("WS_POPUP")); first = FALSE; }
     if (styles & WS_CHILD) { if (!first) _tcscat_s(buffer, bufferSize, _T("\n    ")); _tcscat_s(buffer, bufferSize, _T("WS_CHILD")); first = FALSE; }
     if (styles & WS_MINIMIZE) { if (!first) _tcscat_s(buffer, bufferSize, _T("\n    ")); _tcscat_s(buffer, bufferSize, _T("WS_MINIMIZE")); first = FALSE; }
@@ -2473,11 +2452,6 @@ void CALLBACK handle_windows_event(
         if(!isRootWindow)
         {
             windowManager_remove_client_if_found_by_hwnd(&g_windowManagerState, hwnd);
-            return;
-        }
-
-        if(hwnd == g_windowManagerState.menuView->hwnd)
-        {
             return;
         }
 
@@ -4185,39 +4159,6 @@ void monacleLayout_calculate_and_apply_client_sizes(Workspace *workspace)
     }
 }
 
-void menu_focus(WindowManagerState *windowManagerState, MenuView *self)
-{
-    INPUT inputs[1] = { 0 };
-    ZeroMemory(inputs, sizeof(inputs));
-
-    inputs[0].type = INPUT_MOUSE;
-
-    SendInput(ARRAYSIZE(inputs), inputs, sizeof(INPUT));
-
-    int x = windowManagerState->selectedMonitor->xOffset + windowManagerState->selectedMonitor->workspaceStyle->scratchWindowsScreenPadding;
-    int y = windowManagerState->selectedMonitor->workspaceStyle->scratchWindowsScreenPadding;
-    int w = windowManagerState->selectedMonitor->w - (windowManagerState->selectedMonitor->workspaceStyle->scratchWindowsScreenPadding * 2);
-    int h = windowManagerState->selectedMonitor->h - (windowManagerState->selectedMonitor->workspaceStyle->scratchWindowsScreenPadding * 2);
-
-    if(!windowManagerState->menuVisible)
-    {
-        windowManagerState->menuVisible = TRUE;
-        border_window_hide(windowManagerState->borderWindowHwnd);
-        SetForegroundWindow(self->hwnd);
-        HDWP hdwp = BeginDeferWindowPos(1);
-        DeferWindowPos(
-                hdwp,
-                self->hwnd,
-                NULL,
-                x,
-                y,
-                w,
-                h,
-                SWP_SHOWWINDOW);
-        EndDeferWindowPos(hdwp);
-    }
-}
-
 void scratch_window_focus(WindowManagerState *windowManagerState, ScratchWindow *self)
 {
     self->client->data->x = windowManagerState->selectedMonitor->xOffset + windowManagerState->selectedMonitor->workspaceStyle->scratchWindowsScreenPadding;
@@ -4362,13 +4303,6 @@ void scratch_windows_add_to_end(WindowManagerState *windowManager, ScratchWindow
     }
 }
 
-MenuDefinition* menu_create_and_register(void)
-{
-    MenuDefinition *result = menu_definition_create(g_windowManagerState.menuView);
-    result->state = &g_windowManagerState;
-    return result;
-}
-
 void menu_hide(WindowManagerState *windowManagerState)
 {
     nfm_hide();
@@ -4382,18 +4316,9 @@ void menu_on_escape(void *state)
     WindowManagerState *windowManagerState = (WindowManagerState*)state;
     menu_hide(windowManagerState);
     HWND foregroundHwnd = GetForegroundWindow();
-    if((foregroundHwnd == windowManagerState->menuView->hwnd || foregroundHwnd == windowManagerState->borderWindowHwnd) && windowManagerState->selectedMonitor->workspace)
+    if((foregroundHwnd == windowManagerState->borderWindowHwnd) && windowManagerState->selectedMonitor->workspace)
     {
         workspace_focus_selected_window(windowManagerState, windowManagerState->selectedMonitor->workspace);
-    }
-}
-
-void menu_run(MenuDefinition *definition)
-{
-    UNREFERENCED_PARAMETER(definition);
-    if(g_windowManagerState.selectedMonitor->scratchWindow)
-    {
-        scratch_window_hide(&g_windowManagerState, g_windowManagerState.selectedMonitor->scratchWindow);
     }
 }
 
@@ -5092,6 +5017,7 @@ WNDCLASSEX* bar_register_window_class(void)
 
 void bar_run(Bar *bar, WNDCLASSEX *barWindowClass, int barHeight, int gapWidth)
 {
+    UNREFERENCED_PARAMETER(gapWidth);
     HWND hwnd = CreateWindowEx(
         WS_EX_TOOLWINDOW | WS_EX_CONTROLPARENT | WS_EX_COMPOSITED,
         barWindowClass->lpszClassName,
@@ -5541,11 +5467,7 @@ static LRESULT dcomp_border_window_message_loop(HWND window, UINT message, WPARA
             {
                 WindowManagerState *windowManager = (WindowManagerState*)GetWindowLongPtr(window, GWLP_USERDATA);
                 WINDOWPOS* windowPos = (WINDOWPOS*)lparam;
-                if(windowManager->menuVisible)
-                {
-                    windowPos->hwndInsertAfter = windowManager->menuView->hwnd;
-                }
-                else if(!windowManager->selectedMonitor->scratchWindow)
+                if(!windowManager->selectedMonitor->scratchWindow)
                 {
                     if(windowManager->selectedMonitor->workspace->selected)
                     {
@@ -5755,27 +5677,6 @@ void command_scratch_arg_get_description(Command *self, int maxLen, CHAR *toFill
             self->scratchWindowArg->cmd);
 }
 
-void command_execute_menu_arg(Command *self)
-{
-    if(self->menuArg && self->menuAction)
-    {
-        self->menuAction(self->menuArg);
-    }
-}
-
-void command_menu_arg_get_description(Command *self, int maxLen, CHAR *toFill)
-{
-    if(self->menuArg->loadCommand)
-    {
-        sprintf_s(
-                toFill,
-                maxLen,
-                "%.*s",
-                maxLen - 1,
-                self->menuArg->loadCommand->expression);
-    }
-}
-
 void command_execute_shell_arg(Command *self)
 {
     if(self->shellArg && self->shellAction)
@@ -5783,6 +5684,7 @@ void command_execute_shell_arg(Command *self)
         self->shellAction(self->shellArg);
     }
 }
+
 
 void command_shell_arg_get_description(Command *self, int maxLen, CHAR *toFill)
 {
@@ -5793,6 +5695,7 @@ void command_shell_arg_get_description(Command *self, int maxLen, CHAR *toFill)
             maxLen -1,
             self->shellArg);
 }
+
 
 void command_register(WindowManagerState *windowManager, Command *self)
 {
@@ -5879,21 +5782,6 @@ Command *command_create_with_scratchwindow_arg(WindowManagerState *windowManager
     return result;
 }
 
-Command *command_create_with_menu_arg(WindowManagerState *windowManager, CHAR *name, MenuDefinition *arg, void (*action) (MenuDefinition *arg))
-{
-    Command *result = command_create(windowManager, name);
-    if(result)
-    {
-        result->type = "Menu";
-        result->menuArg = arg;
-        result->menuAction = action;
-        result->execute = command_execute_menu_arg;
-        result->getDescription = command_menu_arg_get_description;
-    }
-
-    return result;
-}
-
 Command *command_create_with_shell_arg(WindowManagerState *windowManager, CHAR *name, TCHAR *arg, void (*action) (TCHAR *arg))
 {
     Command *result = command_create(windowManager, name);
@@ -5908,6 +5796,7 @@ Command *command_create_with_shell_arg(WindowManagerState *windowManager, CHAR *
 
     return result;
 }
+
 
 void keybinding_assign_to_command(KeyBinding *keyBinding, Command *command)
 {
@@ -5940,20 +5829,6 @@ void keybinding_create_with_scratchwindow_arg(CHAR *name, int modifiers, unsigne
 {
     KeyBinding *keyBinding = keybindings_find_existing_or_create(&g_windowManagerState, name, modifiers, key);
     Command *command = command_create_with_scratchwindow_arg(&g_windowManagerState, name, arg, scratch_window_toggle);
-    keybinding_assign_to_command(keyBinding, command);
-}
-
-void keybinding_create_with_shell_arg(CHAR *name, int modifiers, unsigned int key, void (*action) (TCHAR*), TCHAR *arg)
-{
-    KeyBinding *keyBinding = keybindings_find_existing_or_create(&g_windowManagerState, name, modifiers, key);
-    Command *command = command_create_with_shell_arg(&g_windowManagerState, name, arg, action);
-    keybinding_assign_to_command(keyBinding, command);
-}
-
-void keybinding_create_with_menu_arg(CHAR *name, int modifiers, unsigned int key, void (*action) (MenuDefinition*), MenuDefinition *arg)
-{
-    KeyBinding *keyBinding = keybindings_find_existing_or_create(&g_windowManagerState, name, modifiers, key);
-    Command *command = command_create_with_menu_arg(&g_windowManagerState, name, arg, action);
     keybinding_assign_to_command(keyBinding, command);
 }
 
@@ -6450,7 +6325,7 @@ void open_program_scratch_callback(char *stdOut, void *state)
 
 void open_program_scratch_callback_not_elevated(char *stdOut, void *state)
 {
-    printf(stdout);
+    printf("%s", stdOut);
     WindowManagerState *windowManagerState = (WindowManagerState*)state;
     menu_hide(windowManagerState);
     /* border_window_hide(g_windowManagerState.borderWindowHwnd); */
@@ -6721,10 +6596,6 @@ int run (void)
     workspaceStyle->scratchWindowsScreenPadding = 250;
     workspaceStyle->dropTargetColor = RGB(0, 90, 90);
 
-    TCHAR menuTitle[BUF_LEN] = L"nmenu";
-    g_windowManagerState.menuView = menu_create(menuTitle, configuration->textStyle);
-    ShowWindow(g_windowManagerState.menuView->hwnd, SW_HIDE);
-
     configuration->monitors = g_windowManagerState.monitors;
     configuration->workspaces = g_windowManagerState.workspaces;
     configuration->windowRoutingMode = FilteredAndRoutedToWorkspace;
@@ -6832,12 +6703,6 @@ int run (void)
     }
 
     monitor_select(&g_windowManagerState, g_windowManagerState.monitors[0]);
-
-    int menuLeft = g_windowManagerState.selectedMonitor->xOffset + g_windowManagerState.selectedMonitor->workspaceStyle->scratchWindowsScreenPadding;
-    int menuTop = g_windowManagerState.selectedMonitor->workspaceStyle->scratchWindowsScreenPadding;
-    int menuWidth = g_windowManagerState.selectedMonitor->w - (g_windowManagerState.selectedMonitor->workspaceStyle->scratchWindowsScreenPadding * 2);
-    int menuHeight = g_windowManagerState.selectedMonitor->h - (g_windowManagerState.selectedMonitor->workspaceStyle->scratchWindowsScreenPadding * 2);
-    SetWindowPos(g_windowManagerState.menuView->hwnd, HWND_TOPMOST, menuLeft, menuTop, menuWidth, menuHeight, SWP_HIDEWINDOW);
 
     IWbemLocator *locator  = NULL;
 

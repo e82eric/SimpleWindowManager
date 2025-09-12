@@ -15,6 +15,7 @@ typedef struct ScratchWindow ScratchWindow;
 typedef struct Configuration Configuration;
 typedef struct BarSegment BarSegment;
 typedef struct BarSegmentConfiguration BarSegmentConfiguration;
+typedef struct BarSegmentHeader BarSegmentHeader;
 typedef struct FloatLogEntry FloatLogEntry;
 typedef struct FloatLogBuffer FloatLogBuffer;
 typedef struct ClientLogEntry ClientLogEntry;
@@ -288,8 +289,6 @@ struct Command
     Workspace *workspaceArg;
     void (*scratchWindowAction)(WindowManagerState *windowManager, ScratchWindow *arg);
     ScratchWindow *scratchWindowArg;
-    void (*menuAction)(MenuDefinition *arg);
-    MenuDefinition *menuArg;
     void (*shellAction) (TCHAR *arg);
     TCHAR *shellArg;
     KeyBinding *keyBinding;
@@ -367,7 +366,6 @@ struct WindowManagerState
     Workspace *lastWorkspace;
     KeyBinding *keyBindings;
     ScratchWindow *scratchWindows;
-    MenuView *menuView;
     BOOL menuVisible;
     size_t longestCommandName;
     Command *commands[MAX_COMMANDS];
@@ -422,8 +420,6 @@ Workspace* workspace_create(TCHAR *name, WindowFilter windowFilter, WCHAR* tag, 
 void keybinding_create_with_no_arg(CHAR *name, int modifiers, unsigned int key, void (*action) (WindowManagerState*));
 void keybinding_create_with_workspace_arg(CHAR *name, int modifiers, unsigned int key, void (*action) (WindowManagerState*, Workspace*), Workspace *arg);
 void keybinding_create_with_scratchwindow_arg(CHAR *name, int modifiers, unsigned int key, ScratchWindow *arg);
-void keybinding_create_with_menu_arg(CHAR *name, int modifiers, unsigned int key, void (*action) (MenuDefinition*), MenuDefinition *arg);
-void keybinding_create_with_shell_arg(CHAR *name, int modifiers, unsigned int key, void (*action) (TCHAR*), TCHAR *arg);
 
 TCHAR* client_get_command_line(Client *self);
 
@@ -506,11 +502,8 @@ void open_process_list_scratch_callback(char *stdOut);
 void open_process_list(void);
 void quit(WindowManagerState *self);
 
-void menu_defintion_register(MenuDefinition *definition);
 void menu_on_escape(void *state);
 
-MenuDefinition* menu_create_and_register(void);
-void menu_run(MenuDefinition *definition);
 void show_clients(void);
 void show_keybindings(ScratchWindow *self, Monitor *monitor, int scratchWindowsScreenPadding);
 void keybindings_register_defaults(void);
