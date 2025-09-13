@@ -11,7 +11,6 @@ typedef struct Bar Bar;
 typedef struct Button Button;
 typedef struct Command Command;
 typedef struct KeyBinding KeyBinding;
-typedef struct ScratchWindow ScratchWindow;
 typedef struct Configuration Configuration;
 typedef struct BarSegment BarSegment;
 typedef struct BarSegmentConfiguration BarSegmentConfiguration;
@@ -22,7 +21,6 @@ typedef struct ClientLogEntry ClientLogEntry;
 typedef struct ClientLogBuffer ClientLogBuffer;
 
 typedef BOOL (*WindowFilter)(Client *client);
-typedef BOOL (*ScratchFilter)(ScratchWindow *self, Client *client);
 
 #define MAX_COMMANDS 256
 #define FLOAT_LOG_BUFFER_SIZE 100
@@ -97,7 +95,6 @@ typedef struct BarSegmentHeader
 typedef struct WorkspaceStyle
 {
     int gapWidth;
-    int scratchWindowsScreenPadding;
     COLORREF dropTargetColor;
     HBRUSH _dropTargetBrush;
 } WorkspaceStyle;
@@ -179,22 +176,6 @@ struct Client
     Workspace *workspace;
 };
 
-struct ScratchWindow
-{
-    CHAR *name;
-    TCHAR *processImageName;
-    CHAR *cmd;
-    CHAR *cmdArgs;
-    TCHAR *uniqueStr;
-    Client *client;
-    void (*stdOutCallback) (CHAR *);
-    WindowFilter windowFilter;
-    ScratchFilter scratchFilter;
-    ScratchWindow *next;
-    void (*runFunc) (ScratchWindow *, Monitor *monitor, int);
-    void (*beforeCmd) (ScratchWindow *, WindowManagerState *, CHAR *, size_t);
-    ULONGLONG timeout;
-};
 
 struct ClientData
 {
@@ -208,8 +189,6 @@ struct ClientData
     TCHAR *commandLine;
     BOOL isElevated;
     BOOL isMinimized;
-    BOOL isScratchWindow;
-    BOOL isScratchWindowBoundToWorkspace;
     BOOL useMinimizeToHide;
 };
 
@@ -222,7 +201,6 @@ struct Monitor
     int h;
     int w;
     Workspace *workspace;
-    ScratchWindow *scratchWindow;
     BOOL isHidden;
     HWND barHwnd;
     BOOL selected;
@@ -286,8 +264,6 @@ struct Command
     Monitor *monitorArg;
     void (*workspaceAction)(WindowManagerState *windowManager, Workspace *arg);
     Workspace *workspaceArg;
-    void (*scratchWindowAction)(WindowManagerState *windowManager, ScratchWindow *arg);
-    ScratchWindow *scratchWindowArg;
     void (*shellAction) (TCHAR *arg);
     TCHAR *shellArg;
     KeyBinding *keyBinding;
@@ -364,7 +340,6 @@ struct WindowManagerState
     int numberOfWorkspaces;
     Workspace *lastWorkspace;
     KeyBinding *keyBindings;
-    ScratchWindow *scratchWindows;
     BOOL menuVisible;
     size_t longestCommandName;
     Command *commands[MAX_COMMANDS];
@@ -415,7 +390,6 @@ Workspace* workspace_create(TCHAR *name, WindowFilter windowFilter, WCHAR* tag, 
 
 void keybinding_create_with_no_arg(CHAR *name, int modifiers, unsigned int key, void (*action) (WindowManagerState*));
 void keybinding_create_with_workspace_arg(CHAR *name, int modifiers, unsigned int key, void (*action) (WindowManagerState*, Workspace*), Workspace *arg);
-void keybinding_create_with_scratchwindow_arg(CHAR *name, int modifiers, unsigned int key, ScratchWindow *arg);
 
 TCHAR* client_get_command_line(Client *self);
 
@@ -452,10 +426,6 @@ void select_previous_window(WindowManagerState *self);
 void monitor_select_next(WindowManagerState *self);
 void start_launcher(CHAR *cmdArgs);
 void start_scratch_not_elevated(CHAR *cmdArgs);
-void scratch_terminal_register_with_unique_string(CHAR *cmd, int modifiers, int key, TCHAR *uniqueStr);
-void scratch_terminal_register(CHAR *cmd, int modifiers, int key, TCHAR *uniqueStr, ScratchFilter scratchFilter);
-ScratchWindow *register_scratch_with_unique_string(TCHAR *processImageName, CHAR *name, char *cmd, TCHAR *uniqueStr);
-ScratchWindow *register_windows_terminal_scratch_with_unique_string(CHAR *name, char *cmd, TCHAR *uniqueStr);
 void process_with_stdout_start(CHAR *cmdArgs, void (*onSuccess) (CHAR *));
 void start_app(TCHAR *processExe);
 void start_app_non_elevated(TCHAR *processExe);
@@ -501,7 +471,6 @@ void quit(WindowManagerState *self);
 void menu_on_escape(void *state);
 
 void show_clients(void);
-void show_keybindings(ScratchWindow *self, Monitor *monitor, int scratchWindowsScreenPadding);
 void keybindings_register_defaults(void);
 void keybindings_register_defaults_with_modifiers(int modifiers);
 void keybindings_register_float_window_movements(int modifiers);
