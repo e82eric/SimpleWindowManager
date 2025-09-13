@@ -56,7 +56,7 @@ typedef void (*nfm_show_array_columns_menu_func)(
 typedef void (*nfm_hide_func)();
 typedef void (*nfm_run_last_definition_func)();
 
-HMODULE nfm_load_library(const char* dllPath);
+HMODULE nfm_load_library(const wchar_t* dllPath);
 void nfm_unload_library(HMODULE hModule);
 
 extern nfm_initialize_func nfm_initialize;

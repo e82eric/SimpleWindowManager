@@ -141,7 +141,6 @@ static BOOL hit_test_hwnd(HWND hwnd);
 static BOOL hit_test_monitor(Monitor *monitor);
 static BOOL hit_test_client(Client *client);
 static void drag_drop_cancel(DragDropState *self);
-static void start_scratch_not_elevated(CHAR *cmdArgs);
 
 static IAudioEndpointVolume *g_audioEndpointVolume;
 static INetworkListManager *g_networkListManager;

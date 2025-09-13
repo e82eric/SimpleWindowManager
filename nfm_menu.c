@@ -11,7 +11,7 @@ nfm_show_array_columns_menu_func nfm_show_array_columns_menu = NULL;
 nfm_hide_func nfm_hide = NULL;
 nfm_run_last_definition_func nfm_run_last_definition = NULL;
 
-HMODULE nfm_load_library(const char* dllPath) {
+HMODULE nfm_load_library(const wchar_t* dllPath) {
     HMODULE hModule = LoadLibrary(dllPath);
     if (!hModule) {
         fprintf(stderr, "Failed to load DLL: %ls\n", dllPath);
