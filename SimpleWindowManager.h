@@ -126,7 +126,6 @@ struct Configuration
     BOOL alwaysRedraw;
     int nonFloatWindowHeightMinimum;
     BOOL floatUwpWindows;
-    int easyResizeModifiers;
     int dragDropFloatModifier;
     int floatWindowMovement;
     int borderWindowBackgroundTransparency;
@@ -392,9 +391,6 @@ typedef struct DragDropState
 
 typedef struct ResizeState
 {
-    bool easyResizeInProgress;
-    POINT easyResizeStartPoint;
-    int easyResizeStartOffset;
     bool regularResizeInProgress;
     Client *regularResizeClient;
     WindowManagerState *windowManager;

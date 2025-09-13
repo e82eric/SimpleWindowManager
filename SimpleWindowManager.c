@@ -1991,44 +1991,11 @@ void windowManager_hide_border(WindowManagerState *self)
     border_window_hide(self->borderWindowHwnd);
 }
 
-void easy_resize_handle(ResizeState *resizeState, Monitor *mouseMonitor, POINT mousePoint)
-{
-    Workspace *workspace = mouseMonitor->workspace;
-
-    if(!resizeState->easyResizeInProgress)
-    {
-        resizeState->easyResizeInProgress = TRUE;
-        resizeState->easyResizeStartPoint = mousePoint;
-        resizeState->easyResizeStartOffset = workspace->mainOffset; 
-    }
-
-    int diff = mousePoint.x - resizeState->easyResizeStartPoint.x;
-    workspace->mainOffset = resizeState->easyResizeStartOffset + diff;
-    workspace_arrange_windows(workspace, resizeState->windowManager);
-    windowManager_hide_border(resizeState->windowManager);
-}
-
-void easy_resize_complete(ResizeState *self)
-{
-    self->easyResizeInProgress = FALSE;
-    border_window_update(self->windowManager);
-}
-
 void resize_complete(ResizeState *self)
 {
     self->regularResizeInProgress = FALSE;
     workspace_arrange_windows(self->regularResizeClient->workspace, self->windowManager);
     self->regularResizeClient = NULL;
-}
-
-BOOL resize_try_easy_resize_complete(ResizeState *self)
-{
-    if(self->easyResizeInProgress)
-    {
-        easy_resize_complete(self);
-        return TRUE;
-    }
-    return FALSE;
 }
 
 BOOL resize_try_regular_resize_complete(ResizeState *self)
@@ -2041,36 +2008,15 @@ BOOL resize_try_regular_resize_complete(ResizeState *self)
     return FALSE;
 }
 
-void resize_try_handle_mouse_move(ResizeState *self, POINT pt, int modifiers)
-{
-    if(modifiers == configuration->easyResizeModifiers)
-    {
-        Monitor *monitor = windowManager_find_monitor_from_mouse_location(self->windowManager);
-        if(monitor)
-        {
-            easy_resize_handle(self, monitor, pt);
-        }
-    }
-}
-
 LRESULT CALLBACK handle_mouse(int code, WPARAM w, LPARAM l)
 {
     if (code >= 0) 
     {
-        if(w == WM_MOUSEMOVE && GetAsyncKeyState(VK_LBUTTON))
+        if(w == WM_LBUTTONUP)
         {
-            MSLLHOOKSTRUCT *p = (MSLLHOOKSTRUCT*)l;
-            int modifiers = get_modifiers_pressed();
-            resize_try_handle_mouse_move(&g_resizeState, p->pt, modifiers);
-        }
-        else if(w == WM_LBUTTONUP)
-        {
-            if(!resize_try_easy_resize_complete(&g_resizeState))
+            if(!drag_drop_try_handle_left_mouse_up(&g_dragDropState))
             {
-                if(!drag_drop_try_handle_left_mouse_up(&g_dragDropState))
-                {
-                    resize_try_regular_resize_complete(&g_resizeState);
-                }
+                resize_try_regular_resize_complete(&g_resizeState);
             }
         }
     }
@@ -2350,7 +2296,7 @@ BOOL window_manager_try_handle_location_changed_event(WindowManagerState *self, 
                     return true;
                 }
 
-                if(GetAsyncKeyState(VK_LBUTTON) & 0x8000 && !(GetAsyncKeyState(VK_LSHIFT) & 0x8000) && !g_resizeState.easyResizeInProgress)
+                if(GetAsyncKeyState(VK_LBUTTON) & 0x8000 && !(GetAsyncKeyState(VK_LSHIFT) & 0x8000))
                 {
                     drag_drop_handle_location_change_with_mouse_down(&g_dragDropState, hwnd, styles, exStyles);
                     return true;
@@ -2362,7 +2308,7 @@ BOOL window_manager_try_handle_location_changed_event(WindowManagerState *self, 
     }
     else
     {
-        if(GetAsyncKeyState(VK_LBUTTON) & 0x8000 && !(GetAsyncKeyState(VK_LSHIFT) & 0x8000) && !g_resizeState.easyResizeInProgress)
+        if(GetAsyncKeyState(VK_LBUTTON) & 0x8000 && !(GetAsyncKeyState(VK_LSHIFT) & 0x8000))
         {
             if(drag_drop_handle_location_change_with_mouse_down(&g_dragDropState, hwnd, styles, exStyles))
             {
@@ -6602,7 +6548,6 @@ int run (void)
     configuration->alwaysRedraw = FALSE;
     configuration->nonFloatWindowHeightMinimum = 500;
     configuration->floatUwpWindows = FALSE;
-    configuration->easyResizeModifiers = LWin | LCtl | LAlt;
     configuration->dragDropFloatModifier = LAlt;
     configuration->floatWindowMovement = 75;
     configuration->borderWindowBackgroundTransparency = (128 << 24);
