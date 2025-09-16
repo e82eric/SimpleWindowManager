@@ -322,23 +322,30 @@ void open_program_scratch_callback(char *stdOut, void *state)
 {
     WindowManagerState *windowManagerState = (WindowManagerState*)state;
     menu_hide(windowManagerState);
-    char str[1024];
 
-    sprintf_s(str, 1024, "/c start \"\" \"%s\"", stdOut);
-    start_launcher(str);
+    // Launch directly to avoid command injection via cmd.exe
+    // Assume stdOut is a UTF-8 or ANSI path; use ShellExecuteW for safety
+    wchar_t wPath[MAX_PATH];
+    int wlen = MultiByteToWideChar(CP_UTF8, 0, stdOut, -1, wPath, MAX_PATH);
+    if (wlen == 0) {
+        // Fallback to ANSI if UTF-8 fails
+        MultiByteToWideChar(CP_ACP, 0, stdOut, -1, wPath, MAX_PATH);
+    }
+    start_app(wPath);
     nfm_hide();
 }
 
 void open_program_scratch_callback_not_elevated(char *stdOut, void *state)
 {
-    printf("%s", stdOut);
     WindowManagerState *windowManagerState = (WindowManagerState*)state;
     menu_hide(windowManagerState);
-    /* border_window_hide(g_windowManagerState.borderWindowHwnd); */
-    char str[1024];
-
-    sprintf_s(str, 1024, "/c start \"\" \"%s\"", stdOut);
-    start_scratch_not_elevated(str);
+    // Launch directly not elevated via parent-process attribute chain
+    wchar_t wPath[MAX_PATH];
+    int wlen = MultiByteToWideChar(CP_UTF8, 0, stdOut, -1, wPath, MAX_PATH);
+    if (wlen == 0) {
+        MultiByteToWideChar(CP_ACP, 0, stdOut, -1, wPath, MAX_PATH);
+    }
+    start_app(wPath);
     nfm_hide();
 }
 
@@ -406,38 +413,80 @@ void noop(char* output, void* state)
 void run_new_last_definition_menu(WindowManagerState *state)
 {
     UNREFERENCED_PARAMETER(state);
-    nfm_run_last_definition();
-    g_windowManagerState.menuVisible = true;
+    if (nfm_run_last_definition)
+    {
+        nfm_run_last_definition();
+        g_windowManagerState.menuVisible = true;
+    }
+    else
+    {
+        MessageBox(NULL, L"LibNfm.dll not loaded; menu unavailable.", L"SimpleWindowManager", MB_OK | MB_ICONWARNING);
+    }
 }
 
 void run_new_process_menu(WindowManagerState *state)
 {
-    nfm_show_processes_list(noop, menu_on_closed, state);
-    g_windowManagerState.menuVisible = true;
+    if (nfm_show_processes_list)
+    {
+        nfm_show_processes_list(noop, menu_on_closed, state);
+        g_windowManagerState.menuVisible = true;
+    }
+    else
+    {
+        MessageBox(NULL, L"LibNfm.dll not loaded; menu unavailable.", L"SimpleWindowManager", MB_OK | MB_ICONWARNING);
+    }
 }
 
 void run_new_windows_menu(WindowManagerState *state)
 {
-    nfm_show_windows_list(open_windows_scratch_exit_callback, menu_on_closed, state);
-    g_windowManagerState.menuVisible = true;
+    if (nfm_show_windows_list)
+    {
+        nfm_show_windows_list(open_windows_scratch_exit_callback, menu_on_closed, state);
+        g_windowManagerState.menuVisible = true;
+    }
+    else
+    {
+        MessageBox(NULL, L"LibNfm.dll not loaded; menu unavailable.", L"SimpleWindowManager", MB_OK | MB_ICONWARNING);
+    }
 }
 
 void run_new_programs_not_elevated_menu(WindowManagerState *state)
 {
-    nfm_show_programs_list(state->programLauncherDirectories, (int)state->programLauncherDirectoryCount, open_program_scratch_callback_not_elevated, menu_on_closed, state);
-    g_windowManagerState.menuVisible = true;
+    if (nfm_show_programs_list)
+    {
+        nfm_show_programs_list(state->programLauncherDirectories, (int)state->programLauncherDirectoryCount, open_program_scratch_callback_not_elevated, menu_on_closed, state);
+        g_windowManagerState.menuVisible = true;
+    }
+    else
+    {
+        MessageBox(NULL, L"LibNfm.dll not loaded; menu unavailable.", L"SimpleWindowManager", MB_OK | MB_ICONWARNING);
+    }
 }
 
 void run_new_programs_elevated_menu(WindowManagerState *state)
 {
-    nfm_show_programs_list(state->programLauncherDirectories, (int)state->programLauncherDirectoryCount, open_program_scratch_callback, menu_on_closed, state);
-    g_windowManagerState.menuVisible = true;
+    if (nfm_show_programs_list)
+    {
+        nfm_show_programs_list(state->programLauncherDirectories, (int)state->programLauncherDirectoryCount, open_program_scratch_callback, menu_on_closed, state);
+        g_windowManagerState.menuVisible = true;
+    }
+    else
+    {
+        MessageBox(NULL, L"LibNfm.dll not loaded; menu unavailable.", L"SimpleWindowManager", MB_OK | MB_ICONWARNING);
+    }
 }
 
 void run_new_file_system_menu(WindowManagerState *state)
 {
-    nfm_show_file_system(open_program_scratch_callback_not_elevated, menu_on_closed, state);
-    g_windowManagerState.menuVisible = true;
+    if (nfm_show_file_system)
+    {
+        nfm_show_file_system(open_program_scratch_callback_not_elevated, menu_on_closed, state);
+        g_windowManagerState.menuVisible = true;
+    }
+    else
+    {
+        MessageBox(NULL, L"LibNfm.dll not loaded; menu unavailable.", L"SimpleWindowManager", MB_OK | MB_ICONWARNING);
+    }
 }
 
 void run_float_logs_menu(WindowManagerState *state)
@@ -2628,7 +2677,7 @@ void get_command_line(DWORD processId, Client *target)
     TCHAR *language = L"WQL";
     TCHAR queryBuff[1024];
 
-    swprintf(queryBuff, 1024, L"SELECT * FROM Win32_Process WHERE ProcessID = %lu", processId);
+    StringCchPrintfW(queryBuff, 1024, L"SELECT * FROM Win32_Process WHERE ProcessID = %lu", processId);
     IEnumWbemClassObject *results  = NULL;
     services->lpVtbl->ExecQuery(services, language, queryBuff, WBEM_FLAG_BIDIRECTIONAL, NULL, &results);
 
@@ -2636,24 +2685,27 @@ void get_command_line(DWORD processId, Client *target)
     {
         IWbemClassObject *result = NULL;
         ULONG returnedCount = 0;
-
+        
         results->lpVtbl->Next(results, WBEM_INFINITE, 1, &result, &returnedCount);
-        VARIANT CommandLine;
+        VARIANT CommandLine; VariantInit(&CommandLine);
 
-        result->lpVtbl->Get(result, L"CommandLine", 0, &CommandLine, 0, 0);
-        int commandLineLen = SysStringLen(CommandLine.bstrVal) + 1;
-        target->data->commandLine = calloc(commandLineLen, sizeof(TCHAR));
+        if (result) {
+            result->lpVtbl->Get(result, L"CommandLine", 0, &CommandLine, 0, 0);
+        }
+        const WCHAR *b = (CommandLine.vt == VT_BSTR && CommandLine.bstrVal) ? CommandLine.bstrVal : L"";
+        int commandLineLen = (int)SysStringLen((BSTR)b) + 1;
+        target->data->commandLine = calloc((size_t)commandLineLen, sizeof(TCHAR));
         if(!target->data->commandLine)
         {
             assert(false);
         }
-        wcscpy_s(target->data->commandLine, commandLineLen, CommandLine.bstrVal);
+        wcscpy_s(target->data->commandLine, (rsize_t)commandLineLen, b);
 
+        if (result) { result->lpVtbl->Release(result); result = NULL; }
         results->lpVtbl->Next(results, WBEM_INFINITE, 1, &result, &returnedCount);
         assert(0 == returnedCount);
         VariantClear(&CommandLine);
-
-        result->lpVtbl->Release(result);
+        if (result) { result->lpVtbl->Release(result); }
         results->lpVtbl->Release(results);
     }
 }
@@ -4268,7 +4320,15 @@ void bar_render_selected_window_description(Bar *bar, HDC hdc)
     int focusedWindowBufLen;
     int workspaceInfoBufLen;
     int numberOfWorkspaceClients = workspace_get_number_of_clients(bar->monitor->workspace);
-    LPCWSTR processShortFileName = PathFindFileName(clientToRender->data->processImageName);
+    LPCWSTR processShortFileName = L"Unknown";
+    if (clientToRender->data->processImageName && clientToRender->data->processImageName[0] != L'\0')
+    {
+        processShortFileName = PathFindFileName(clientToRender->data->processImageName);
+        if (!processShortFileName || processShortFileName[0] == L'\0')
+        {
+            processShortFileName = L"Unknown";
+        }
+    }
 
     workspaceInfoBufLen = swprintf(workspaceInfoBuf, MAX_PATH, L"[%ls:%d][Mode:%ls]",
         bar->monitor->workspace->layout->tag,
@@ -5670,11 +5730,13 @@ static void CALLBACK process_with_stdout_exit_callback(void* context, BOOLEAN is
     UNREFERENCED_PARAMETER(isTimeOut);
     LauncherProcess *launcherProcess = (LauncherProcess*)context;
     CHAR chBuf[1024] = "";
-    DWORD dwRead;
+    DWORD dwRead = 0;
 
-    BOOL bSuccess = ReadFile(launcherProcess->readFileHandle, chBuf, 1024, &dwRead, NULL);
-    if(bSuccess)
+    BOOL bSuccess = ReadFile(launcherProcess->readFileHandle, chBuf, (DWORD)(sizeof(chBuf) - 1), &dwRead, NULL);
+    if (bSuccess)
     {
+        size_t n = (dwRead < (sizeof(chBuf) - 1)) ? dwRead : (sizeof(chBuf) - 1);
+        chBuf[n] = '\0';
         launcherProcess->onSuccess(chBuf);
     }
 
@@ -6347,7 +6409,8 @@ int run (void)
         WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
 
     workspace_focus_selected_window(&g_windowManagerState, g_windowManagerState.selectedMonitor->workspace);
-    nfm_load_library(L"LibNfm.dll");
+    // Load LibNfm only from the same directory as the EXE.
+    nfm_load_library();
 
     MSG msg;
     while (GetMessage(&msg, NULL, 0, 0))
@@ -6357,6 +6420,8 @@ int run (void)
     };
 
     dcomp_border_clean();
+    if (g_kb_hook) UnhookWindowsHookEx(g_kb_hook);
+    if (g_mouse_hook) UnhookWindowsHookEx(g_mouse_hook);
     CloseHandle(hMutex);
 
     IMMDeviceEnumerator_Release(mmdevice);
