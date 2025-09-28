@@ -468,8 +468,6 @@ void open_process_list_scratch_callback(char *stdOut);
 void open_process_list(void);
 void quit(WindowManagerState *self);
 
-void menu_on_escape(void *state);
-
 void show_clients(void);
 void keybindings_register_defaults(void);
 void keybindings_register_defaults_with_modifiers(int modifiers);

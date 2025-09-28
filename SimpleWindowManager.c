@@ -149,7 +149,6 @@ static WindowManagerState g_windowManagerState;
 static ResizeState g_resizeState;
 static DragDropState g_dragDropState;
 
-
 Layout deckLayout = {
     .select_next_window = deckLayout_select_next_window,
     //using the same function for next and previous since there will only be 2 windows to swicth between.
@@ -316,6 +315,7 @@ int populate_commands_list(void *state)
 void menu_on_closed(void)
 {
     g_windowManagerState.menuVisible = false;
+    workspace_focus_selected_window(&g_windowManagerState, g_windowManagerState.selectedMonitor->workspace); 
 }
 
 void open_program_scratch_callback(char *stdOut, void *state)
@@ -323,12 +323,9 @@ void open_program_scratch_callback(char *stdOut, void *state)
     WindowManagerState *windowManagerState = (WindowManagerState*)state;
     menu_hide(windowManagerState);
 
-    // Launch directly to avoid command injection via cmd.exe
-    // Assume stdOut is a UTF-8 or ANSI path; use ShellExecuteW for safety
     wchar_t wPath[MAX_PATH];
     int wlen = MultiByteToWideChar(CP_UTF8, 0, stdOut, -1, wPath, MAX_PATH);
     if (wlen == 0) {
-        // Fallback to ANSI if UTF-8 fails
         MultiByteToWideChar(CP_ACP, 0, stdOut, -1, wPath, MAX_PATH);
     }
     start_app(wPath);
@@ -339,7 +336,6 @@ void open_program_scratch_callback_not_elevated(char *stdOut, void *state)
 {
     WindowManagerState *windowManagerState = (WindowManagerState*)state;
     menu_hide(windowManagerState);
-    // Launch directly not elevated via parent-process attribute chain
     wchar_t wPath[MAX_PATH];
     int wlen = MultiByteToWideChar(CP_UTF8, 0, stdOut, -1, wPath, MAX_PATH);
     if (wlen == 0) {
@@ -3463,6 +3459,10 @@ void workspace_focus_selected_window(WindowManagerState *windowManagerState, Wor
         }
         windowManagerState->isForegroundWindowSameAsSelectMonitorSelected = TRUE;
     }
+    else
+    {
+        SetForegroundWindow(workspace->monitor->bar->hwnd);
+    }
     if(workspace->monitor->bar)
     {
         bar_trigger_selected_window_paint(workspace->monitor->bar);
@@ -4104,11 +4104,6 @@ void monacleLayout_calculate_and_apply_client_sizes(Workspace *workspace)
     }
 }
 
-
-
-
-
-
 void menu_hide(WindowManagerState *windowManagerState)
 {
     nfm_hide();
@@ -4116,23 +4111,6 @@ void menu_hide(WindowManagerState *windowManagerState)
     bar_trigger_selected_window_paint(windowManagerState->selectedMonitor->bar);
     border_window_update(windowManagerState);
 }
-
-void menu_on_escape(void *state)
-{
-    WindowManagerState *windowManagerState = (WindowManagerState*)state;
-    menu_hide(windowManagerState);
-    HWND foregroundHwnd = GetForegroundWindow();
-    if((foregroundHwnd == windowManagerState->borderWindowHwnd) && windowManagerState->selectedMonitor->workspace)
-    {
-        workspace_focus_selected_window(windowManagerState, windowManagerState->selectedMonitor->workspace);
-    }
-}
-
-
-
-
-
-
 
 unsigned __int64 ConvertFileTimeToInt64(FILETIME *fileTime)
 {
@@ -4143,8 +4121,6 @@ unsigned __int64 ConvertFileTimeToInt64(FILETIME *fileTime)
 
     return result.QuadPart;
 }
-
-
 
 void monitor_set_workspace_and_arrange(Workspace *workspace, Monitor *monitor, HDWP hdwp, WindowManagerState *windowManagerState)
 {
@@ -5149,7 +5125,7 @@ static LRESULT dcomp_border_window_message_loop(HWND window, UINT message, WPARA
                 UINT width = LOWORD(lparam);
                 UINT height = HIWORD(lparam);
                 WindowManagerState *windowManager = (WindowManagerState*)GetWindowLongPtr(window, GWLP_USERDATA);
-                dcomp_border_window_draw(width, height, !windowManager->isForegroundWindowSameAsSelectMonitorSelected);
+                dcomp_border_window_draw(width, height, !windowManager->isForegroundWindowSameAsSelectMonitorSelected && !g_windowManagerState.menuVisible);
             }
             break;
         case WM_PAINT:
@@ -5160,7 +5136,7 @@ static LRESULT dcomp_border_window_message_loop(HWND window, UINT message, WPARA
 
                 UINT width = rcWindow.right - rcWindow.left;
                 UINT height = rcWindow.bottom - rcWindow.top;
-                dcomp_border_window_draw(width, height, !windowManager->isForegroundWindowSameAsSelectMonitorSelected);
+                dcomp_border_window_draw(width, height, !windowManager->isForegroundWindowSameAsSelectMonitorSelected && !g_windowManagerState.menuVisible);
             }
             break;
         case WM_ERASEBKGND:
@@ -6450,3 +6426,4 @@ int WINAPI WinMain(
 /*{ */
 /*    return run(); */
 /*} */
+
