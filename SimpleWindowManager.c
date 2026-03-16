@@ -1511,13 +1511,13 @@ void log_float_decision(WindowManagerState *windowManager, Client *client, LONG_
     
     if (client->data->processImageName)
     {
-        _tcscpy_s(entry->processImageName, MAX_PATH, client->data->processImageName);
+        _tcsncpy_s(entry->processImageName, MAX_PATH, client->data->processImageName, _TRUNCATE);
     }
     else
     {
         _tcscpy_s(entry->processImageName, MAX_PATH, _T("Unknown"));
     }
-    
+
     if (client->data->className)
     {
         _tcscpy_s(entry->className, MAX_PATH, client->data->className);
@@ -1526,7 +1526,7 @@ void log_float_decision(WindowManagerState *windowManager, Client *client, LONG_
     {
         _tcscpy_s(entry->className, MAX_PATH, _T("Unknown"));
     }
-    
+
     if (client->data->title)
     {
         _tcsncpy_s(entry->title, 256, client->data->title, _TRUNCATE);
@@ -1535,7 +1535,7 @@ void log_float_decision(WindowManagerState *windowManager, Client *client, LONG_
     {
         _tcscpy_s(entry->title, 256, _T("Unknown"));
     }
-    
+
     _tcsncpy_s(entry->reason, 512, reason, _TRUNCATE);
     
     RECT windowRect;
@@ -1582,10 +1582,10 @@ void log_client_addition(WindowManagerState *windowManager, Client *client, Work
     LONG exStyles = GetWindowLong(client->data->hwnd, GWL_EXSTYLE);
     entry->styles = styles;
     entry->exStyles = exStyles;
-    entry->isFloated = is_float_window(client, styles, exStyles);
+    entry->isFloated = FALSE;
     
     if (client->data->processImageName)
-        _tcscpy_s(entry->processImageName, MAX_PATH, client->data->processImageName);
+        _tcsncpy_s(entry->processImageName, MAX_PATH, client->data->processImageName, _TRUNCATE);
     else
         _tcscpy_s(entry->processImageName, MAX_PATH, _T("Unknown"));
     
