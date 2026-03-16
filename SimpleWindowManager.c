@@ -1411,34 +1411,17 @@ BOOL has_float_styles(LONG_PTR styles, LONG_PTR exStyles)
 
 BOOL is_float_window(Client *client, LONG_PTR styles, LONG_PTR exStyles)
 {
-    TCHAR reason[512] = {0};
-    BOOL shouldFloat = FALSE;
-    
     if(configuration->windowsThatShouldNotFloatFunc)
     {
         if(!configuration->windowsThatShouldNotFloatFunc(client, styles, exStyles))
         {
-            _tcscpy_s(reason, 512, _T("Configuration function explicitly prevents floating"));
-            shouldFloat = FALSE;
-            log_float_decision(&g_windowManagerState, client, styles, exStyles, shouldFloat, reason);
             return FALSE;
         }
     }
 
     if(wcsstr(client->data->className, UWP_WRAPPER_CLASS))
     {
-        if(configuration->floatUwpWindows)
-        {
-            _stprintf_s(reason, 512, _T("UWP window and floatUwpWindows=TRUE (className: %s)"), client->data->className);
-            shouldFloat = TRUE;
-        }
-        else
-        {
-            _stprintf_s(reason, 512, _T("UWP window but floatUwpWindows=FALSE (className: %s)"), client->data->className);
-            shouldFloat = FALSE;
-        }
-        log_float_decision(&g_windowManagerState, client, styles, exStyles, shouldFloat, reason);
-        return shouldFloat;
+        return configuration->floatUwpWindows;
     }
 
     WINDOWPLACEMENT placement = {0};
@@ -1447,39 +1430,15 @@ BOOL is_float_window(Client *client, LONG_PTR styles, LONG_PTR exStyles)
         int height = placement.rcNormalPosition.bottom - placement.rcNormalPosition.top;
         if(height < configuration->nonFloatWindowHeightMinimum)
         {
-            _stprintf_s(reason, 512, _T("Window height (%d) below minimum (%d)"), 
-                       height, configuration->nonFloatWindowHeightMinimum);
-            shouldFloat = TRUE;
-            log_float_decision(&g_windowManagerState, client, styles, exStyles, shouldFloat, reason);
             return TRUE;
         }
     }
 
     if(has_float_styles(styles, exStyles))
     {
-        _tcscpy_s(reason, 512, _T("Has float styles: "));
-        
-        if(exStyles & WS_EX_TOOLWINDOW)
-        {
-            _tcscat_s(reason, 512, _T("TOOLWINDOW "));
-        }
-        if(!(styles & WS_SIZEBOX))
-        {
-            _tcscat_s(reason, 512, _T("NO_SIZEBOX "));
-        }
-        if(exStyles & WS_EX_APPWINDOW)
-        {
-            _tcscat_s(reason, 512, _T("(APPWINDOW_OVERRIDE) "));
-        }
-            
-        shouldFloat = TRUE;
-        log_float_decision(&g_windowManagerState, client, styles, exStyles, shouldFloat, reason);
         return TRUE;
     }
 
-    _stprintf_s(reason, 512, _T("No floating criteria met - will be tiled"));
-    shouldFloat = FALSE;
-    log_float_decision(&g_windowManagerState, client, styles, exStyles, shouldFloat, reason);
     return FALSE;
 }
 
@@ -3085,8 +3044,7 @@ void workspace_add_unminimized_client(Workspace *workspace, Client *client)
 void workspace_add_client(Workspace *workspace, Client *client)
 {
     client->workspace = workspace;
-    BOOL wasMinimized = client->data->isMinimized;
-    
+
     if(client->data->isMinimized)
     {
         workspace_add_minimized_client(workspace, client);
@@ -3098,7 +3056,7 @@ void workspace_add_client(Workspace *workspace, Client *client)
 
     workspace_update_client_counts(workspace);
     
-    log_client_addition(&g_windowManagerState, client, workspace, wasMinimized);
+    //log_client_addition(&g_windowManagerState, client, workspace, wasMinimized);
 }
 
 void workspace_remove_client_and_arrange(WindowManagerState *windowManagerState, Workspace *workspace, Client *client)
