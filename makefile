@@ -9,13 +9,27 @@ CONFIG = DEBUG
 
 !IF "$(CONFIG)" == "DEBUG"
 outdir = tmp\debug
-cflags = /c /W4 /EHsc /nologo /DUNICODE /D_UNICODE /Zi
-DEBUG_FLAGS = /RTCs /RTCu
+CRTFLAG = /MDd
+OPTFLAG = /Od
 !ELSE
 outdir = tmp\release
-cflags = /c /W4 /EHsc /nologo /DUNICODE /D_UNICODE /Zi /O2
-DEBUG_FLAGS =
+CRTFLAG = /MD
+OPTFLAG = /O2
 !ENDIF
+
+!IF "$(CONFIG)" == "DEBUG"
+!IF "$(ASAN)" == "1"
+cflags = $(cflags) /fsanitize=address
+DEBUG_FLAGS =
+LFLAGS = /DEBUG:FULL /DYNAMICBASE /NXCOMPAT /INCREMENTAL:NO
+!ELSE
+DEBUG_FLAGS = /RTC1
+LFLAGS = /DEBUG:FULL /DYNAMICBASE /NXCOMPAT
+!ENDIF
+!ENDIF
+
+cflags       = /c /W4 /EHsc /nologo /DUNICODE /D_UNICODE /Zi $(OPTFLAG) $(CRTFLAG) /GS
+nowarncflags = /c /EHsc /nologo /DUNICODE /D_UNICODE /Zi $(OPTFLAG) $(CRTFLAG) /GS /W0
 
 debug:
 	nmake /f Makefile CONFIG=DEBUG SimpleWindowManager.exe
@@ -62,8 +76,8 @@ SimpleWindowManager.exe: outdir copy_nfm_menu_binaries nfm_menu.obj RestoreMoved
 	mt -manifest SimpleWindowManager.manifest -outputresource:$(outdir)\SimpleWindowManager.exe;1
 !ENDIF
 
-RestoreMovedWindows.exe: outdir RestoreMovedWindowsConsole.obj ListWindows.obj
-	LINK $(LFLAGS) $(outdir)\RestoreMovedWindows.obj $(outdir)\RestoreMovedWindowsConsole.obj $(outdir)\ListWindows.obj $(winlibs) Shlwapi.lib Dwmapi.lib /OUT:$(outdir)\RestoreMovedWindows.exe
+RestoreMovedWindows.exe: outdir RestoreMovedWindows.obj RestoreMovedWindowsConsole.obj ListWindows.obj
+    LINK $(LFLAGS) $(outdir)\RestoreMovedWindows.obj $(outdir)\RestoreMovedWindowsConsole.obj $(outdir)\ListWindows.obj $(winlibs) Shlwapi.lib Dwmapi.lib /OUT:$(outdir)\RestoreMovedWindows.exe
 
 publish:
 	rd /s /q $(publishdir)
