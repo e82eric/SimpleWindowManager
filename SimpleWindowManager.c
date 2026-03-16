@@ -2482,6 +2482,11 @@ void windowManager_remove_client_if_found_by_hwnd(WindowManagerState *self, HWND
     }
     if(client)
     {
+        if(g_resizeState.regularResizeClient == client)
+        {
+            g_resizeState.regularResizeInProgress = FALSE;
+            g_resizeState.regularResizeClient = NULL;
+        }
         free_client(client);
     }
 }
@@ -3329,7 +3334,7 @@ void workspace_arrange_windows_with_defer_handle(Workspace *workspace, HDWP hdwp
 void workspace_register_classname_contains_filter(Workspace *workspace, TCHAR *className)
 {
     workspace->filterData->numberOfClassNames++;
-    TCHAR **temp = realloc(workspace->filterData->classNames, workspace->filterData->numberOfClassNames);
+    TCHAR **temp = realloc(workspace->filterData->classNames, workspace->filterData->numberOfClassNames * sizeof(TCHAR*));
     if(!temp)
     {
         assert(false);
@@ -3344,7 +3349,7 @@ void workspace_register_classname_contains_filter(Workspace *workspace, TCHAR *c
 void workspace_register_classname_not_contains_filter(Workspace *workspace, TCHAR *className)
 {
     workspace->filterData->numberOfNotClassNames++;
-    TCHAR **temp = realloc(workspace->filterData->notClassNames, workspace->filterData->numberOfNotClassNames);
+    TCHAR **temp = realloc(workspace->filterData->notClassNames, workspace->filterData->numberOfNotClassNames * sizeof(TCHAR*));
     if(!temp)
     {
         assert(false);
@@ -6287,11 +6292,11 @@ int run (void)
       eMultimedia,
       &mmdevice);
     if (FAILED(hr)) {
-      IMMDeviceEnumerator_Release(mmdevice);
+      IMMDeviceEnumerator_Release(dev_enumerator);
       CoUninitialize();
       return 1;
     }
-  
+
     hr = IMMDevice_Activate(
       mmdevice,
       &IID_IAudioEndpointVolume,
@@ -6299,8 +6304,8 @@ int run (void)
       NULL,
       (void**)&g_audioEndpointVolume);
     if (FAILED(hr)) {
-      IMMDeviceEnumerator_Release(mmdevice);
       IMMDevice_Release(mmdevice);
+      IMMDeviceEnumerator_Release(dev_enumerator);
       CoUninitialize();
       return 1;
     }
