@@ -1411,17 +1411,25 @@ BOOL has_float_styles(LONG_PTR styles, LONG_PTR exStyles)
 
 BOOL is_float_window(Client *client, LONG_PTR styles, LONG_PTR exStyles)
 {
+    TCHAR reason[512] = {0};
+
     if(configuration->windowsThatShouldNotFloatFunc)
     {
         if(!configuration->windowsThatShouldNotFloatFunc(client, styles, exStyles))
         {
+            log_float_decision(&g_windowManagerState, client, styles, exStyles, FALSE,
+                _T("Configuration function explicitly prevents floating"));
             return FALSE;
         }
     }
 
     if(wcsstr(client->data->className, UWP_WRAPPER_CLASS))
     {
-        return configuration->floatUwpWindows;
+        BOOL shouldFloat = configuration->floatUwpWindows;
+        _stprintf_s(reason, 512, _T("UWP window, floatUwpWindows=%s (className: %s)"),
+            shouldFloat ? _T("TRUE") : _T("FALSE"), client->data->className);
+        log_float_decision(&g_windowManagerState, client, styles, exStyles, shouldFloat, reason);
+        return shouldFloat;
     }
 
     WINDOWPLACEMENT placement = {0};
@@ -1430,15 +1438,25 @@ BOOL is_float_window(Client *client, LONG_PTR styles, LONG_PTR exStyles)
         int height = placement.rcNormalPosition.bottom - placement.rcNormalPosition.top;
         if(height < configuration->nonFloatWindowHeightMinimum)
         {
+            _stprintf_s(reason, 512, _T("Window height (%d) below minimum (%d)"),
+                height, configuration->nonFloatWindowHeightMinimum);
+            log_float_decision(&g_windowManagerState, client, styles, exStyles, TRUE, reason);
             return TRUE;
         }
     }
 
     if(has_float_styles(styles, exStyles))
     {
+        _tcscpy_s(reason, 512, _T("Has float styles:"));
+        if(exStyles & WS_EX_TOOLWINDOW) _tcscat_s(reason, 512, _T(" TOOLWINDOW"));
+        if(!(styles & WS_SIZEBOX))       _tcscat_s(reason, 512, _T(" NO_SIZEBOX"));
+        if(exStyles & WS_EX_APPWINDOW)  _tcscat_s(reason, 512, _T(" (APPWINDOW_OVERRIDE)"));
+        log_float_decision(&g_windowManagerState, client, styles, exStyles, TRUE, reason);
         return TRUE;
     }
 
+    log_float_decision(&g_windowManagerState, client, styles, exStyles, FALSE,
+        _T("No floating criteria met - will be tiled"));
     return FALSE;
 }
 
@@ -1479,7 +1497,7 @@ void log_float_decision(WindowManagerState *windowManager, Client *client, LONG_
 
     if (client->data->className)
     {
-        _tcscpy_s(entry->className, MAX_PATH, client->data->className);
+        _tcsncpy_s(entry->className, MAX_PATH, client->data->className, _TRUNCATE);
     }
     else
     {
@@ -1549,7 +1567,7 @@ void log_client_addition(WindowManagerState *windowManager, Client *client, Work
         _tcscpy_s(entry->processImageName, MAX_PATH, _T("Unknown"));
     
     if (client->data->className)
-        _tcscpy_s(entry->className, MAX_PATH, client->data->className);
+        _tcsncpy_s(entry->className, MAX_PATH, client->data->className, _TRUNCATE);
     else
         _tcscpy_s(entry->className, MAX_PATH, _T("Unknown"));
     
@@ -2705,21 +2723,16 @@ Client* clientFactory_create_from_hwnd(HWND hwnd)
     }
 
     TCHAR processImageFileName[1024] = {0};
-    DWORD dwFileSize = 1024;
-    DWORD processImageFileNameResult = QueryFullProcessImageNameW(
-        hProcess,
-        0,
-        processImageFileName,
-        &dwFileSize
-    );
-    CloseHandle(hProcess);
-
-    if(processImageFileNameResult == 0)
+    if(hProcess)
     {
-        wchar_t buf[256];
-        FormatMessageW(FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
-            NULL, GetLastError(), MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT), 
-            buf, (sizeof(buf) / sizeof(wchar_t)), NULL);
+        DWORD dwFileSize = 1024;
+        QueryFullProcessImageNameW(
+            hProcess,
+            0,
+            processImageFileName,
+            &dwFileSize
+        );
+        CloseHandle(hProcess);
     }
 
     TCHAR title[256];
@@ -3044,6 +3057,7 @@ void workspace_add_unminimized_client(Workspace *workspace, Client *client)
 void workspace_add_client(Workspace *workspace, Client *client)
 {
     client->workspace = workspace;
+    BOOL wasMinimized = client->data->isMinimized;
 
     if(client->data->isMinimized)
     {
@@ -3056,7 +3070,7 @@ void workspace_add_client(Workspace *workspace, Client *client)
 
     workspace_update_client_counts(workspace);
     
-    //log_client_addition(&g_windowManagerState, client, workspace, wasMinimized);
+    log_client_addition(&g_windowManagerState, client, workspace, wasMinimized);
 }
 
 void workspace_remove_client_and_arrange(WindowManagerState *windowManagerState, Workspace *workspace, Client *client)
