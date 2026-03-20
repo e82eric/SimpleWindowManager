@@ -165,6 +165,9 @@ struct Workspace
     Client *lastClient;
     int numberOfClients;
     WorkspaceFilterData *filterData;
+    ClientData **savedLayout;
+    int savedLayoutCount;
+    ClientData *savedSelectedData;
 };
 
 struct Client
@@ -371,6 +374,7 @@ typedef struct ResizeState
     WindowManagerState *windowManager;
 } ResizeState;
 
+extern Layout gridLayout;
 extern Layout deckLayout;
 extern Layout monacleLayout;
 extern Layout tileLayout;
@@ -452,6 +456,7 @@ void taskbar_toggle(WindowManagerState *self);
 void mimimize_focused_window(WindowManagerState *self);
 void move_focused_client_next(WindowManagerState *self);
 void move_focused_client_previous(WindowManagerState *self);
+void swap_selected_monitor_to_grid_layout(WindowManagerState *self);
 void swap_selected_monitor_to_deck_layout(WindowManagerState *self);
 void swap_selected_monitor_to_monacle_layout(WindowManagerState *self);
 void swap_selected_monitor_to_tile_layout(WindowManagerState *self);

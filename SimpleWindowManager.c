@@ -80,6 +80,12 @@ void monacleLayout_move_client_previous(Client *client);
 void monacleLayout_calculate_and_apply_client_sizes(Workspace *workspace);
 
 void noop_swap_clients(Client *client1, Client *client2);
+void gridLayout_select_next_window(Workspace *workspace);
+void gridLayout_select_previous_window(Workspace *workspace);
+void gridLayout_move_client_to_main(Client *client);
+void gridLayout_move_client_next(Client *client);
+void gridLayout_move_client_previous(Client *client);
+void gridLayout_apply_to_workspace(Workspace *workspace);
 
 void process_with_stdin_start(TCHAR *cmdArgs, CHAR **lines, int numberOfLines, void (*onSuccess) (CHAR *));
 void start_process(CHAR *processExe, CHAR *cmdArgs, DWORD creationFlags);
@@ -105,6 +111,8 @@ static void workspace_remove_minimized_client(Workspace *workspace, Client *clie
 static void workspace_remove_unminimized_client(Workspace *workspace, Client *client);
 static void workspace_remove_client_and_arrange(WindowManagerState *windowManagerState, Workspace *workspace, Client *client);
 static int workspace_update_client_counts(Workspace *workspace);
+static void workspace_save_layout(Workspace *workspace);
+static void workspace_restore_saved_layout(Workspace *workspace);
 static int workspace_get_number_of_clients(Workspace *workspace);
 static KeyBinding* keybindings_find_existing_or_create(WindowManagerState *windowManager, CHAR* name, int modifiers, unsigned int key);
 static void format_window_styles(LONG_PTR styles, TCHAR* buffer, size_t bufferSize);
@@ -149,6 +157,18 @@ static WindowManagerState g_windowManagerState;
 static ResizeState g_resizeState;
 static DragDropState g_dragDropState;
 
+Layout gridLayout = {
+    .select_next_window = gridLayout_select_next_window,
+    .select_previous_window = gridLayout_select_previous_window,
+    .swap_clients = tileLayout_swap_clients,
+    .move_client_to_main = gridLayout_move_client_to_main,
+    .move_client_next = gridLayout_move_client_next,
+    .move_client_previous = gridLayout_move_client_previous,
+    .apply_to_workspace = gridLayout_apply_to_workspace,
+    .next = NULL,
+    .tag = L"Q"
+};
+
 Layout deckLayout = {
     .select_next_window = deckLayout_select_next_window,
     //using the same function for next and previous since there will only be 2 windows to swicth between.
@@ -159,7 +179,7 @@ Layout deckLayout = {
     .move_client_next = deckLayout_move_client_next,
     .move_client_previous = deckLayout_move_client_previous,
     .apply_to_workspace = deckLayout_apply_to_workspace,
-    .next = NULL,
+    .next = &gridLayout,
     .tag = L"D"
 };
 
@@ -776,6 +796,7 @@ void run_command_from_menu(char *stdOut, void *state)
         if(strcmp(name, windowManagerState->commands[i]->name) == 0)
         {
             windowManagerState->commands[i]->execute(windowManagerState->commands[i]);
+            menu_hide(state);
             return;
         }
     }
@@ -954,7 +975,12 @@ void move_focused_window_to_main(WindowManagerState *self)
         Client *client = self->selectedMonitor->workspace->selected;
         if(client)
         {
-            if(client == client->workspace->clients)
+            // Redirect clients[0] → clients[1] so tile/deck layouts don't no-op
+            // when the main window tries to swap with itself.
+            // Skip for grid layout, which handles clients[0] correctly
+            // (swaps TL with its horizontal neighbour TR).
+            if(client == client->workspace->clients &&
+               client->workspace->layout != &gridLayout)
             {
                 if(client->next)
                 {
@@ -1235,6 +1261,11 @@ void swap_selected_monitor_to_monacle_layout(WindowManagerState *self)
 void swap_selected_monitor_to_deck_layout(WindowManagerState *self)
 {
     monitor_set_layout(self, &deckLayout);
+}
+
+void swap_selected_monitor_to_grid_layout(WindowManagerState *self)
+{
+    monitor_set_layout(self, &gridLayout);
 }
 
 void swap_selected_monitor_to_horizontaldeck_layout(WindowManagerState *self)
@@ -3238,6 +3269,65 @@ int workspace_get_number_of_clients(Workspace *workspace)
     return workspace->numberOfClients;
 }
 
+static void workspace_save_layout(Workspace *workspace)
+{
+    int count = workspace_get_number_of_clients(workspace);
+    if(count == 0)
+    {
+        return;
+    }
+    free(workspace->savedLayout);
+    workspace->savedLayout = malloc(sizeof(ClientData *) * count);
+    workspace->savedLayoutCount = count;
+    workspace->savedSelectedData = workspace->selected ? workspace->selected->data : NULL;
+    Client *c = workspace->clients;
+    for(int i = 0; i < count; i++)
+    {
+        workspace->savedLayout[i] = c->data;
+        c = c->next;
+    }
+}
+
+static void workspace_restore_saved_layout(Workspace *workspace)
+{
+    if(!workspace->savedLayout)
+    {
+        return;
+    }
+    Client *c = workspace->clients;
+    for(int i = 0; i < workspace->savedLayoutCount && c; i++)
+    {
+        Client *found = workspace->clients;
+        while(found && found->data != workspace->savedLayout[i])
+        {
+            found = found->next;
+        }
+        if(found && found != c)
+        {
+            ClientData *temp = c->data;
+            c->data = found->data;
+            found->data = temp;
+        }
+        c = c->next;
+    }
+    if(workspace->savedSelectedData)
+    {
+        Client *sel = workspace->clients;
+        while(sel && sel->data != workspace->savedSelectedData)
+        {
+            sel = sel->next;
+        }
+        if(sel)
+        {
+            workspace->selected = sel;
+        }
+    }
+    free(workspace->savedLayout);
+    workspace->savedLayout = NULL;
+    workspace->savedLayoutCount = 0;
+    workspace->savedSelectedData = NULL;
+}
+
 int workspace_update_client_counts(Workspace *workspace)
 {
     int numberOfClients = 0;
@@ -3968,6 +4058,322 @@ void deckLayout_select_next_window(Workspace *workspace)
     }
 }
 
+void gridLayout_apply_to_workspace(Workspace *workspace)
+{
+    int numberOfClients = workspace_get_number_of_clients(workspace);
+    if(numberOfClients == 0)
+    {
+        return;
+    }
+
+    int gapWidth  = workspace->monitor->workspaceStyle->gapWidth;
+    int screenHeight = workspace->monitor->bottom - workspace->monitor->top;
+    int screenWidth  = workspace->monitor->w;
+    int monitorXOffset = workspace->monitor->xOffset;
+    int mainOffset = workspace->mainOffset;
+
+    int allY      = workspace->monitor->top + gapWidth;
+    int allHeight = screenHeight - (gapWidth * 2);
+    int leftX     = monitorXOffset + gapWidth;
+    int leftWidth  = (screenWidth / 2) - gapWidth - (gapWidth / 2) + mainOffset;
+    int rightWidth = (screenWidth / 2) - gapWidth - (gapWidth / 2) - mainOffset;
+    int rightX     = monitorXOffset + leftWidth + (gapWidth * 2);
+
+    if(numberOfClients == 1)
+    {
+        client_set_screen_coordinates(workspace->clients,
+            screenWidth - (gapWidth * 2), allHeight, leftX, allY);
+        workspace->clients->isVisible = TRUE;
+        return;
+    }
+
+    int leftCount  = numberOfClients / 2;
+    int rightCount = numberOfClients - leftCount;
+
+    long leftGaps  = (leftCount  > 1) ? (leftCount  - 1) * gapWidth : 0;
+    long rightGaps = (rightCount > 1) ? (rightCount - 1) * gapWidth : 0;
+    int leftTileH  = (int)((allHeight - leftGaps)  / leftCount);
+    int rightTileH = (int)((allHeight - rightGaps) / rightCount);
+
+    Client *c = workspace->clients;
+    int leftY  = allY;
+    int rightY = allY;
+    for(int i = 0; i < numberOfClients; i++)
+    {
+        c->isVisible = TRUE;
+        if(i < leftCount)
+        {
+            client_set_screen_coordinates(c, leftWidth, leftTileH, leftX, leftY);
+            leftY += leftTileH + gapWidth;
+        }
+        else
+        {
+            client_set_screen_coordinates(c, rightWidth, rightTileH, rightX, rightY);
+            rightY += rightTileH + gapWidth;
+        }
+        c = c->next;
+    }
+}
+
+// Returns the position that follows `pos` in a clockwise circuit:
+// TL(0) → TR(leftCount) → down right column → BR(N-1) → up left column → TL
+static int gridLayout_next_pos(int pos, int leftCount, int numberOfClients)
+{
+    if(pos == 0)
+    {
+        return leftCount; // TL → TR
+    }
+    else if(pos >= leftCount && pos < numberOfClients - 1)
+    {
+        return pos + 1; // down the right column
+    }
+    else if(pos == numberOfClients - 1)
+    {
+        return leftCount - 1; // BR → BL (or TL when leftCount==1)
+    }
+    else if(pos > 1)
+    {
+        return pos - 1; // up the left column
+    }
+    else
+    {
+        return 0; // left[1] → TL
+    }
+}
+
+static int gridLayout_prev_pos(int pos, int leftCount, int numberOfClients)
+{
+    if(pos == 0)
+    {
+        return (leftCount > 1) ? 1 : numberOfClients - 1; // TL → left[1] or BR
+    }
+    else if(pos == leftCount)
+    {
+        return 0; // TR → TL
+    }
+    else if(pos > leftCount)
+    {
+        return pos - 1; // up the right column
+    }
+    else if(pos == leftCount - 1)
+    {
+        return numberOfClients - 1; // BL → BR
+    }
+    else
+    {
+        return pos + 1; // down the left column
+    }
+}
+
+void gridLayout_select_next_window(Workspace *workspace)
+{
+    if(!workspace->clients)
+    {
+        return;
+    }
+
+    if(!workspace->selected)
+    {
+        workspace->selected = workspace->clients;
+        return;
+    }
+
+    int numberOfClients = workspace_get_number_of_clients(workspace);
+    if(numberOfClients <= 1)
+    {
+        workspace->selected = workspace->clients;
+        return;
+    }
+
+    int leftCount = numberOfClients / 2;
+
+    Client *c = workspace->clients;
+    int pos = 0;
+    while(c && c != workspace->selected)
+    {
+        c = c->next;
+        pos++;
+    }
+    if(!c)
+    {
+        workspace->selected = workspace->clients;
+        return;
+    }
+
+    int nextPos = gridLayout_next_pos(pos, leftCount, numberOfClients);
+    c = workspace->clients;
+    for(int i = 0; i < nextPos; i++)
+    {
+        c = c->next;
+    }
+    workspace->selected = c;
+}
+
+void gridLayout_select_previous_window(Workspace *workspace)
+{
+    if(!workspace->clients)
+    {
+        return;
+    }
+
+    if(!workspace->selected)
+    {
+        workspace->selected = workspace->clients;
+        return;
+    }
+
+    int numberOfClients = workspace_get_number_of_clients(workspace);
+    if(numberOfClients <= 1)
+    {
+        workspace->selected = workspace->clients;
+        return;
+    }
+
+    int leftCount = numberOfClients / 2;
+
+    Client *c = workspace->clients;
+    int pos = 0;
+    while(c && c != workspace->selected)
+    {
+        c = c->next;
+        pos++;
+    }
+    if(!c)
+    {
+        workspace->selected = workspace->clients;
+        return;
+    }
+
+    int prevPos = gridLayout_prev_pos(pos, leftCount, numberOfClients);
+    c = workspace->clients;
+    for(int i = 0; i < prevPos; i++)
+    {
+        c = c->next;
+    }
+    workspace->selected = c;
+}
+
+void gridLayout_move_client_to_main(Client *client)
+{
+    int numberOfClients = workspace_get_number_of_clients(client->workspace);
+    if(numberOfClients < 2)
+    {
+        return;
+    }
+
+    int leftCount = numberOfClients / 2;
+
+    Client *c = client->workspace->clients;
+    int pos = 0;
+    while(c && c != client)
+    {
+        c = c->next;
+        pos++;
+    }
+    if(!c)
+    {
+        return;
+    }
+
+    int targetPos;
+    if(pos >= leftCount)
+    {
+        // Right column: swap with same row in left column
+        int rightRow = pos - leftCount;
+        targetPos = (rightRow < leftCount) ? rightRow : leftCount - 1;
+    }
+    else
+    {
+        // Left column: swap with same row in right column
+        int targetRight = leftCount + pos;
+        targetPos = (targetRight < numberOfClients) ? targetRight : numberOfClients - 1;
+        if(targetPos == pos)
+        {
+            return;
+        }
+    }
+
+    Client *target = client->workspace->clients;
+    for(int i = 0; i < targetPos; i++)
+    {
+        target = target->next;
+    }
+
+    ClientData *temp = client->data;
+    client->data = target->data;
+    target->data = temp;
+}
+
+void gridLayout_move_client_next(Client *client)
+{
+    int numberOfClients = workspace_get_number_of_clients(client->workspace);
+    if(numberOfClients <= 1)
+    {
+        return;
+    }
+
+    int leftCount = numberOfClients / 2;
+
+    Client *c = client->workspace->clients;
+    int pos = 0;
+    while(c && c != client)
+    {
+        c = c->next;
+        pos++;
+    }
+    if(!c)
+    {
+        return;
+    }
+
+    int nextPos = gridLayout_next_pos(pos, leftCount, numberOfClients);
+    Client *next = client->workspace->clients;
+    for(int i = 0; i < nextPos; i++)
+    {
+        next = next->next;
+    }
+
+    ClientData *temp = client->data;
+    client->data = next->data;
+    next->data = temp;
+    client->workspace->selected = next;
+}
+
+void gridLayout_move_client_previous(Client *client)
+{
+    int numberOfClients = workspace_get_number_of_clients(client->workspace);
+    if(numberOfClients <= 1)
+    {
+        return;
+    }
+
+    int leftCount = numberOfClients / 2;
+
+    Client *c = client->workspace->clients;
+    int pos = 0;
+    while(c && c != client)
+    {
+        c = c->next;
+        pos++;
+    }
+    if(!c)
+    {
+        return;
+    }
+
+    int prevPos = gridLayout_prev_pos(pos, leftCount, numberOfClients);
+    Client *prev = client->workspace->clients;
+    for(int i = 0; i < prevPos; i++)
+    {
+        prev = prev->next;
+    }
+
+    ClientData *temp = client->data;
+    client->data = prev->data;
+    prev->data = temp;
+    client->workspace->selected = prev;
+}
+
 void monacleLayout_select_next_client(Workspace *workspace)
 {
     if(!workspace->clients)
@@ -4187,6 +4593,14 @@ void monitor_select(WindowManagerState *self, Monitor *monitor)
 void monitor_set_layout(WindowManagerState *windowManagerState, Layout *layout)
 {
     Workspace *workspace = windowManagerState->selectedMonitor->workspace;
+    if(workspace->layout == &monacleLayout && layout != &monacleLayout)
+    {
+        workspace_restore_saved_layout(workspace);
+    }
+    else if(workspace->layout != &monacleLayout && layout == &monacleLayout)
+    {
+        workspace_save_layout(workspace);
+    }
     workspace->layout = layout;
     workspace_arrange_windows(workspace, windowManagerState);
     if(workspace->monitor->bar)
@@ -5501,7 +5915,7 @@ void keybindings_register_defaults_with_modifiers(int modifiers)
     keybinding_create_with_no_arg("swap_selected_monitor_to_monacle_layout", modifiers, VK_M, swap_selected_monitor_to_monacle_layout);
     keybinding_create_with_no_arg("swap_selected_monitor_to_deck_layout", modifiers, VK_Y, swap_selected_monitor_to_deck_layout);
     /* keybinding_create_with_no_arg("swap_selected_monitor_to_horizontaldeck_layout", modifiers, VK_H, swap_selected_monitor_to_horizontaldeck_layout); */
-    keybinding_create_with_no_arg("swap_selected_monitor_to_tile_layout", modifiers, VK_U, swap_selected_monitor_to_tile_layout);
+    keybinding_create_with_no_arg("swap_selected_monitor_to_grid_layout", modifiers, VK_U, swap_selected_monitor_to_grid_layout);
     keybinding_create_with_no_arg("redraw_focused_window", modifiers, VK_I, redraw_focused_window);
 }
 
@@ -5925,9 +6339,8 @@ void configuration_register_default_text_style(Configuration *self, TCHAR *fontN
     COLORREF normalTextColor = RGB(235, 219, 178);
     COLORREF disabledColor = 0x504945;
     COLORREF focusTextColor = RGB(204, 36, 29);
-    //COLORREF focusColor2 = RGB(250, 189, 47);
     COLORREF lostFocusColor = RGB(142, 192, 124);
-    COLORREF focusColor2 = 0x00888545;;//RGB(131, 165, 152);
+    COLORREF focusColor2 = RGB(250, 189, 47); // gruvbox bright yellow #fabd2f
 
     self->textStyle->font = textFont;
     self->textStyle->iconFont = iconFont;
