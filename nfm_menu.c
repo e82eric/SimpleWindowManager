@@ -16,6 +16,7 @@ nfm_show_items_list_func            nfm_show_items_list = NULL;
 nfm_show_array_columns_menu_func    nfm_show_array_columns_menu = NULL;
 nfm_hide_func                       nfm_hide = NULL;
 nfm_run_last_definition_func        nfm_run_last_definition = NULL;
+nfm_set_menu_location_func          nfm_set_menu_location = NULL;
 
 static HMODULE LoadDllStrict(const wchar_t* fullPath, DWORD* lastErr)
 {
@@ -108,6 +109,7 @@ HMODULE nfm_load_library(void)
     nfm_show_array_columns_menu  = (nfm_show_array_columns_menu_func) GetProcAddress(hModule, "ShowArrayColumns");
     nfm_hide                     = (nfm_hide_func)                    GetProcAddress(hModule, "Hide");
     nfm_run_last_definition      = (nfm_run_last_definition_func)     GetProcAddress(hModule, "RunLastDefinition");
+    nfm_set_menu_location        = (nfm_set_menu_location_func)       GetProcAddress(hModule, "SetMenuLocation");
 
     if (!nfm_initialize || !nfm_show_file_system || !nfm_show_programs_list || !nfm_show_windows_list ||
         !nfm_show_processes_list || !nfm_show_items_list || !nfm_show_array_columns_menu || !nfm_hide || !nfm_run_last_definition)
@@ -137,5 +139,21 @@ void nfm_unload_library(HMODULE hModule)
 {
     if (hModule) {
         FreeLibrary(hModule);
+    }
+}
+
+void nfm_set_menu_location_primary_monitor_center(void)
+{
+    if (!nfm_set_menu_location) return;
+
+    POINT pt = {0, 0};
+    HMONITOR hmon = MonitorFromPoint(pt, MONITOR_DEFAULTTOPRIMARY);
+    MONITORINFO mi;
+    mi.cbSize = sizeof(mi);
+    if (GetMonitorInfoW(hmon, &mi))
+    {
+        int cx = (mi.rcWork.left + mi.rcWork.right) / 2;
+        int cy = (mi.rcWork.top + mi.rcWork.bottom) / 2;
+        nfm_set_menu_location(cx, cy);
     }
 }

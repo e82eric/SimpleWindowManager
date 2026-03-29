@@ -55,6 +55,7 @@ typedef void (*nfm_show_array_columns_menu_func)(
 );
 typedef void (*nfm_hide_func)();
 typedef void (*nfm_run_last_definition_func)();
+typedef void (*nfm_set_menu_location_func)(int x, int y);
 
 HMODULE nfm_load_library(void);
 void nfm_unload_library(HMODULE hModule);
@@ -68,5 +69,8 @@ extern nfm_show_items_list_func nfm_show_items_list;
 extern nfm_show_array_columns_menu_func nfm_show_array_columns_menu;
 extern nfm_hide_func nfm_hide;
 extern nfm_run_last_definition_func nfm_run_last_definition;
+extern nfm_set_menu_location_func nfm_set_menu_location;
+
+void nfm_set_menu_location_primary_monitor_center(void);
 
 #endif
