@@ -80,12 +80,26 @@ void monacleLayout_move_client_previous(Client *client);
 void monacleLayout_calculate_and_apply_client_sizes(Workspace *workspace);
 
 void noop_swap_clients(Client *client1, Client *client2);
+void tileLayout_select_left(Workspace *workspace);
+void tileLayout_select_right(Workspace *workspace);
+void tileLayout_move_client_left(Client *client);
+void tileLayout_move_client_right(Client *client);
+void deckLayout_select_down(Workspace *workspace);
+void deckLayout_select_up(Workspace *workspace);
 void gridLayout_select_next_window(Workspace *workspace);
 void gridLayout_select_previous_window(Workspace *workspace);
 void gridLayout_move_client_to_main(Client *client);
 void gridLayout_move_client_next(Client *client);
 void gridLayout_move_client_previous(Client *client);
 void gridLayout_apply_to_workspace(Workspace *workspace);
+void gridLayout_select_left(Workspace *workspace);
+void gridLayout_select_right(Workspace *workspace);
+void gridLayout_select_up(Workspace *workspace);
+void gridLayout_select_down(Workspace *workspace);
+void gridLayout_move_client_left(Client *client);
+void gridLayout_move_client_right(Client *client);
+void gridLayout_move_client_up(Client *client);
+void gridLayout_move_client_down(Client *client);
 
 void process_with_stdin_start(TCHAR *cmdArgs, CHAR **lines, int numberOfLines, void (*onSuccess) (CHAR *));
 void start_process(CHAR *processExe, CHAR *cmdArgs, DWORD creationFlags);
@@ -165,34 +179,54 @@ Layout gridLayout = {
     .move_client_next = gridLayout_move_client_next,
     .move_client_previous = gridLayout_move_client_previous,
     .apply_to_workspace = gridLayout_apply_to_workspace,
+    .select_left = gridLayout_select_left,
+    .select_right = gridLayout_select_right,
+    .select_up = gridLayout_select_up,
+    .select_down = gridLayout_select_down,
+    .move_client_left = gridLayout_move_client_left,
+    .move_client_right = gridLayout_move_client_right,
+    .move_client_up = gridLayout_move_client_up,
+    .move_client_down = gridLayout_move_client_down,
     .next = NULL,
     .tag = L"Q"
 };
 
 Layout deckLayout = {
     .select_next_window = deckLayout_select_next_window,
-    //using the same function for next and previous since there will only be 2 windows to swicth between.
-    //It will always be moving between the 2
     .select_previous_window = deckLayout_select_next_window,
     .swap_clients = tileLayout_swap_clients,
     .move_client_to_main = deckLayout_client_to_main,
     .move_client_next = deckLayout_move_client_next,
     .move_client_previous = deckLayout_move_client_previous,
     .apply_to_workspace = deckLayout_apply_to_workspace,
+    .select_left = tileLayout_select_left,
+    .select_right = tileLayout_select_right,
+    .select_up = deckLayout_select_up,
+    .select_down = deckLayout_select_down,
+    .move_client_left = tileLayout_move_client_left,
+    .move_client_right = tileLayout_move_client_right,
+    .move_client_up = deckLayout_move_client_previous,
+    .move_client_down = deckLayout_move_client_next,
     .next = &gridLayout,
     .tag = L"D"
 };
 
 Layout horizontaldeckLayout = {
     .select_next_window = deckLayout_select_next_window,
-    //using the same function for next and previous since there will only be 2 windows to swicth between.
-    //It will always be moving between the 2
     .select_previous_window = deckLayout_select_next_window,
     .swap_clients = tileLayout_swap_clients,
     .move_client_to_main = deckLayout_client_to_main,
     .move_client_next = deckLayout_move_client_next,
     .move_client_previous = deckLayout_move_client_previous,
     .apply_to_workspace = horizontaldeckLayout_apply_to_workspace,
+    .select_left = tileLayout_select_left,
+    .select_right = tileLayout_select_right,
+    .select_up = deckLayout_select_up,
+    .select_down = deckLayout_select_down,
+    .move_client_left = tileLayout_move_client_left,
+    .move_client_right = tileLayout_move_client_right,
+    .move_client_up = deckLayout_move_client_previous,
+    .move_client_down = deckLayout_move_client_next,
     .next = NULL,
     .tag = L"D"
 };
@@ -205,6 +239,10 @@ Layout monacleLayout = {
     .move_client_next = monacleLayout_move_client_next,
     .move_client_previous = monacleLayout_move_client_previous,
     .apply_to_workspace = monacleLayout_calculate_and_apply_client_sizes,
+    .move_client_left = monacleLayout_move_client_previous,
+    .move_client_right = monacleLayout_move_client_next,
+    .move_client_up = monacleLayout_move_client_previous,
+    .move_client_down = monacleLayout_move_client_next,
     .next = &deckLayout,
     .tag = L"M"
 };
@@ -217,6 +255,12 @@ Layout tileLayout = {
     .move_client_next = tilelayout_move_client_next,
     .move_client_previous = tilelayout_move_client_previous,
     .apply_to_workspace = tilelayout_calulate_and_apply_client_sizes,
+    .select_left = tileLayout_select_left,
+    .select_right = tileLayout_select_right,
+    .move_client_left = tileLayout_move_client_left,
+    .move_client_right = tileLayout_move_client_right,
+    .move_client_up = tilelayout_move_client_previous,
+    .move_client_down = tilelayout_move_client_next,
     .next = &monacleLayout,
     .tag = L"T"
 };
@@ -937,28 +981,44 @@ void mimimize_focused_window(WindowManagerState *self)
     workspace_focus_selected_window(self, self->selectedMonitor->workspace);
 }
 
-void move_focused_client_next(WindowManagerState *self)
+
+static void move_focused_client_directional(WindowManagerState *self,
+    void (*dirFunc)(Client*))
 {
     HWND foregroundHwnd = GetForegroundWindow();
-    Client* existingClient = windowManager_find_client_in_workspaces_by_hwnd(self, foregroundHwnd);
-    if(existingClient)
+    Client *client = windowManager_find_client_in_workspaces_by_hwnd(self, foregroundHwnd);
+    if(!client)
     {
-        existingClient->workspace->layout->move_client_next(existingClient);
-        workspace_arrange_windows(existingClient->workspace, self);
-        workspace_focus_selected_window(self, existingClient->workspace);
+        return;
     }
+
+    dirFunc(client);
+    workspace_arrange_windows(client->workspace, self);
+    workspace_focus_selected_window(self, client->workspace);
 }
 
-void move_focused_client_previous(WindowManagerState *self)
+void move_focused_client_left(WindowManagerState *self)
 {
-    HWND foregroundHwnd = GetForegroundWindow();
-    Client* existingClient = windowManager_find_client_in_workspaces_by_hwnd(self, foregroundHwnd);
-    if(existingClient)
-    {
-        existingClient->workspace->layout->move_client_previous(existingClient->workspace->selected);
-        workspace_arrange_windows(existingClient->workspace, self);
-        workspace_focus_selected_window(self, existingClient->workspace);
-    }
+    Workspace *ws = self->selectedMonitor->workspace;
+    move_focused_client_directional(self, ws->layout->move_client_left);
+}
+
+void move_focused_client_right(WindowManagerState *self)
+{
+    Workspace *ws = self->selectedMonitor->workspace;
+    move_focused_client_directional(self, ws->layout->move_client_right);
+}
+
+void move_focused_client_up(WindowManagerState *self)
+{
+    Workspace *ws = self->selectedMonitor->workspace;
+    move_focused_client_directional(self, ws->layout->move_client_up);
+}
+
+void move_focused_client_down(WindowManagerState *self)
+{
+    Workspace *ws = self->selectedMonitor->workspace;
+    move_focused_client_directional(self, ws->layout->move_client_down);
 }
 
 void move_focused_window_to_workspace(WindowManagerState *self, Workspace *workspace)
@@ -1252,6 +1312,64 @@ void select_previous_window(WindowManagerState *self)
 {
     Workspace *workspace = self->selectedMonitor->workspace;
     workspace->layout->select_previous_window(workspace);
+    workspace_focus_selected_window(self, workspace);
+}
+
+void select_window_left(WindowManagerState *self)
+{
+    Workspace *workspace = self->selectedMonitor->workspace;
+    if(workspace->layout->select_left)
+    {
+        workspace->layout->select_left(workspace);
+    }
+    else
+    {
+        workspace->layout->select_previous_window(workspace);
+    }
+    workspace_focus_selected_window(self, workspace);
+}
+
+void select_window_right(WindowManagerState *self)
+{
+    Workspace *workspace = self->selectedMonitor->workspace;
+    if(workspace->layout->select_right)
+    {
+        workspace->layout->select_right(workspace);
+    }
+    else
+    {
+        workspace->layout->select_next_window(workspace);
+    }
+    workspace_focus_selected_window(self, workspace);
+}
+
+void select_window_up(WindowManagerState *self)
+{
+    Workspace *workspace = self->selectedMonitor->workspace;
+    if(workspace->layout->select_up)
+    {
+        workspace->layout->select_up(workspace);
+    }
+    else
+    {
+        workspace->layout->select_previous_window(workspace);
+    }
+    workspace_arrange_windows(workspace, self);
+    workspace_focus_selected_window(self, workspace);
+}
+
+void select_window_down(WindowManagerState *self)
+{
+    Workspace *workspace = self->selectedMonitor->workspace;
+    if(workspace->layout->select_down)
+    {
+        workspace->layout->select_down(workspace);
+    }
+    else
+    {
+        workspace->layout->select_next_window(workspace);
+    }
+    workspace_arrange_windows(workspace, self);
     workspace_focus_selected_window(self, workspace);
 }
 
@@ -1838,14 +1956,7 @@ void drag_drop_cancel(DragDropState *self)
     self->inProgress = FALSE;
     self->dragHwnd = NULL;
 
-    SetWindowPos(
-            self->dropTargetHwnd,
-            HWND_BOTTOM,
-            0,
-            0,
-            0,
-            0,
-            SWP_HIDEWINDOW);
+    ShowWindow(self->dropTargetHwnd, SW_HIDE);
 }
 
 void drag_drop_start(DragDropState *self, HWND hwnd, Client *dropTargetClient)
@@ -2035,6 +2146,14 @@ void drag_drop_complete(DragDropState *self)
                     workspace_arrange_windows(dropTargetMonitor->workspace, self->windowManager);
                     workspace_focus_selected_window(self->windowManager, dropTargetMonitor->workspace);
                     monitor_select(self->windowManager, dropTargetMonitor);
+                }
+            }
+            else
+            {
+                Client *client = windowManager_find_client_in_workspaces_by_hwnd(self->windowManager, dragHwnd);
+                if(client)
+                {
+                    workspace_arrange_windows(client->workspace, self->windowManager);
                 }
             }
         }
@@ -3777,6 +3896,62 @@ void tileLayout_select_previous_window(Workspace *workspace)
     }
 }
 
+void tileLayout_select_left(Workspace *workspace)
+{
+    if(!workspace->clients || !workspace->selected)
+    {
+        return;
+    }
+    if(workspace->selected != workspace->clients)
+    {
+        workspace->selected = workspace->clients;
+    }
+}
+
+void tileLayout_select_right(Workspace *workspace)
+{
+    if(!workspace->clients || !workspace->selected)
+    {
+        return;
+    }
+    if(workspace->selected == workspace->clients && workspace->clients->next)
+    {
+        workspace->selected = workspace->clients->next;
+    }
+}
+
+void tileLayout_move_client_left(Client *client)
+{
+    if(!client->workspace->clients)
+    {
+        return;
+    }
+    if(client != client->workspace->clients)
+    {
+        Client *main = client->workspace->clients;
+        ClientData *temp = client->data;
+        client->data = main->data;
+        main->data = temp;
+        client->workspace->selected = main;
+    }
+}
+
+void tileLayout_move_client_right(Client *client)
+{
+    if(!client->workspace->clients)
+    {
+        return;
+    }
+    if(client == client->workspace->clients && client->next)
+    {
+        Client *target = client->next;
+        ClientData *temp = client->data;
+        client->data = target->data;
+        target->data = temp;
+        client->workspace->selected = target;
+    }
+}
+
 void deckLayout_client_to_main(Client *client)
 {
     if(client->workspace->clients->next)
@@ -3871,9 +4046,15 @@ void deckLayout_move_client_previous(Client *client)
         return;
     }
 
-    if(!client->previous)
+    if(!client->previous && client->workspace->clients->next)
     {
-        //Exit we are in the main position
+        //We are in the main
+        //Swap main with the last deck item: last comes to main, main goes to last
+        Client *last = client->workspace->lastClient;
+        ClientData *temp = client->data;
+        client->data = last->data;
+        last->data = temp;
+
         return;
     }
 
@@ -4074,6 +4255,25 @@ void deckLayout_select_next_window(Workspace *workspace)
     }
 }
 
+void deckLayout_select_down(Workspace *workspace)
+{
+    if(!workspace->clients || !workspace->clients->next || !workspace->selected)
+    {
+        return;
+    }
+    deckLayout_move_client_next(workspace->selected);
+}
+
+void deckLayout_select_up(Workspace *workspace)
+{
+    if(!workspace->clients || !workspace->clients->next || !workspace->selected)
+    {
+        return;
+    }
+    deckLayout_move_client_previous(workspace->selected);
+}
+
+
 void gridLayout_apply_to_workspace(Workspace *workspace)
 {
     int numberOfClients = workspace_get_number_of_clients(workspace);
@@ -4269,6 +4469,147 @@ void gridLayout_select_previous_window(Workspace *workspace)
     workspace->selected = c;
 }
 
+static int gridLayout_get_pos(Workspace *workspace)
+{
+    Client *c = workspace->clients;
+    int pos = 0;
+    while(c && c != workspace->selected)
+    {
+        c = c->next;
+        pos++;
+    }
+    return c ? pos : -1;
+}
+
+static Client* gridLayout_client_at_pos(Workspace *workspace, int targetPos)
+{
+    Client *c = workspace->clients;
+    for(int i = 0; i < targetPos && c; i++)
+    {
+        c = c->next;
+    }
+    return c;
+}
+
+void gridLayout_select_left(Workspace *workspace)
+{
+    if(!workspace->clients || !workspace->selected)
+    {
+        return;
+    }
+
+    int numberOfClients = workspace_get_number_of_clients(workspace);
+    if(numberOfClients <= 1)
+    {
+        return;
+    }
+
+    int leftCount = numberOfClients / 2;
+    int pos = gridLayout_get_pos(workspace);
+    if(pos < 0)
+    {
+        return;
+    }
+
+    if(pos >= leftCount)
+    {
+        int row = pos - leftCount;
+        int target = (row < leftCount) ? row : leftCount - 1;
+        workspace->selected = gridLayout_client_at_pos(workspace, target);
+    }
+}
+
+void gridLayout_select_right(Workspace *workspace)
+{
+    if(!workspace->clients || !workspace->selected)
+    {
+        return;
+    }
+
+    int numberOfClients = workspace_get_number_of_clients(workspace);
+    if(numberOfClients <= 1)
+    {
+        return;
+    }
+
+    int leftCount = numberOfClients / 2;
+    int pos = gridLayout_get_pos(workspace);
+    if(pos < 0)
+    {
+        return;
+    }
+
+    if(pos < leftCount)
+    {
+        int target = pos + leftCount;
+        if(target >= numberOfClients)
+        {
+            target = numberOfClients - 1;
+        }
+        workspace->selected = gridLayout_client_at_pos(workspace, target);
+    }
+}
+
+void gridLayout_select_up(Workspace *workspace)
+{
+    if(!workspace->clients || !workspace->selected)
+    {
+        return;
+    }
+
+    int numberOfClients = workspace_get_number_of_clients(workspace);
+    if(numberOfClients <= 1)
+    {
+        return;
+    }
+
+    int leftCount = numberOfClients / 2;
+    int pos = gridLayout_get_pos(workspace);
+    if(pos < 0)
+    {
+        return;
+    }
+
+    if(pos < leftCount && pos > 0)
+    {
+        workspace->selected = gridLayout_client_at_pos(workspace, pos - 1);
+    }
+    else if(pos >= leftCount && pos > leftCount)
+    {
+        workspace->selected = gridLayout_client_at_pos(workspace, pos - 1);
+    }
+}
+
+void gridLayout_select_down(Workspace *workspace)
+{
+    if(!workspace->clients || !workspace->selected)
+    {
+        return;
+    }
+
+    int numberOfClients = workspace_get_number_of_clients(workspace);
+    if(numberOfClients <= 1)
+    {
+        return;
+    }
+
+    int leftCount = numberOfClients / 2;
+    int pos = gridLayout_get_pos(workspace);
+    if(pos < 0)
+    {
+        return;
+    }
+
+    if(pos < leftCount && pos < leftCount - 1)
+    {
+        workspace->selected = gridLayout_client_at_pos(workspace, pos + 1);
+    }
+    else if(pos >= leftCount && pos < numberOfClients - 1)
+    {
+        workspace->selected = gridLayout_client_at_pos(workspace, pos + 1);
+    }
+}
+
 void gridLayout_move_client_to_main(Client *client)
 {
     int numberOfClients = workspace_get_number_of_clients(client->workspace);
@@ -4388,6 +4729,119 @@ void gridLayout_move_client_previous(Client *client)
     client->data = prev->data;
     prev->data = temp;
     client->workspace->selected = prev;
+}
+
+static void gridLayout_swap_client_to_pos(Client *client, int targetPos)
+{
+    Client *target = gridLayout_client_at_pos(client->workspace, targetPos);
+    if(!target || target == client)
+    {
+        return;
+    }
+
+    ClientData *temp = client->data;
+    client->data = target->data;
+    target->data = temp;
+    client->workspace->selected = target;
+}
+
+void gridLayout_move_client_left(Client *client)
+{
+    int numberOfClients = workspace_get_number_of_clients(client->workspace);
+    if(numberOfClients <= 1)
+    {
+        return;
+    }
+
+    int leftCount = numberOfClients / 2;
+    int pos = gridLayout_get_pos(client->workspace);
+    if(pos < 0)
+    {
+        return;
+    }
+
+    if(pos >= leftCount)
+    {
+        int row = pos - leftCount;
+        int target = (row < leftCount) ? row : leftCount - 1;
+        gridLayout_swap_client_to_pos(client, target);
+    }
+}
+
+void gridLayout_move_client_right(Client *client)
+{
+    int numberOfClients = workspace_get_number_of_clients(client->workspace);
+    if(numberOfClients <= 1)
+    {
+        return;
+    }
+
+    int leftCount = numberOfClients / 2;
+    int pos = gridLayout_get_pos(client->workspace);
+    if(pos < 0)
+    {
+        return;
+    }
+
+    if(pos < leftCount)
+    {
+        int target = pos + leftCount;
+        if(target >= numberOfClients)
+        {
+            target = numberOfClients - 1;
+        }
+        gridLayout_swap_client_to_pos(client, target);
+    }
+}
+
+void gridLayout_move_client_up(Client *client)
+{
+    int numberOfClients = workspace_get_number_of_clients(client->workspace);
+    if(numberOfClients <= 1)
+    {
+        return;
+    }
+
+    int leftCount = numberOfClients / 2;
+    int pos = gridLayout_get_pos(client->workspace);
+    if(pos < 0)
+    {
+        return;
+    }
+
+    if(pos < leftCount && pos > 0)
+    {
+        gridLayout_swap_client_to_pos(client, pos - 1);
+    }
+    else if(pos >= leftCount && pos > leftCount)
+    {
+        gridLayout_swap_client_to_pos(client, pos - 1);
+    }
+}
+
+void gridLayout_move_client_down(Client *client)
+{
+    int numberOfClients = workspace_get_number_of_clients(client->workspace);
+    if(numberOfClients <= 1)
+    {
+        return;
+    }
+
+    int leftCount = numberOfClients / 2;
+    int pos = gridLayout_get_pos(client->workspace);
+    if(pos < 0)
+    {
+        return;
+    }
+
+    if(pos < leftCount && pos < leftCount - 1)
+    {
+        gridLayout_swap_client_to_pos(client, pos + 1);
+    }
+    else if(pos >= leftCount && pos < numberOfClients - 1)
+    {
+        gridLayout_swap_client_to_pos(client, pos + 1);
+    }
 }
 
 void monacleLayout_select_next_client(Workspace *workspace)
@@ -5883,12 +6337,12 @@ void keybindings_register_defaults_with_modifiers(int modifiers)
     keybinding_create_with_no_arg("quit_and_restore_windows", modifiers | LShift, VK_F10, quit_and_restore_windows);
     keybinding_create_with_no_arg("quit", modifiers | LShift, VK_F9, quit);
     
-    keybinding_create_with_no_arg("select_next_window", modifiers, VK_J, select_next_window);
-    keybinding_create_with_no_arg("select_previous_window", modifiers, VK_K, select_previous_window);
+    keybinding_create_with_no_arg("select_window_down", modifiers, VK_J, select_window_down);
+    keybinding_create_with_no_arg("select_window_up", modifiers, VK_K, select_window_up);
     keybinding_create_with_no_arg("monitor_select_next", modifiers, VK_OEM_COMMA, monitor_select_next);
     keybinding_create_with_no_arg("arrange_clients_in_selected_workspace", modifiers, VK_N, arrange_clients_in_selected_workspace);
-    keybinding_create_with_no_arg("move_focused_window_right", modifiers, VK_L, move_focused_window_right);
-    keybinding_create_with_no_arg("move_focused_window_left", modifiers, VK_H, move_focused_window_left);
+    keybinding_create_with_no_arg("select_window_right", modifiers, VK_L, select_window_right);
+    keybinding_create_with_no_arg("select_window_left", modifiers, VK_H, select_window_left);
     keybinding_create_with_no_arg("move_focused_window_to_main", modifiers, VK_RETURN, move_focused_window_to_main);
     keybinding_create_with_no_arg("mimimize_focused_window", LShift | modifiers, VK_DOWN, mimimize_focused_window);
 
@@ -5903,8 +6357,10 @@ void keybindings_register_defaults_with_modifiers(int modifiers)
     keybinding_create_with_workspace_arg("swap_selected_monitor_to[9]", modifiers, VK_9, swap_selected_monitor_to, g_windowManagerState.workspaces[8]);
     keybinding_create_with_workspace_arg("swap_selected_monitor_to[0]", modifiers, VK_0, swap_selected_monitor_to, g_windowManagerState.workspaces[9]);
 
-    keybinding_create_with_no_arg("move_focused_client_next", LShift | modifiers, VK_J, move_focused_client_next);
-    keybinding_create_with_no_arg("move_focused_client_previous", LShift | modifiers, VK_K, move_focused_client_previous);
+    keybinding_create_with_no_arg("move_focused_client_down", LShift | modifiers, VK_J, move_focused_client_down);
+    keybinding_create_with_no_arg("move_focused_client_up", LShift | modifiers, VK_K, move_focused_client_up);
+    keybinding_create_with_no_arg("move_focused_client_right", LShift | modifiers, VK_L, move_focused_client_right);
+    keybinding_create_with_no_arg("move_focused_client_left", LShift | modifiers, VK_H, move_focused_client_left);
 
     keybinding_create_with_workspace_arg("move_focused_window_to_workspace[1]", LShift | modifiers, VK_1, move_focused_window_to_workspace, g_windowManagerState.workspaces[0]);
     keybinding_create_with_workspace_arg("move_focused_window_to_workspace[2]", LShift | modifiers, VK_2, move_focused_window_to_workspace, g_windowManagerState.workspaces[1]);
@@ -5932,6 +6388,7 @@ void keybindings_register_defaults_with_modifiers(int modifiers)
     keybinding_create_with_no_arg("swap_selected_monitor_to_deck_layout", modifiers, VK_Y, swap_selected_monitor_to_deck_layout);
     /* keybinding_create_with_no_arg("swap_selected_monitor_to_horizontaldeck_layout", modifiers, VK_H, swap_selected_monitor_to_horizontaldeck_layout); */
     keybinding_create_with_no_arg("swap_selected_monitor_to_grid_layout", modifiers, VK_U, swap_selected_monitor_to_grid_layout);
+    command_create_with_no_arg(&g_windowManagerState, "swap_selected_monitor_to_tile_layout", swap_selected_monitor_to_tile_layout);
     keybinding_create_with_no_arg("redraw_focused_window", modifiers, VK_I, redraw_focused_window);
 }
 

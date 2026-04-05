@@ -17,6 +17,10 @@ CRTFLAG = /MD
 OPTFLAG = /O2
 !ENDIF
 
+!IFDEF OUTDIR_OVERRIDE
+outdir = $(OUTDIR_OVERRIDE)
+!ENDIF
+
 !IF "$(CONFIG)" == "DEBUG"
 !IF "$(ASAN)" == "1"
 cflags = $(cflags) /fsanitize=address
@@ -36,6 +40,9 @@ debug:
 
 release:
 	nmake /f Makefile CONFIG=RELEASE SimpleWindowManager.exe
+
+check:
+	nmake /f Makefile CONFIG=DEBUG OUTDIR_OVERRIDE=tmp\check SimpleWindowManager.exe
 
 both: debug release
 

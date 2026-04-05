@@ -222,6 +222,14 @@ struct Layout
     void (*move_client_next) (Client *client);
     void (*move_client_previous) (Client *client);
     void (*apply_to_workspace) (Workspace *workspace);
+    void (*select_left) (Workspace *workspace);
+    void (*select_right) (Workspace *workspace);
+    void (*select_up) (Workspace *workspace);
+    void (*select_down) (Workspace *workspace);
+    void (*move_client_left) (Client *client);
+    void (*move_client_right) (Client *client);
+    void (*move_client_up) (Client *client);
+    void (*move_client_down) (Client *client);
     Layout *next;
 };
 
@@ -427,6 +435,14 @@ void windowManager_move_workspace_to_monitor(WindowManagerState *windowManagerSt
 void redraw_focused_window(WindowManagerState *self);
 void select_next_window(WindowManagerState *self);
 void select_previous_window(WindowManagerState *self);
+void select_window_left(WindowManagerState *self);
+void select_window_right(WindowManagerState *self);
+void select_window_up(WindowManagerState *self);
+void select_window_down(WindowManagerState *self);
+void move_focused_client_left(WindowManagerState *self);
+void move_focused_client_right(WindowManagerState *self);
+void move_focused_client_up(WindowManagerState *self);
+void move_focused_client_down(WindowManagerState *self);
 void monitor_select_next(WindowManagerState *self);
 void start_launcher(CHAR *cmdArgs);
 void start_scratch_not_elevated(CHAR *cmdArgs);
@@ -454,8 +470,6 @@ void float_window_move_up(WindowManagerState *self, HWND hwnd);
 void float_window_move_down(WindowManagerState *self, HWND hwnd);
 void taskbar_toggle(WindowManagerState *self);
 void mimimize_focused_window(WindowManagerState *self);
-void move_focused_client_next(WindowManagerState *self);
-void move_focused_client_previous(WindowManagerState *self);
 void swap_selected_monitor_to_grid_layout(WindowManagerState *self);
 void swap_selected_monitor_to_deck_layout(WindowManagerState *self);
 void swap_selected_monitor_to_monacle_layout(WindowManagerState *self);
