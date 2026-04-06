@@ -171,6 +171,8 @@ static WindowManagerState g_windowManagerState;
 static ResizeState g_resizeState;
 static DragDropState g_dragDropState;
 
+void tilelayout_reversed_calculate_and_apply_client_sizes(Workspace *workspace);
+
 Layout gridLayout = {
     .select_next_window = gridLayout_select_next_window,
     .select_previous_window = gridLayout_select_previous_window,
@@ -247,6 +249,24 @@ Layout monacleLayout = {
     .tag = L"M"
 };
 
+Layout tileLayoutReversed = {
+    .select_next_window = tileLayout_select_next_window,
+    .select_previous_window = tileLayout_select_previous_window,
+    .swap_clients = tileLayout_swap_clients,
+    .move_client_to_main = deckLayout_client_to_main,
+    .move_client_next = tilelayout_move_client_next,
+    .move_client_previous = tilelayout_move_client_previous,
+    .apply_to_workspace = tilelayout_reversed_calculate_and_apply_client_sizes,
+    .select_left = tileLayout_select_right,
+    .select_right = tileLayout_select_left,
+    .move_client_left = tileLayout_move_client_right,
+    .move_client_right = tileLayout_move_client_left,
+    .move_client_up = tilelayout_move_client_previous,
+    .move_client_down = tilelayout_move_client_next,
+    .next = &monacleLayout,
+    .tag = L"RT"
+};
+
 Layout tileLayout = {
     .select_next_window = tileLayout_select_next_window,
     .select_previous_window = tileLayout_select_previous_window,
@@ -261,7 +281,7 @@ Layout tileLayout = {
     .move_client_right = tileLayout_move_client_right,
     .move_client_up = tilelayout_move_client_previous,
     .move_client_down = tilelayout_move_client_next,
-    .next = &monacleLayout,
+    .next = &tileLayoutReversed,
     .tag = L"T"
 };
 
@@ -1410,6 +1430,11 @@ void swap_selected_monitor_to_horizontaldeck_layout(WindowManagerState *self)
 void swap_selected_monitor_to_tile_layout(WindowManagerState *self)
 {
     monitor_set_layout(self, &tileLayout);
+}
+
+void swap_selected_monitor_to_tile_layout_reversed(WindowManagerState *self)
+{
+    monitor_set_layout(self, &tileLayoutReversed);
 }
 
 void arrange_clients_in_selected_workspace(WindowManagerState *self)
@@ -3834,6 +3859,77 @@ void tilelayout_calulate_and_apply_client_sizes(Workspace *workspace)
 
     int mainY = workspace->monitor->top + gapWidth;
     int tileX = workspace->monitor->xOffset + mainWidth + (gapWidth * 2);
+
+    Client *c  = workspace->clients;
+    int NumberOfClients2 = 0;
+    int tileY = mainY;
+    while(c)
+    {
+        c->isVisible = TRUE;
+        if(NumberOfClients2 == 0)
+        {
+            client_set_screen_coordinates(c, mainWidth, mainHeight, mainX, mainY);
+        }
+        else
+        {
+            client_set_screen_coordinates(c, tileWidth, tileHeight, tileX, tileY);
+            tileY = tileY + tileHeight + gapWidth;
+        }
+
+        NumberOfClients2++;
+        c = c->next;
+    }
+}
+
+void tilelayout_reversed_calculate_and_apply_client_sizes(Workspace *workspace)
+{
+    int gapWidth = workspace->monitor->workspaceStyle->gapWidth;
+
+    int screenWidth = workspace->monitor->w;
+    int screenHeight = workspace->monitor->bottom - workspace->monitor->top;
+
+    int numberOfClients = workspace_get_number_of_clients(workspace);
+
+    int allWidth = 0;
+
+    int mainWidth;
+    int tileWidth;
+    if(numberOfClients == 1)
+    {
+      mainWidth = screenWidth - (gapWidth * 2);
+      tileWidth = 0;
+      allWidth = screenWidth - (gapWidth * 2);
+    }
+    else
+    {
+      mainWidth = (screenWidth / 2) - gapWidth - (gapWidth / 2) + workspace->mainOffset;
+      tileWidth = (screenWidth / 2) - gapWidth - (gapWidth / 2) - workspace->mainOffset;
+      allWidth = (screenWidth / 2) - gapWidth;
+    }
+
+    int mainHeight = screenHeight - (gapWidth * 2);
+    int tileHeight = 0;
+    if(numberOfClients < 3)
+    {
+        tileHeight = mainHeight;
+    }
+    else
+    {
+        long numberOfTiles = numberOfClients - 1;
+        long numberOfGaps = numberOfTiles - 1;
+        long spaceForGaps = numberOfGaps * gapWidth;
+        long spaceForTiles = mainHeight - spaceForGaps;
+        tileHeight = spaceForTiles / numberOfTiles;
+    }
+
+    int mainY = workspace->monitor->top + gapWidth;
+    int tileX = workspace->monitor->xOffset + gapWidth;
+    int mainX = workspace->monitor->xOffset + tileWidth + (gapWidth * 2);
+
+    if(numberOfClients == 1)
+    {
+        mainX = workspace->monitor->xOffset + gapWidth;
+    }
 
     Client *c  = workspace->clients;
     int NumberOfClients2 = 0;
@@ -6393,6 +6489,7 @@ void keybindings_register_defaults_with_modifiers(int modifiers)
     /* keybinding_create_with_no_arg("swap_selected_monitor_to_horizontaldeck_layout", modifiers, VK_H, swap_selected_monitor_to_horizontaldeck_layout); */
     keybinding_create_with_no_arg("swap_selected_monitor_to_grid_layout", modifiers, VK_U, swap_selected_monitor_to_grid_layout);
     command_create_with_no_arg(&g_windowManagerState, "swap_selected_monitor_to_tile_layout", swap_selected_monitor_to_tile_layout);
+    command_create_with_no_arg(&g_windowManagerState, "swap_selected_monitor_to_tile_layout_reversed", swap_selected_monitor_to_tile_layout_reversed);
     keybinding_create_with_no_arg("redraw_focused_window", modifiers, VK_I, redraw_focused_window);
 }
 

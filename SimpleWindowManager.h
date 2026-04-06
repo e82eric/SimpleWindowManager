@@ -386,6 +386,7 @@ extern Layout gridLayout;
 extern Layout deckLayout;
 extern Layout monacleLayout;
 extern Layout tileLayout;
+extern Layout tileLayoutReversed;
 
 extern TCHAR *scratchWindowTitle;
 
