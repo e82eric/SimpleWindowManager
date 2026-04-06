@@ -5,6 +5,8 @@
 #include <stddef.h>
 #include <windows.h>
 
+typedef struct Monitor Monitor;
+
 typedef void (*nfm_on_select_callback)(HWND hwnd, void* state);
 typedef void (*nfm_on_closed_callback)(void);
 typedef void (*nfm_on_select_string_callback)(char* message, void* state);
@@ -71,6 +73,6 @@ extern nfm_hide_func nfm_hide;
 extern nfm_run_last_definition_func nfm_run_last_definition;
 extern nfm_set_menu_location_func nfm_set_menu_location;
 
-void nfm_set_menu_location_primary_monitor_center(void);
+void nfm_set_menu_location_monitor_center(Monitor *monitor);
 
 #endif

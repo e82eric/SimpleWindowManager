@@ -495,7 +495,7 @@ void run_new_process_menu(WindowManagerState *state)
 {
     if (nfm_show_processes_list)
     {
-        nfm_set_menu_location_primary_monitor_center();
+        nfm_set_menu_location_monitor_center(state->primaryMonitor);
         nfm_show_processes_list(noop, menu_on_closed, state);
         g_windowManagerState.menuVisible = true;
     }
@@ -509,7 +509,7 @@ void run_new_windows_menu(WindowManagerState *state)
 {
     if (nfm_show_windows_list)
     {
-        nfm_set_menu_location_primary_monitor_center();
+        nfm_set_menu_location_monitor_center(state->primaryMonitor);
         nfm_show_windows_list(open_windows_scratch_exit_callback, menu_on_closed, state);
         g_windowManagerState.menuVisible = true;
     }
@@ -523,7 +523,7 @@ void run_new_programs_not_elevated_menu(WindowManagerState *state)
 {
     if (nfm_show_programs_list)
     {
-        nfm_set_menu_location_primary_monitor_center();
+        nfm_set_menu_location_monitor_center(state->primaryMonitor);
         nfm_show_programs_list(state->programLauncherDirectories, (int)state->programLauncherDirectoryCount, open_program_scratch_callback_not_elevated, menu_on_closed, state);
         g_windowManagerState.menuVisible = true;
     }
@@ -537,7 +537,7 @@ void run_new_programs_elevated_menu(WindowManagerState *state)
 {
     if (nfm_show_programs_list)
     {
-        nfm_set_menu_location_primary_monitor_center();
+        nfm_set_menu_location_monitor_center(state->primaryMonitor);
         nfm_show_programs_list(state->programLauncherDirectories, (int)state->programLauncherDirectoryCount, open_program_scratch_callback, menu_on_closed, state);
         g_windowManagerState.menuVisible = true;
     }
@@ -551,7 +551,7 @@ void run_new_file_system_menu(WindowManagerState *state)
 {
     if (nfm_show_file_system)
     {
-        nfm_set_menu_location_primary_monitor_center();
+        nfm_set_menu_location_monitor_center(state->primaryMonitor);
         nfm_show_file_system(open_program_scratch_callback_not_elevated, menu_on_closed, state);
         g_windowManagerState.menuVisible = true;
     }
@@ -590,7 +590,7 @@ void run_float_logs_menu(WindowManagerState *state)
         static char* row_data[] = {time_str, action_str, process_str, class_str, title_str, styles_str, exstyles_str, reason_str, hwnd_str, processid_str, width_str, height_str};
         static char** row_ptrs[] = {row_data};
 
-        nfm_set_menu_location_primary_monitor_center();
+        nfm_set_menu_location_monitor_center(state->primaryMonitor);
         nfm_show_array_columns_menu(
             (char***)row_ptrs,
             1,
@@ -672,7 +672,7 @@ void run_float_logs_menu(WindowManagerState *state)
         current = (current + 1) % FLOAT_LOG_BUFFER_SIZE;
     }
 
-    nfm_set_menu_location_primary_monitor_center();
+    nfm_set_menu_location_monitor_center(state->primaryMonitor);
     nfm_show_array_columns_menu(
         (char***)row_ptrs,
         buffer->count,
@@ -816,7 +816,7 @@ void run_client_logs_menu(WindowManagerState *state)
     
     static int display_column_indices[] = {0, 1, 2, 3, 4, 5, 6};
 
-    nfm_set_menu_location_primary_monitor_center();
+    nfm_set_menu_location_monitor_center(state->primaryMonitor);
     nfm_show_array_columns_menu(
         (char***)row_ptrs,
         rowCount,
@@ -880,7 +880,7 @@ void run_new_commands_menu(WindowManagerState *state)
         keyBindingWidth,
         "KeyBinding",
         "Description");
-    nfm_set_menu_location_primary_monitor_center();
+    nfm_set_menu_location_monitor_center(state->primaryMonitor);
     nfm_show_items_list(header, list_commands_for_menu, run_command_from_menu, menu_on_closed, state);
     g_windowManagerState.menuVisible = true;
 }
@@ -3413,6 +3413,10 @@ static void workspace_save_layout(Workspace *workspace)
     }
     free(workspace->savedLayout);
     workspace->savedLayout = malloc(sizeof(ClientData *) * count);
+    if(!workspace->savedLayout)
+    {
+        return;
+    }
     workspace->savedLayoutCount = count;
     workspace->savedSelectedData = workspace->selected ? workspace->selected->data : NULL;
     Client *c = workspace->clients;
@@ -4058,7 +4062,7 @@ void deckLayout_move_client_previous(Client *client)
         return;
     }
 
-    if(!client->previous->previous && !client->next)
+    if(!client->previous || (!client->previous->previous && !client->next))
     {
         //Exit there isn't another secondary to move to
         return;

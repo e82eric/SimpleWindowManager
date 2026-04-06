@@ -1,5 +1,6 @@
 #define COBJMACROS
 #include "nfm_menu.h"
+#include "SimpleWindowManager.h"
 #include <windows.h>
 #include <stdio.h>
 #include <strsafe.h>
@@ -142,18 +143,10 @@ void nfm_unload_library(HMODULE hModule)
     }
 }
 
-void nfm_set_menu_location_primary_monitor_center(void)
+void nfm_set_menu_location_monitor_center(Monitor *monitor)
 {
     if (!nfm_set_menu_location) return;
-
-    POINT pt = {0, 0};
-    HMONITOR hmon = MonitorFromPoint(pt, MONITOR_DEFAULTTOPRIMARY);
-    MONITORINFO mi;
-    mi.cbSize = sizeof(mi);
-    if (GetMonitorInfoW(hmon, &mi))
-    {
-        int cx = (mi.rcWork.left + mi.rcWork.right) / 2;
-        int cy = (mi.rcWork.top + mi.rcWork.bottom) / 2;
-        nfm_set_menu_location(cx, cy);
-    }
+    int cx = monitor->xOffset + monitor->w / 2;
+    int cy = (monitor->top + monitor->bottom) / 2;
+    nfm_set_menu_location(cx, cy);
 }
