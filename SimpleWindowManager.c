@@ -103,6 +103,7 @@ void gridLayout_move_client_down(Client *client);
 
 void process_with_stdin_start(TCHAR *cmdArgs, CHAR **lines, int numberOfLines, void (*onSuccess) (CHAR *));
 void start_process(CHAR *processExe, CHAR *cmdArgs, DWORD creationFlags);
+void start_as_explorer_user(TCHAR *processExe);
 void process_with_stdout_start(CHAR *cmdArgs, void (*onSuccess) (CHAR *));
 
 static int get_modifiers_pressed();
@@ -425,7 +426,7 @@ void open_program_scratch_callback_not_elevated(char *stdOut, void *state)
     if (wlen == 0) {
         MultiByteToWideChar(CP_ACP, 0, stdOut, -1, wPath, MAX_PATH);
     }
-    start_app(wPath);
+    start_as_explorer_user(wPath);
     nfm_hide();
 }
 
@@ -566,6 +567,8 @@ void run_new_programs_elevated_menu(WindowManagerState *state)
         MessageBox(NULL, L"LibNfm.dll not loaded; menu unavailable.", L"SimpleWindowManager", MB_OK | MB_ICONWARNING);
     }
 }
+
+
 
 void run_new_file_system_menu(WindowManagerState *state)
 {
@@ -6566,66 +6569,6 @@ void start_process(CHAR *processExe, CHAR *cmdArgs, DWORD creationFlags)
     CloseHandle( pi.hThread );
 }
 
-void start_not_elevated(CHAR *processExe, CHAR *cmdArgs, DWORD creationFlags)
-{
-    HWND hwnd = GetShellWindow();
-
-    SIZE_T size = 0;
-
-    DWORD pid;
-    GetWindowThreadProcessId(hwnd, &pid);
-
-    HANDLE process = OpenProcess(PROCESS_CREATE_PROCESS, FALSE, pid);
-
-    STARTUPINFOEXA siex;
-    ZeroMemory(&siex, sizeof(siex));
-    InitializeProcThreadAttributeList(NULL, 1, 0, &size);
-    siex.StartupInfo.cb = sizeof(siex);
-    siex.StartupInfo.wShowWindow = SW_SHOW;
-    siex.lpAttributeList = (LPPROC_THREAD_ATTRIBUTE_LIST)HeapAlloc(
-        GetProcessHeap(),
-        0,
-        size
-    );
-
-    InitializeProcThreadAttributeList(siex.lpAttributeList, 1, 0, &size);
-
-    UpdateProcThreadAttribute(
-        siex.lpAttributeList,
-        0,
-        PROC_THREAD_ATTRIBUTE_PARENT_PROCESS,
-        &process,
-        sizeof(process),
-        NULL,
-        NULL);
-
-    PROCESS_INFORMATION pi;
-
-    CreateProcessA(
-        processExe,
-        cmdArgs,
-        NULL,
-        NULL,
-        FALSE,
-        creationFlags | EXTENDED_STARTUPINFO_PRESENT,
-        NULL,
-        NULL,
-        &siex.StartupInfo,
-        &pi);
-
-    DeleteProcThreadAttributeList(siex.lpAttributeList);
-    HeapFree(GetProcessHeap(), 0, siex.lpAttributeList);
-
-    CloseHandle(pi.hProcess);
-    CloseHandle(pi.hThread);
-    CloseHandle(process);
-}
-
-void start_scratch_not_elevated(CHAR *cmdArgs)
-{
-    start_not_elevated(cmdLineExe, cmdArgs, CREATE_NO_WINDOW);
-}
-
 void start_launcher(CHAR *cmdArgs)
 {
     start_process(cmdLineExe, cmdArgs, CREATE_NO_WINDOW);
@@ -6634,6 +6577,72 @@ void start_launcher(CHAR *cmdArgs)
 void start_app(TCHAR *processExe)
 {
     ShellExecute(NULL, L"open", processExe, NULL, NULL, SW_SHOWNORMAL);
+}
+
+void start_as_explorer_user(TCHAR *processExe)
+{
+    HWND shellWnd = GetShellWindow();
+    if (!shellWnd)
+    {
+        return;
+    }
+
+    DWORD shellPid;
+    GetWindowThreadProcessId(shellWnd, &shellPid);
+
+    HANDLE shellProcess = OpenProcess(PROCESS_QUERY_INFORMATION, FALSE, shellPid);
+    if (!shellProcess)
+    {
+        return;
+    }
+
+    HANDLE shellToken = NULL;
+    if (!OpenProcessToken(shellProcess, TOKEN_DUPLICATE | TOKEN_QUERY, &shellToken))
+    {
+        CloseHandle(shellProcess);
+        return;
+    }
+
+    HANDLE primaryToken = NULL;
+    if (!DuplicateTokenEx(shellToken, MAXIMUM_ALLOWED, NULL, SecurityImpersonation, TokenPrimary, &primaryToken))
+    {
+        CloseHandle(shellToken);
+        CloseHandle(shellProcess);
+        return;
+    }
+
+    STARTUPINFOW si = { 0 };
+    si.cb = sizeof(si);
+    si.wShowWindow = SW_SHOWNORMAL;
+    si.dwFlags = STARTF_USESHOWWINDOW;
+
+    PROCESS_INFORMATION pi = { 0 };
+
+    TCHAR cmdLine[2048];
+    _sntprintf_s(cmdLine, _countof(cmdLine), _TRUNCATE, L"cmd.exe /c start \"\" \"%s\"", processExe);
+
+    CreateProcessWithTokenW(
+        primaryToken,
+        LOGON_WITH_PROFILE,
+        NULL,
+        cmdLine,
+        CREATE_NO_WINDOW,
+        NULL,
+        NULL,
+        &si,
+        &pi);
+
+    if (pi.hProcess)
+    {
+        CloseHandle(pi.hProcess);
+    }
+    if (pi.hThread)
+    {
+        CloseHandle(pi.hThread);
+    }
+    CloseHandle(primaryToken);
+    CloseHandle(shellToken);
+    CloseHandle(shellProcess);
 }
 
 void launcher_fail(PTSTR lpszFunction)
