@@ -440,6 +440,17 @@ void open_windows_scratch_exit_callback(HWND hwnd, void *state)
     {
         if(client->data->isMinimized)
         {
+            workspace_remove_minimized_client(client->workspace, client);
+            workspace_add_unminimized_client(client->workspace, client);
+            client->data->isMinimized = FALSE;
+            workspace_update_client_counts(client->workspace);
+            client->workspace->selected = client;
+
+            if(windowManagerState->selectedMonitor->workspace != client->workspace)
+            {
+                windowManager_move_workspace_to_monitor(windowManagerState, windowManagerState->selectedMonitor, client->workspace);
+            }
+
             ShowWindow(hwnd, SW_RESTORE);
         }
         else
