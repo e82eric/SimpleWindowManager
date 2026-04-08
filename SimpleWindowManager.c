@@ -440,32 +440,31 @@ void open_windows_scratch_exit_callback(HWND hwnd, void *state)
     {
         if(client->data->isMinimized)
         {
-            LONG style = GetWindowLong(hwnd, GWL_STYLE);
-            SetWindowLong(hwnd, GWL_STYLE, style & ~WS_MINIMIZE | WS_VISIBLE);
-            client_move_from_minimized_to_unminimized(windowManagerState, client);
-            client->workspace->selected = client;
-        }
-
-        if(client->workspace->layout != &gridLayout)
-        {
-            client->workspace->layout->move_client_to_main(client);
-            client->workspace->selected = client->workspace->clients;
+            ShowWindow(hwnd, SW_RESTORE);
         }
         else
         {
-            client->workspace->selected = client;
-        }
+            if(client->workspace->layout != &gridLayout)
+            {
+                client->workspace->layout->move_client_to_main(client);
+                client->workspace->selected = client->workspace->clients;
+            }
+            else
+            {
+                client->workspace->selected = client;
+            }
 
-        if(windowManagerState->selectedMonitor->workspace != client->workspace)
-        {
-            windowManager_move_workspace_to_monitor(windowManagerState, windowManagerState->selectedMonitor, client->workspace);
-            workspace_arrange_windows(client->workspace, windowManagerState);
-            workspace_focus_selected_window(windowManagerState, client->workspace);
-        }
-        else
-        {
-            workspace_arrange_windows(client->workspace, windowManagerState);
-            workspace_focus_selected_window(windowManagerState, client->workspace);
+            if(windowManagerState->selectedMonitor->workspace != client->workspace)
+            {
+                windowManager_move_workspace_to_monitor(windowManagerState, windowManagerState->selectedMonitor, client->workspace);
+                workspace_arrange_windows(client->workspace, windowManagerState);
+                workspace_focus_selected_window(windowManagerState, client->workspace);
+            }
+            else
+            {
+                workspace_arrange_windows(client->workspace, windowManagerState);
+                workspace_focus_selected_window(windowManagerState, client->workspace);
+            }
         }
     }
     else
