@@ -970,8 +970,9 @@ ProgramLauncherMenu* register_program_launcher_menu(int modifiers, int virtualKe
     menu->directoryCount = 0;
     menu->directories = NULL;
 
-    CHAR name[128];
-    sprintf_s(name, sizeof(name), "ProgramLauncherMenu_%d_%d", modifiers, virtualKey);
+    CHAR nameBuf[128];
+    sprintf_s(nameBuf, sizeof(nameBuf), "ProgramLauncherMenu_%s", isElevated ? "elevated" : "not_elevated");
+    CHAR *name = _strdup(nameBuf);
     keybinding_create_with_program_launcher_arg(name, modifiers, virtualKey, run_program_launcher_menu, menu);
     return menu;
 }
