@@ -551,26 +551,13 @@ void run_new_windows_menu(WindowManagerState *state)
     }
 }
 
-void run_new_programs_not_elevated_menu(WindowManagerState *state)
+void run_program_launcher_menu(WindowManagerState *state, ProgramLauncherMenu *menu)
 {
     if (nfm_show_programs_list)
     {
         nfm_set_menu_location_monitor_center(state->primaryMonitor);
-        nfm_show_programs_list(state->programLauncherDirectories, (int)state->programLauncherDirectoryCount, open_program_scratch_callback_not_elevated, menu_on_closed, state);
-        g_windowManagerState.menuVisible = true;
-    }
-    else
-    {
-        MessageBox(NULL, L"LibNfm.dll not loaded; menu unavailable.", L"SimpleWindowManager", MB_OK | MB_ICONWARNING);
-    }
-}
-
-void run_new_programs_elevated_menu(WindowManagerState *state)
-{
-    if (nfm_show_programs_list)
-    {
-        nfm_set_menu_location_monitor_center(state->primaryMonitor);
-        nfm_show_programs_list(state->programLauncherDirectories, (int)state->programLauncherDirectoryCount, open_program_scratch_callback, menu_on_closed, state);
+        nfm_on_select_string_callback callback = menu->isElevated ? open_program_scratch_callback : open_program_scratch_callback_not_elevated;
+        nfm_show_programs_list(menu->directories, (int)menu->directoryCount, callback, menu_on_closed, state);
         g_windowManagerState.menuVisible = true;
     }
     else
@@ -969,42 +956,41 @@ void register_file_sytem_memu(int modifiers, int virtualKey)
     keybinding_create_with_no_arg("FileSystemMenu", modifiers, virtualKey, run_new_file_system_menu);
 }
 
-void register_program_launcher_menu(int modifiers, int virtualKey, CHAR** directories, size_t numberOfDirectories, BOOL isElevated)
+void keybinding_create_with_program_launcher_arg(CHAR *name, int modifiers, unsigned int key, void (*action) (WindowManagerState*, ProgramLauncherMenu*), ProgramLauncherMenu *arg);
+
+ProgramLauncherMenu* register_program_launcher_menu(int modifiers, int virtualKey, BOOL isElevated)
 {
-    if (g_windowManagerState.programLauncherDirectories != NULL)
+    ProgramLauncherMenu *menu = malloc(sizeof(ProgramLauncherMenu));
+    if (menu == NULL)
     {
-        for (size_t i = 0; i < g_windowManagerState.programLauncherDirectoryCount; i++)
-        {
-            free(g_windowManagerState.programLauncherDirectories[i]);
-        }
-        free(g_windowManagerState.programLauncherDirectories);
+        return NULL;
     }
-    
-    g_windowManagerState.programLauncherDirectories = malloc(numberOfDirectories * sizeof(CHAR*));
-    if (g_windowManagerState.programLauncherDirectories == NULL)
+
+    menu->isElevated = isElevated;
+    menu->directoryCount = 0;
+    menu->directories = NULL;
+
+    CHAR name[128];
+    sprintf_s(name, sizeof(name), "ProgramLauncherMenu_%d_%d", modifiers, virtualKey);
+    keybinding_create_with_program_launcher_arg(name, modifiers, virtualKey, run_program_launcher_menu, menu);
+    return menu;
+}
+
+void program_launcher_add_directory(ProgramLauncherMenu *menu, CHAR *directory)
+{
+    CHAR **newDirectories = realloc(menu->directories, (menu->directoryCount + 1) * sizeof(CHAR*));
+    if (newDirectories == NULL)
     {
-        g_windowManagerState.programLauncherDirectoryCount = 0;
         return;
     }
-    
-    g_windowManagerState.programLauncherDirectoryCount = numberOfDirectories;
-    for (size_t i = 0; i < numberOfDirectories; i++)
+    menu->directories = newDirectories;
+
+    size_t len = strlen(directory) + 1;
+    menu->directories[menu->directoryCount] = malloc(len);
+    if (menu->directories[menu->directoryCount] != NULL)
     {
-        size_t len = strlen(directories[i]) + 1;
-        g_windowManagerState.programLauncherDirectories[i] = malloc(len);
-        if (g_windowManagerState.programLauncherDirectories[i] != NULL)
-        {
-            strcpy_s(g_windowManagerState.programLauncherDirectories[i], len, directories[i]);
-        }
-    }
-    
-    if(isElevated)
-    {
-        keybinding_create_with_no_arg("ProgramLauncherMenu", modifiers, virtualKey, run_new_programs_elevated_menu);
-    }
-    else
-    {
-        keybinding_create_with_no_arg("ProgramLauncherNotElevatedMenu", modifiers, virtualKey, run_new_programs_not_elevated_menu);
+        strcpy_s(menu->directories[menu->directoryCount], len, directory);
+        menu->directoryCount++;
     }
 }
 
@@ -6289,6 +6275,19 @@ void command_shell_arg_get_description(Command *self, int maxLen, CHAR *toFill)
             self->shellArg);
 }
 
+void command_execute_program_launcher_arg(Command *self)
+{
+    if(self->programLauncherArg && self->programLauncherAction)
+    {
+        self->programLauncherAction(self->windowManager, self->programLauncherArg);
+    }
+}
+
+void command_program_launcher_arg_get_description(Command *self, int maxLen, CHAR *toFill)
+{
+    sprintf_s(toFill, maxLen, "ProgramLauncher(%s)", self->programLauncherArg && self->programLauncherArg->isElevated ? "elevated" : "not elevated");
+}
+
 
 void command_register(WindowManagerState *windowManager, Command *self)
 {
@@ -6376,6 +6375,21 @@ Command *command_create_with_shell_arg(WindowManagerState *windowManager, CHAR *
     return result;
 }
 
+Command *command_create_with_program_launcher_arg(WindowManagerState *windowManager, CHAR *name, ProgramLauncherMenu *arg, void (*action) (WindowManagerState *windowManager, ProgramLauncherMenu *arg))
+{
+    Command *result = command_create(windowManager, name);
+    if(result)
+    {
+        result->type = "ProgramLauncherFunction";
+        result->programLauncherArg = arg;
+        result->programLauncherAction = action;
+        result->execute = command_execute_program_launcher_arg;
+        result->getDescription = command_program_launcher_arg_get_description;
+    }
+
+    return result;
+}
+
 
 void keybinding_assign_to_command(KeyBinding *keyBinding, Command *command)
 {
@@ -6401,6 +6415,13 @@ void keybinding_create_with_workspace_arg(CHAR *name, int modifiers, unsigned in
 {
     KeyBinding *keyBinding = keybindings_find_existing_or_create(&g_windowManagerState, name, modifiers, key);
     Command *command = command_create_with_workspace_arg(&g_windowManagerState, name, arg, action);
+    keybinding_assign_to_command(keyBinding, command);
+}
+
+void keybinding_create_with_program_launcher_arg(CHAR *name, int modifiers, unsigned int key, void (*action) (WindowManagerState*, ProgramLauncherMenu*), ProgramLauncherMenu *arg)
+{
+    KeyBinding *keyBinding = keybindings_find_existing_or_create(&g_windowManagerState, name, modifiers, key);
+    Command *command = command_create_with_program_launcher_arg(&g_windowManagerState, name, arg, action);
     keybinding_assign_to_command(keyBinding, command);
 }
 

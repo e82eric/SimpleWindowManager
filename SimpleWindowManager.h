@@ -19,6 +19,7 @@ typedef struct FloatLogEntry FloatLogEntry;
 typedef struct FloatLogBuffer FloatLogBuffer;
 typedef struct ClientLogEntry ClientLogEntry;
 typedef struct ClientLogBuffer ClientLogBuffer;
+typedef struct ProgramLauncherMenu ProgramLauncherMenu;
 
 typedef BOOL (*WindowFilter)(Client *client);
 
@@ -277,6 +278,8 @@ struct Command
     Workspace *workspaceArg;
     void (*shellAction) (TCHAR *arg);
     TCHAR *shellArg;
+    void (*programLauncherAction)(WindowManagerState *windowManager, ProgramLauncherMenu *arg);
+    ProgramLauncherMenu *programLauncherArg;
     KeyBinding *keyBinding;
     WindowManagerState *windowManager;
 };
@@ -288,6 +291,13 @@ struct KeyBinding
     int modifiers;
     unsigned int key;
     KeyBinding *next;
+};
+
+struct ProgramLauncherMenu
+{
+    CHAR **directories;
+    size_t directoryCount;
+    BOOL isElevated;
 };
 
 struct FloatLogEntry
@@ -363,8 +373,6 @@ struct WindowManagerState
     TextStyle *textStyle;
     FloatLogBuffer floatLogBuffer;
     ClientLogBuffer clientLogBuffer;
-    CHAR **programLauncherDirectories;
-    size_t programLauncherDirectoryCount;
 };
 
 typedef struct DragDropState
@@ -495,7 +503,8 @@ void register_keybindings_menu(void);
 void register_list_processes_menu(int modifers, int virtualKey);
 void register_list_windows_memu(int modifers, int virtualKey);
 void register_list_services_menu(int modifiers, int virtualKey);
-void register_program_launcher_menu(int modifiers, int virtualKey, CHAR** directories, size_t numberOfDirectories, BOOL isElevated);
+ProgramLauncherMenu* register_program_launcher_menu(int modifiers, int virtualKey, BOOL isElevated);
+void program_launcher_add_directory(ProgramLauncherMenu *menu, CHAR *directory);
 void register_file_sytem_memu(int modifiers, int virtualKey);
 void register_secondary_monitor_default_bindings(Monitor *pMonitor, Monitor *sMonitor, Workspace **spaces);
 void register_secondary_monitor_default_bindings_with_modifiers(int modifiers, Monitor *pMonitor, Monitor *sMonitor, Workspace **spaces);

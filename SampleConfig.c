@@ -120,19 +120,15 @@ void configure(Configuration *configuration)
     register_list_processes_menu(modifiers, VK_F15);
     register_keybindings_menu_with_modifiers(modifiers, VK_F17);
 
-    char* notElevatedDirectories[] = {
-        "%USERPROFILE%\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\",
-        "C:\\ProgramData\\Microsoft\\Windows\\Start Menu\\",
-        "%USERPROFILE%\\AppData\\Local\\Microsoft\\WindowsApps\\"
-    };
-    register_program_launcher_menu(modifiers, VK_P, notElevatedDirectories, 3, FALSE);
+    ProgramLauncherMenu *notElevated = register_program_launcher_menu(modifiers, VK_P, FALSE);
+    program_launcher_add_directory(notElevated, "%USERPROFILE%\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\");
+    program_launcher_add_directory(notElevated, "C:\\ProgramData\\Microsoft\\Windows\\Start Menu\\");
+    program_launcher_add_directory(notElevated, "%USERPROFILE%\\AppData\\Local\\Microsoft\\WindowsApps\\");
 
-    char* elevatedDirectories[] = {
-        "%USERPROFILE%\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\",
-        "C:\\ProgramData\\Microsoft\\Windows\\Start Menu\\",
-        "%USERPROFILE%\\AppData\\Local\\Microsoft\\WindowsApps\\"
-    };
-    register_program_launcher_menu(modifiers | LShift, VK_P, elevatedDirectories, 3, TRUE);
+    ProgramLauncherMenu *elevated = register_program_launcher_menu(modifiers | LShift, VK_P, TRUE);
+    program_launcher_add_directory(elevated, "%USERPROFILE%\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\");
+    program_launcher_add_directory(elevated, "C:\\ProgramData\\Microsoft\\Windows\\Start Menu\\");
+    program_launcher_add_directory(elevated, "%USERPROFILE%\\AppData\\Local\\Microsoft\\WindowsApps\\");
 
     searchDriveMenuDefinition = menu_create_and_register();
     MenuDefinition *searchAllDrivesMenu = menu_create_and_register();
