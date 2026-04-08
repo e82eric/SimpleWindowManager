@@ -440,7 +440,8 @@ void open_windows_scratch_exit_callback(HWND hwnd, void *state)
     {
         if(client->data->isMinimized)
         {
-            ShowWindow(hwnd, SW_RESTORE);
+            LONG style = GetWindowLong(hwnd, GWL_STYLE);
+            SetWindowLong(hwnd, GWL_STYLE, style & ~WS_MINIMIZE | WS_VISIBLE);
             client_move_from_minimized_to_unminimized(windowManagerState, client);
             client->workspace->selected = client;
         }
@@ -6447,7 +6448,7 @@ void keybindings_register_defaults_with_modifiers(int modifiers)
     keybinding_create_with_no_arg("select_window_right", modifiers, VK_L, select_window_right);
     keybinding_create_with_no_arg("select_window_left", modifiers, VK_H, select_window_left);
     keybinding_create_with_no_arg("move_focused_window_to_main", modifiers, VK_RETURN, move_focused_window_to_main);
-    keybinding_create_with_no_arg("mimimize_focused_window", LShift | modifiers, VK_DOWN, mimimize_focused_window);
+    keybinding_create_with_no_arg("minimize_focused_window", LShift | modifiers, VK_O, mimimize_focused_window);
 
     keybinding_create_with_workspace_arg("swap_selected_monitor_to[1]", modifiers, VK_1, swap_selected_monitor_to, g_windowManagerState.workspaces[0]);
     keybinding_create_with_workspace_arg("swap_selected_monitor_to[2]", modifiers, VK_2, swap_selected_monitor_to, g_windowManagerState.workspaces[1]);
