@@ -6468,7 +6468,7 @@ KeyBinding* keybindings_find_existing_or_create(WindowManagerState *windowManage
     return result;
 }
 
-void keybindings_register_defaults_with_modifiers(int modifiers)
+void keybindings_register_defaults_with_modifiers(int modifiers, int fKeyModifiers)
 {
     keybinding_create_with_no_arg("quit_and_restore_windows", modifiers | LShift, VK_F10, quit_and_restore_windows);
     keybinding_create_with_no_arg("quit", modifiers | LShift, VK_F9, quit);
@@ -6493,6 +6493,17 @@ void keybindings_register_defaults_with_modifiers(int modifiers)
     keybinding_create_with_workspace_arg("swap_selected_monitor_to[9]", modifiers, VK_9, swap_selected_monitor_to, g_windowManagerState.workspaces[8]);
     keybinding_create_with_workspace_arg("swap_selected_monitor_to[0]", modifiers, VK_0, swap_selected_monitor_to, g_windowManagerState.workspaces[9]);
 
+    keybinding_create_with_workspace_arg("swap_selected_monitor_to[F13]", fKeyModifiers, VK_F13, swap_selected_monitor_to, g_windowManagerState.workspaces[0]);
+    keybinding_create_with_workspace_arg("swap_selected_monitor_to[F14]", fKeyModifiers, VK_F14, swap_selected_monitor_to, g_windowManagerState.workspaces[1]);
+    keybinding_create_with_workspace_arg("swap_selected_monitor_to[F15]", fKeyModifiers, VK_F15, swap_selected_monitor_to, g_windowManagerState.workspaces[2]);
+    keybinding_create_with_workspace_arg("swap_selected_monitor_to[F16]", fKeyModifiers, VK_F16, swap_selected_monitor_to, g_windowManagerState.workspaces[3]);
+    keybinding_create_with_workspace_arg("swap_selected_monitor_to[F17]", fKeyModifiers, VK_F17, swap_selected_monitor_to, g_windowManagerState.workspaces[4]);
+    keybinding_create_with_workspace_arg("swap_selected_monitor_to[F18]", fKeyModifiers, VK_F18, swap_selected_monitor_to, g_windowManagerState.workspaces[5]);
+    keybinding_create_with_workspace_arg("swap_selected_monitor_to[F19]", fKeyModifiers, VK_F19, swap_selected_monitor_to, g_windowManagerState.workspaces[6]);
+    keybinding_create_with_workspace_arg("swap_selected_monitor_to[F20]", fKeyModifiers, VK_F20, swap_selected_monitor_to, g_windowManagerState.workspaces[7]);
+    keybinding_create_with_workspace_arg("swap_selected_monitor_to[F21]", fKeyModifiers, VK_F21, swap_selected_monitor_to, g_windowManagerState.workspaces[8]);
+    keybinding_create_with_workspace_arg("swap_selected_monitor_to[F22]", fKeyModifiers, VK_F22, swap_selected_monitor_to, g_windowManagerState.workspaces[9]);
+
     keybinding_create_with_no_arg("move_focused_client_down", LShift | modifiers, VK_J, move_focused_client_down);
     keybinding_create_with_no_arg("move_focused_client_up", LShift | modifiers, VK_K, move_focused_client_up);
     keybinding_create_with_no_arg("move_focused_client_right", LShift | modifiers, VK_L, move_focused_client_right);
@@ -6508,6 +6519,17 @@ void keybindings_register_defaults_with_modifiers(int modifiers)
     keybinding_create_with_workspace_arg("move_focused_window_to_workspace[8]", LShift | modifiers, VK_8, move_focused_window_to_workspace, g_windowManagerState.workspaces[7]);
     keybinding_create_with_workspace_arg("move_focused_window_to_workspace[9]", LShift | modifiers, VK_9, move_focused_window_to_workspace, g_windowManagerState.workspaces[8]);
     keybinding_create_with_no_arg("move_focused_window_to_selected_monitor_workspace", LShift | modifiers, VK_0, move_focused_window_to_selected_monitor_workspace);
+
+    keybinding_create_with_workspace_arg("move_focused_window_to_workspace[F13]", LShift | fKeyModifiers, VK_F13, move_focused_window_to_workspace, g_windowManagerState.workspaces[0]);
+    keybinding_create_with_workspace_arg("move_focused_window_to_workspace[F14]", LShift | fKeyModifiers, VK_F14, move_focused_window_to_workspace, g_windowManagerState.workspaces[1]);
+    keybinding_create_with_workspace_arg("move_focused_window_to_workspace[F15]", LShift | fKeyModifiers, VK_F15, move_focused_window_to_workspace, g_windowManagerState.workspaces[2]);
+    keybinding_create_with_workspace_arg("move_focused_window_to_workspace[F16]", LShift | fKeyModifiers, VK_F16, move_focused_window_to_workspace, g_windowManagerState.workspaces[3]);
+    keybinding_create_with_workspace_arg("move_focused_window_to_workspace[F17]", LShift | fKeyModifiers, VK_F17, move_focused_window_to_workspace, g_windowManagerState.workspaces[4]);
+    keybinding_create_with_workspace_arg("move_focused_window_to_workspace[F18]", LShift | fKeyModifiers, VK_F18, move_focused_window_to_workspace, g_windowManagerState.workspaces[5]);
+    keybinding_create_with_workspace_arg("move_focused_window_to_workspace[F19]", LShift | fKeyModifiers, VK_F19, move_focused_window_to_workspace, g_windowManagerState.workspaces[6]);
+    keybinding_create_with_workspace_arg("move_focused_window_to_workspace[F20]", LShift | fKeyModifiers, VK_F20, move_focused_window_to_workspace, g_windowManagerState.workspaces[7]);
+    keybinding_create_with_workspace_arg("move_focused_window_to_workspace[F21]", LShift | fKeyModifiers, VK_F21, move_focused_window_to_workspace, g_windowManagerState.workspaces[8]);
+    keybinding_create_with_no_arg("move_focused_window_to_selected_monitor_workspace[F22]", LShift | fKeyModifiers, VK_F22, move_focused_window_to_selected_monitor_workspace);
 
     //keybinding_create_with_no_arg("goto_last_workspace", modifiers, VK_O, goto_last_workspace);
 
@@ -6531,15 +6553,15 @@ void keybindings_register_defaults_with_modifiers(int modifiers)
 
 void keybindings_register_defaults(void)
 {
-    keybindings_register_defaults_with_modifiers(LAlt);
+    keybindings_register_defaults_with_modifiers(LAlt, 0);
 }
 
 void register_secondary_monitor_default_bindings(Monitor *pMonitor, Monitor *sMonitor, Workspace **spaces)
 {
-    register_secondary_monitor_default_bindings_with_modifiers(LAlt | LCtl, pMonitor, sMonitor, spaces);
+    register_secondary_monitor_default_bindings_with_modifiers(LAlt | LCtl, 0, pMonitor, sMonitor, spaces);
 }
 
-void register_secondary_monitor_default_bindings_with_modifiers(int modifiers, Monitor *pMonitor, Monitor *sMonitor, Workspace **spaces)
+void register_secondary_monitor_default_bindings_with_modifiers(int modifiers, int fKeyModifiers, Monitor *pMonitor, Monitor *sMonitor, Workspace **spaces)
 {
     g_windowManagerState.primaryMonitor = pMonitor;
     g_windowManagerState.secondaryMonitor = sMonitor;
@@ -6553,6 +6575,16 @@ void register_secondary_monitor_default_bindings_with_modifiers(int modifiers, M
     keybinding_create_with_workspace_arg("move_workspace_to_secondary_monitor_without_focus[7]", modifiers, VK_F7, move_workspace_to_secondary_monitor_without_focus, spaces[6]);
     keybinding_create_with_workspace_arg("move_workspace_to_secondary_monitor_without_focus[8]", modifiers, VK_F8, move_workspace_to_secondary_monitor_without_focus, spaces[7]);
     keybinding_create_with_workspace_arg("move_workspace_to_secondary_monitor_without_focus[9]", modifiers, VK_F9, move_workspace_to_secondary_monitor_without_focus, spaces[8]);
+
+    keybinding_create_with_workspace_arg("move_workspace_to_secondary_monitor_without_focus[1]", fKeyModifiers, VK_F13, move_workspace_to_secondary_monitor_without_focus, spaces[0]);
+    keybinding_create_with_workspace_arg("move_workspace_to_secondary_monitor_without_focus[2]", fKeyModifiers, VK_F14, move_workspace_to_secondary_monitor_without_focus, spaces[1]);
+    keybinding_create_with_workspace_arg("move_workspace_to_secondary_monitor_without_focus[3]", fKeyModifiers, VK_F15, move_workspace_to_secondary_monitor_without_focus, spaces[2]);
+    keybinding_create_with_workspace_arg("move_workspace_to_secondary_monitor_without_focus[4]", fKeyModifiers, VK_F16, move_workspace_to_secondary_monitor_without_focus, spaces[3]);
+    keybinding_create_with_workspace_arg("move_workspace_to_secondary_monitor_without_focus[5]", fKeyModifiers, VK_F17, move_workspace_to_secondary_monitor_without_focus, spaces[4]);
+    keybinding_create_with_workspace_arg("move_workspace_to_secondary_monitor_without_focus[6]", fKeyModifiers, VK_F18, move_workspace_to_secondary_monitor_without_focus, spaces[5]);
+    keybinding_create_with_workspace_arg("move_workspace_to_secondary_monitor_without_focus[7]", fKeyModifiers, VK_F19, move_workspace_to_secondary_monitor_without_focus, spaces[6]);
+    keybinding_create_with_workspace_arg("move_workspace_to_secondary_monitor_without_focus[8]", fKeyModifiers, VK_F20, move_workspace_to_secondary_monitor_without_focus, spaces[7]);
+    keybinding_create_with_workspace_arg("move_workspace_to_secondary_monitor_without_focus[9]", fKeyModifiers, VK_F21, move_workspace_to_secondary_monitor_without_focus, spaces[8]);
 
     keybinding_create_with_no_arg("move_secondary_monitor_focused_window_to_main", modifiers | LShift, VK_RETURN, move_secondary_monitor_focused_window_to_main);
 }

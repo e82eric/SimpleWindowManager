@@ -496,7 +496,7 @@ void quit(WindowManagerState *self);
 
 void show_clients(void);
 void keybindings_register_defaults(void);
-void keybindings_register_defaults_with_modifiers(int modifiers);
+void keybindings_register_defaults_with_modifiers(int modifiers, int fKeyModifiers);
 void keybindings_register_float_window_movements(int modifiers);
 void register_keybindings_menu_with_modifiers(int modifiers, int virtualKey);
 void register_keybindings_menu(void);
@@ -507,7 +507,7 @@ ProgramLauncherMenu* register_program_launcher_menu(int modifiers, int virtualKe
 void program_launcher_add_directory(ProgramLauncherMenu *menu, CHAR *directory);
 void register_file_sytem_memu(int modifiers, int virtualKey);
 void register_secondary_monitor_default_bindings(Monitor *pMonitor, Monitor *sMonitor, Workspace **spaces);
-void register_secondary_monitor_default_bindings_with_modifiers(int modifiers, Monitor *pMonitor, Monitor *sMonitor, Workspace **spaces);
+void register_secondary_monitor_default_bindings_with_modifiers(int modifiers, int fKeyModifiers, Monitor *pMonitor, Monitor *sMonitor, Workspace **spaces);
 BOOL should_use_old_move_logic(Client* client);
 BOOL is_float_window(Client *client, LONG_PTR styles, LONG_PTR exStyles);
 void log_float_decision(WindowManagerState *windowManager, Client *client, LONG_PTR styles, LONG_PTR exStyles, BOOL isFloated, const TCHAR *reason);

@@ -77,7 +77,7 @@ BOOL should_use_old_move_logic(Client* client)
 void configure(Configuration *configuration)
 {
     int modifiers = LAlt;
-    keybindings_register_defaults_with_modifiers(modifiers);
+    keybindings_register_defaults_with_modifiers(modifiers, 0);
 
     configuration_register_default_text_style(configuration, TEXT("JetBrainsMonoNL NFP Regular"), 12, 13);
     keybinding_create_with_shell_arg("NewTerminalWindow", LWin, VK_T, start_app, L"C:\\Users\\eric\\Utilites\\WezTerm\\wezterm.exe -e");
@@ -146,6 +146,6 @@ void configure(Configuration *configuration)
     configuration_add_bar_segment_with_header(configuration, L" | ", false, volumeIcon, true, 3, false, fill_volume_percent);
     configuration_add_bar_segment(configuration, L" | ", false, 1, true, fill_is_connected_to_internet);
 
-    register_secondary_monitor_default_bindings_with_modifiers(modifiers, configuration->monitors[0], configuration->monitors[1], configuration->workspaces);
+    register_secondary_monitor_default_bindings_with_modifiers(modifiers, 0, configuration->monitors[0], configuration->monitors[1], configuration->workspaces);
     keybindings_register_float_window_movements(LWin);
 }
