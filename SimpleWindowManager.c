@@ -2647,7 +2647,6 @@ void windowManager_remove_client_if_found_by_hwnd(WindowManagerState *self, HWND
     if(client)
     {
         workspace_remove_client_and_arrange(self, client->workspace, client);
-        workspace_focus_selected_window(self, client->workspace);
     }
     if(client)
     {
@@ -3270,7 +3269,7 @@ void workspace_remove_client_and_arrange(WindowManagerState *windowManagerState,
     if(workspace_remove_client(workspace, client))
     {
         workspace_arrange_windows(workspace, windowManagerState);
-        workspace_focus_selected_window(windowManagerState, workspace);
+        workspace_focus_selected_window(windowManagerState, windowManagerState->selectedMonitor->workspace);
     }
 }
 
