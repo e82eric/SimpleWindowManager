@@ -1,6 +1,6 @@
 use crate::commands::{Action, KeyBinding};
 use crate::config::Configuration;
-use crate::menu::{LegacyNfm, RustNfm};
+use crate::menu::LegacyNfm;
 use crate::model::{
     Client, Monitor, MonitorId, Rect, WindowManagerState, WindowRoutingMode, WorkspaceId,
 };
@@ -12,7 +12,7 @@ pub struct Runtime {
     pub configuration: Configuration,
     pub hidden_window_monitor: Monitor,
     pub key_bindings: Vec<KeyBinding>,
-    pub rust_nfm: Option<RustNfm>,
+    pub rust_nfm: Option<rust_nfm::runtime::PickerRuntime>,
     pub legacy_nfm: Option<LegacyNfm>,
     pub bars: Vec<crate::bar::BarWindow>,
     pub drag_drop_state: DragDropState,
@@ -118,7 +118,7 @@ impl Runtime {
         self.focus_selected(self.selected_workspace());
         #[cfg(windows)]
         {
-            self.rust_nfm = Some(RustNfm::linked());
+            self.rust_nfm = rust_nfm::runtime::PickerRuntime::start().ok();
             self.legacy_nfm = LegacyNfm::load().ok();
         }
     }
@@ -394,7 +394,7 @@ impl Runtime {
                 self.apply_workspace(workspace)?;
                 if self.configuration.state.menu_visible {
                     if let Some(menu) = &self.rust_nfm {
-                        unsafe { (menu.focus)() };
+                        menu.focus();
                     }
                 } else {
                     self.focus_selected(workspace);
@@ -668,15 +668,25 @@ impl Runtime {
     fn run_new_windows_menu(&mut self) {
         let monitor = &self.configuration.state.monitors[0];
         if let Some(menu) = &self.rust_nfm {
-            menu.set_monitor_center(monitor);
-            let shown = unsafe {
-                (menu.show_windows)(
-                    crate::platform::menu_window_selected,
-                    crate::platform::menu_on_closed,
-                    std::ptr::null_mut(),
-                )
-            };
-            self.configuration.state.menu_visible = shown != 0;
+            menu.set_preferred_center(
+                monitor.x_offset + monitor.width / 2,
+                (monitor.top + monitor.bottom) / 2,
+            );
+            match menu.show_windows() {
+                Ok(task) => {
+                    crate::platform::consume_picker_task(task, |response| match response {
+                        rust_nfm::request::PickerResponse::Selected(item) => unsafe {
+                            crate::platform::menu_window_selected(
+                                item.native_window,
+                                std::ptr::null_mut(),
+                            )
+                        },
+                        _ => unsafe { crate::platform::menu_on_closed() },
+                    });
+                    self.configuration.state.menu_visible = true;
+                }
+                Err(error) => eprintln!("failed to start window picker: {error:#}"),
+            }
         } else if let Some(menu) = &self.legacy_nfm {
             menu.set_monitor_center(monitor);
             unsafe {
@@ -712,17 +722,31 @@ impl Runtime {
             .map(|value| value.as_ptr() as *mut _)
             .collect();
         let monitor = &self.configuration.state.monitors[0];
-        let state = elevated as usize as *mut std::ffi::c_void;
         if let Some(menu) = &self.rust_nfm {
-            menu.set_monitor_center(monitor);
-            unsafe {
-                (menu.show_programs_list)(
-                    pointers.as_mut_ptr(),
-                    pointers.len() as i32,
-                    crate::platform::menu_program_selected,
-                    crate::platform::menu_on_closed,
-                    state,
-                );
+            menu.set_preferred_center(
+                monitor.x_offset + monitor.width / 2,
+                (monitor.top + monitor.bottom) / 2,
+            );
+            match menu.show_programs(definition.directories.clone()) {
+                Ok(task) => {
+                    crate::platform::consume_picker_task(task, move |response| match response {
+                        rust_nfm::request::PickerResponse::Selected(value) => {
+                            if let Ok(value) = std::ffi::CString::new(value) {
+                                unsafe {
+                                    crate::platform::menu_program_selected(
+                                        value.as_ptr() as *mut _,
+                                        elevated as usize as *mut std::ffi::c_void,
+                                    )
+                                };
+                            }
+                        }
+                        _ => unsafe { crate::platform::menu_on_closed() },
+                    })
+                }
+                Err(error) => {
+                    eprintln!("failed to start program picker: {error:#}");
+                    return;
+                }
             }
             self.configuration.state.menu_visible = true;
         } else if let Some(menu) = &self.legacy_nfm {
@@ -733,7 +757,7 @@ impl Runtime {
                     pointers.len() as i32,
                     crate::platform::menu_program_selected,
                     crate::platform::menu_on_closed,
-                    state,
+                    elevated as usize as *mut std::ffi::c_void,
                 );
             }
             self.configuration.state.menu_visible = true;
@@ -745,18 +769,20 @@ impl Runtime {
     fn run_process_menu(&mut self) {
         let monitor = &self.configuration.state.monitors[0];
         if let Some(menu) = &self.rust_nfm {
-            if let Some(show) = menu.show_processes {
-                menu.set_monitor_center(monitor);
-                let shown = unsafe {
-                    show(
-                        crate::platform::menu_process_selected,
-                        crate::platform::menu_on_closed,
-                        std::ptr::null_mut(),
-                    )
-                };
-                self.configuration.state.menu_visible = shown != 0;
-                return;
+            menu.set_preferred_center(
+                monitor.x_offset + monitor.width / 2,
+                (monitor.top + monitor.bottom) / 2,
+            );
+            match menu.show_processes() {
+                Ok(task) => {
+                    crate::platform::consume_picker_task(task, |_| unsafe {
+                        crate::platform::menu_on_closed()
+                    });
+                    self.configuration.state.menu_visible = true;
+                }
+                Err(error) => eprintln!("failed to start process picker: {error:#}"),
             }
+            return;
         }
         if let Some(menu) = &self.legacy_nfm {
             menu.set_monitor_center(monitor);
@@ -780,21 +806,34 @@ impl Runtime {
     fn run_file_system_menu(&mut self) {
         let monitor = &self.configuration.state.monitors[0];
         if let Some(menu) = &self.rust_nfm {
-            menu.set_monitor_center(monitor);
-            let options = crate::menu::RustNfmFileSystemOptions {
-                struct_size: std::mem::size_of::<crate::menu::RustNfmFileSystemOptions>(),
+            menu.set_preferred_center(
+                monitor.x_offset + monitor.width / 2,
+                (monitor.top + monitor.bottom) / 2,
+            );
+            let options = rust_nfm::runtime::FileSystemPickerOptions {
                 max_depth: 5,
-                preview_visible: 1,
+                preview_visible: true,
+                ..Default::default()
             };
-            let shown = unsafe {
-                (menu.show_file_system)(
-                    &options,
-                    crate::platform::menu_program_selected,
-                    crate::platform::menu_on_closed,
-                    std::ptr::null_mut(),
-                )
-            };
-            self.configuration.state.menu_visible = shown != 0;
+            match menu.show_file_system(options) {
+                Ok(task) => {
+                    crate::platform::consume_picker_task(task, |response| match response {
+                        rust_nfm::request::PickerResponse::Selected(value) => {
+                            if let Ok(value) = std::ffi::CString::new(value) {
+                                unsafe {
+                                    crate::platform::menu_program_selected(
+                                        value.as_ptr() as *mut _,
+                                        std::ptr::null_mut(),
+                                    )
+                                };
+                            }
+                        }
+                        _ => unsafe { crate::platform::menu_on_closed() },
+                    });
+                    self.configuration.state.menu_visible = true;
+                }
+                Err(error) => eprintln!("failed to start file picker: {error:#}"),
+            }
         } else if let Some(menu) = &self.legacy_nfm {
             menu.set_monitor_center(monitor);
             unsafe {
@@ -1012,9 +1051,7 @@ impl Runtime {
 
     pub fn menu_hide(&mut self) {
         if let Some(menu) = &self.rust_nfm {
-            unsafe {
-                (menu.hide)();
-            }
+            menu.hide();
         }
         if let Some(menu) = &self.legacy_nfm {
             unsafe {

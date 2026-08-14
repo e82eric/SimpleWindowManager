@@ -13,6 +13,20 @@ static MENU_POINTERS: Mutex<Vec<usize>> = Mutex::new(Vec::new());
 use crate::runtime::Runtime;
 
 #[cfg(windows)]
+pub(crate) fn consume_picker_task<T, F>(task: rust_nfm::runtime::PickerTask<T>, completed: F)
+where
+    T: Send + 'static,
+    F: FnOnce(rust_nfm::request::PickerResponse<T>) + Send + 'static,
+{
+    std::thread::spawn(move || {
+        let response = task
+            .recv()
+            .unwrap_or_else(|error| rust_nfm::request::PickerResponse::Error(error.to_string()));
+        completed(response);
+    });
+}
+
+#[cfg(windows)]
 static RUNTIME: OnceLock<Mutex<Runtime>> = OnceLock::new();
 
 #[cfg(windows)]
@@ -139,11 +153,6 @@ pub(crate) unsafe extern "C" fn menu_on_closed() {
             runtime.menu_closed();
         }
     }
-}
-
-#[cfg(windows)]
-pub(crate) unsafe extern "C" fn menu_process_selected(_pid: u32, _state: *mut std::ffi::c_void) {
-    unsafe { menu_on_closed() };
 }
 
 #[cfg(windows)]
@@ -497,6 +506,36 @@ fn show_array_columns(
     display: &[i32],
 ) {
     let visible_columns: Vec<usize> = display.iter().map(|column| *column as usize).collect();
+    if let Some(menu) = &runtime.rust_nfm {
+        let monitor = &runtime.configuration.state.monitors[0];
+        menu.set_preferred_center(
+            monitor.x_offset + monitor.width / 2,
+            (monitor.top + monitor.bottom) / 2,
+        );
+        let picker_columns = visible_columns
+            .iter()
+            .filter_map(|index| columns.get(*index))
+            .map(|column| (*column).to_owned())
+            .collect::<Vec<_>>();
+        let picker_rows = rows
+            .iter()
+            .map(|row| {
+                visible_columns
+                    .iter()
+                    .map(|index| row.get(*index).cloned().unwrap_or_default())
+                    .collect::<Vec<_>>()
+            })
+            .collect();
+        match menu.show_structured(picker_columns, picker_rows, None) {
+            Ok(task) => consume_picker_task(task, |_| unsafe { menu_on_closed() }),
+            Err(error) => {
+                eprintln!("failed to start structured picker: {error:#}");
+                return;
+            }
+        }
+        runtime.configuration.state.menu_visible = true;
+        return;
+    }
     let lines = rows
         .into_iter()
         .map(|row| {
@@ -640,6 +679,7 @@ fn show_string_items(
     if lines.is_empty() {
         lines.push("No entries logged yet".into());
     }
+    let rust_values = lines.clone();
     let mut items = MENU_ITEMS.lock().unwrap();
     *items = lines
         .into_iter()
@@ -655,15 +695,23 @@ fn show_string_items(
     };
     let monitor = &runtime.configuration.state.monitors[0];
     if let Some(menu) = &runtime.rust_nfm {
-        menu.set_monitor_center(monitor);
-        unsafe {
-            (menu.show_items_list)(
-                header.as_ptr() as *mut _,
-                menu_items,
-                select,
-                menu_on_closed,
-                std::ptr::null_mut(),
-            );
+        menu.set_preferred_center(
+            monitor.x_offset + monitor.width / 2,
+            (monitor.top + monitor.bottom) / 2,
+        );
+        match menu.show_items(rust_values, None) {
+            Ok(task) => consume_picker_task(task, move |response| match response {
+                rust_nfm::request::PickerResponse::Selected(value) => {
+                    if let Ok(value) = std::ffi::CString::new(value) {
+                        unsafe { select(value.as_ptr() as *mut _, std::ptr::null_mut()) };
+                    }
+                }
+                _ => unsafe { menu_on_closed() },
+            }),
+            Err(error) => {
+                eprintln!("failed to start item picker: {error:#}");
+                return;
+            }
         }
         runtime.configuration.state.menu_visible = true;
     } else if let Some(menu) = &runtime.legacy_nfm {
