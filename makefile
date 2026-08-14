@@ -3,6 +3,9 @@ publishdir = bin
 winlibs = Gdi32.lib user32.lib ComCtl32.lib
 nowarncflags = /c /EHsc /nologo /DUNICODE /D_UNICODE /Zi
 nfmPublishDir = $(nfmSourceDir)\bin\LibNfm
+rustNfmSourceDir = G:\src\RustWin32Host
+rustNfmBuildProfile = release
+rustNfmTargetDir = $(rustNfmSourceDir)\target\$(rustNfmBuildProfile)
 LFLAGS = /DEBUG
 
 CONFIG = DEBUG
@@ -59,8 +62,16 @@ copy_nfm_menu_binaries: outdir
 	xcopy /Y "$(nfmPublishDir)\*.dll" "$(outdir)\"
 	xcopy /Y "$(nfmPublishDir)\*.pdb" "$(outdir)\"
 
+copy_rust_nfm_binaries: outdir
+	cd /D "$(rustNfmSourceDir)" && cargo build --release --lib
+	xcopy /Y "$(rustNfmTargetDir)\rust_nfm.dll" "$(outdir)\"
+	xcopy /Y "$(rustNfmTargetDir)\rust_nfm.pdb" "$(outdir)\"
+
 nfm_menu.obj:
 	CL $(DEBUG_FLAGS) $(cflags) /I ./ /Ifzf nfm_menu.c /Fd"$(outdir)\nfm_menu.pdb" /Fo"$(outdir)\nfm_menu.obj"
+
+rust_nfm_menu.obj:
+	CL $(DEBUG_FLAGS) $(cflags) /I ./ /Ifzf rust_nfm_menu.c /Fd"$(outdir)\rust_nfm_menu.pdb" /Fo"$(outdir)\rust_nfm_menu.obj"
 
 Config.obj:
 	CL $(DEBUG_FLAGS) $(cflags) /I ./ /Ifzf $(configFile) /Fd"$(outdir)\Config.pdb" /Fo"$(outdir)\Config.obj"
@@ -77,8 +88,8 @@ dcomp_border_window.obj:
 .c.obj:
 	CL $(DEBUG_FLAGS) /analyze /c $(cflags) $*.c /Fd"$(outdir)\$*.pdb" /Fo"$(outdir)\$*.obj"
 
-SimpleWindowManager.exe: outdir copy_nfm_menu_binaries nfm_menu.obj RestoreMovedWindows.exe RestoreMovedWindows.obj SimpleWindowManager.obj Config.obj dcomp_border_window.obj cloak.obj
-	LINK $(outdir)\cloak.obj $(LFLAGS) $(outdir)\ListWindows.obj $(outdir)\RestoreMovedWindows.obj $(outdir)\nfm_menu.obj $(outdir)\dcomp_border_window.obj $(outdir)\SimpleWindowManager.obj $(outdir)\Config.obj $(winlibs) Oleacc.lib Shlwapi.lib OLE32.lib Advapi32.lib Dwmapi.lib Shell32.lib OleAut32.lib uxtheme.lib dxgi.lib d3d11.lib d2d1.lib dcomp.lib /OUT:$(outdir)\SimpleWindowManager.exe
+SimpleWindowManager.exe: outdir copy_nfm_menu_binaries copy_rust_nfm_binaries nfm_menu.obj rust_nfm_menu.obj RestoreMovedWindows.exe RestoreMovedWindows.obj SimpleWindowManager.obj Config.obj dcomp_border_window.obj cloak.obj
+	LINK $(outdir)\cloak.obj $(LFLAGS) $(outdir)\ListWindows.obj $(outdir)\RestoreMovedWindows.obj $(outdir)\nfm_menu.obj $(outdir)\rust_nfm_menu.obj $(outdir)\dcomp_border_window.obj $(outdir)\SimpleWindowManager.obj $(outdir)\Config.obj $(winlibs) Oleacc.lib Shlwapi.lib OLE32.lib Advapi32.lib Dwmapi.lib Shell32.lib OleAut32.lib uxtheme.lib dxgi.lib d3d11.lib d2d1.lib dcomp.lib /OUT:$(outdir)\SimpleWindowManager.exe
 !IF "$(requireAdmin)" == "TRUE"
 	mt -manifest SimpleWindowManager.manifest -outputresource:$(outdir)\SimpleWindowManager.exe;1
 !ENDIF

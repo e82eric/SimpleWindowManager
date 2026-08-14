@@ -7,3 +7,5 @@ tmp
 props.mk.local
 .claude
 logs
+target
+/rust-port/target*/

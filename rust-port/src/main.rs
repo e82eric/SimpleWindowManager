@@ -1,0 +1,34 @@
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
+use simple_window_manager_rs::{Configuration, configure};
+
+fn main() {
+    // The C entry point becomes DPI-aware before reading any monitor or window
+    // geometry. Doing this later mixes virtualized and physical coordinates.
+    #[cfg(windows)]
+    unsafe {
+        windows_sys::Win32::UI::WindowsAndMessaging::SetProcessDPIAware();
+    }
+    let instance_mutex = match simple_window_manager_rs::platform::acquire_single_instance() {
+        Ok(Some(handle)) => handle,
+        Ok(None) => return,
+        Err(error) => {
+            eprintln!("Single-instance initialization failed with error {error}");
+            return;
+        }
+    };
+    let mut configuration = Configuration::default();
+    configure(&mut configuration);
+    let snapshot =
+        match simple_window_manager_rs::snapshot::capture(configuration.float_uwp_windows) {
+            Ok(snapshot) => snapshot,
+            Err(error) => {
+                eprintln!("Desktop discovery failed with error {error}");
+                return;
+            }
+        };
+    let runtime = simple_window_manager_rs::runtime::Runtime::initialize(configuration, snapshot);
+    if let Err(error) = simple_window_manager_rs::platform::run(runtime, instance_mutex) {
+        eprintln!("GetMessageW failed with error {error}");
+    }
+}

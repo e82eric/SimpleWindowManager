@@ -506,6 +506,7 @@ void register_list_services_menu(int modifiers, int virtualKey);
 ProgramLauncherMenu* register_program_launcher_menu(int modifiers, int virtualKey, BOOL isElevated);
 void program_launcher_add_directory(ProgramLauncherMenu *menu, CHAR *directory);
 void register_file_sytem_memu(int modifiers, int virtualKey);
+void register_rust_file_system_menu(int modifiers, int virtualKey);
 void register_secondary_monitor_default_bindings(Monitor *pMonitor, Monitor *sMonitor, Workspace **spaces);
 void register_secondary_monitor_default_bindings_with_modifiers(int modifiers, int fKeyModifiers, Monitor *pMonitor, Monitor *sMonitor, Workspace **spaces);
 BOOL should_use_old_move_logic(Client* client);

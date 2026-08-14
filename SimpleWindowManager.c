@@ -28,6 +28,7 @@
 #include "SimpleWindowManager.h"
 #include "dcomp_border_window.h"
 #include "nfm_menu.h"
+#include "rust_nfm_menu.h"
 #include "cloak.h"
 #include "RestoreMovedWindows.h"
 
@@ -58,6 +59,10 @@ struct LauncherProcess
 
 HHOOK g_kb_hook = 0;
 HHOOK g_mouse_hook = 0;
+static BOOL g_suppressedKeyUps[256] = { FALSE };
+
+static HWND g_workspaceMoveForegroundHwnd = NULL;
+static UINT_PTR g_workspaceMoveFocusTimer = 0;
 
 static BOOL CALLBACK enum_windows_callback(HWND hWnd, LPARAM lparam);
 
@@ -399,7 +404,7 @@ int populate_commands_list(void *state)
 
 void menu_on_closed(void)
 {
-    g_windowManagerState.menuVisible = false;
+    menu_hide(&g_windowManagerState);
     workspace_focus_selected_window(&g_windowManagerState, g_windowManagerState.selectedMonitor->workspace); 
 }
 
@@ -414,6 +419,10 @@ void open_program_scratch_callback(char *stdOut, void *state)
         MultiByteToWideChar(CP_ACP, 0, stdOut, -1, wPath, MAX_PATH);
     }
     start_app(wPath);
+    if (rust_nfm_hide)
+    {
+        rust_nfm_hide();
+    }
     nfm_hide();
 }
 
@@ -427,6 +436,11 @@ void open_program_scratch_callback_not_elevated(char *stdOut, void *state)
         MultiByteToWideChar(CP_ACP, 0, stdOut, -1, wPath, MAX_PATH);
     }
     start_as_explorer_user(wPath);
+
+    if (rust_nfm_hide)
+    {
+        rust_nfm_hide();
+    }
     nfm_hide();
 }
 
@@ -509,6 +523,13 @@ void noop(char* output, void* state)
     nfm_hide();
 }
 
+void process_menu_selected(uint32_t pid, void* state)
+{
+    UNREFERENCED_PARAMETER(pid);
+    UNREFERENCED_PARAMETER(state);
+    menu_on_closed();
+}
+
 void run_new_last_definition_menu(WindowManagerState *state)
 {
     UNREFERENCED_PARAMETER(state);
@@ -525,7 +546,15 @@ void run_new_last_definition_menu(WindowManagerState *state)
 
 void run_new_process_menu(WindowManagerState *state)
 {
-    if (nfm_show_processes_list)
+    if (rust_nfm_show_processes)
+    {
+        rust_nfm_set_menu_location_monitor_center(state->primaryMonitor);
+        if (rust_nfm_show_processes(process_menu_selected, menu_on_closed, state))
+        {
+            g_windowManagerState.menuVisible = true;
+        }
+    }
+    else if (nfm_show_processes_list)
     {
         nfm_set_menu_location_monitor_center(state->primaryMonitor);
         nfm_show_processes_list(noop, menu_on_closed, state);
@@ -539,7 +568,15 @@ void run_new_process_menu(WindowManagerState *state)
 
 void run_new_windows_menu(WindowManagerState *state)
 {
-    if (nfm_show_windows_list)
+    if (rust_nfm_show_windows)
+    {
+        rust_nfm_set_menu_location_monitor_center(state->primaryMonitor);
+        if (rust_nfm_show_windows(open_windows_scratch_exit_callback, menu_on_closed, state))
+        {
+            g_windowManagerState.menuVisible = true;
+        }
+    }
+    else if (nfm_show_windows_list)
     {
         nfm_set_menu_location_monitor_center(state->primaryMonitor);
         nfm_show_windows_list(open_windows_scratch_exit_callback, menu_on_closed, state);
@@ -553,7 +590,14 @@ void run_new_windows_menu(WindowManagerState *state)
 
 void run_program_launcher_menu(WindowManagerState *state, ProgramLauncherMenu *menu)
 {
-    if (nfm_show_programs_list)
+    if (rust_nfm_show_programs_list)
+    {
+        rust_nfm_set_menu_location_monitor_center(state->primaryMonitor);
+        nfm_on_select_string_callback callback = menu->isElevated ? open_program_scratch_callback : open_program_scratch_callback_not_elevated;
+        rust_nfm_show_programs_list(menu->directories, (int)menu->directoryCount, callback, menu_on_closed, state);
+        g_windowManagerState.menuVisible = true;
+    }
+    else if (nfm_show_programs_list)
     {
         nfm_set_menu_location_monitor_center(state->primaryMonitor);
         nfm_on_select_string_callback callback = menu->isElevated ? open_program_scratch_callback : open_program_scratch_callback_not_elevated;
@@ -570,7 +614,24 @@ void run_program_launcher_menu(WindowManagerState *state, ProgramLauncherMenu *m
 
 void run_new_file_system_menu(WindowManagerState *state)
 {
-    if (nfm_show_file_system)
+    if (rust_nfm_show_file_system)
+    {
+        rust_nfm_set_menu_location_monitor_center(state->primaryMonitor);
+        RustNfmFileSystemOptions options = {
+            .struct_size = sizeof(RustNfmFileSystemOptions),
+            .max_depth = 5,
+            .preview_visible = true
+        };
+        if (rust_nfm_show_file_system(
+            &options,
+            open_program_scratch_callback_not_elevated,
+            menu_on_closed,
+            state))
+        {
+            g_windowManagerState.menuVisible = true;
+        }
+    }
+    else if (nfm_show_file_system)
     {
         nfm_set_menu_location_monitor_center(state->primaryMonitor);
         nfm_show_file_system(open_program_scratch_callback_not_elevated, menu_on_closed, state);
@@ -901,8 +962,16 @@ void run_new_commands_menu(WindowManagerState *state)
         keyBindingWidth,
         "KeyBinding",
         "Description");
-    nfm_set_menu_location_monitor_center(state->primaryMonitor);
-    nfm_show_items_list(header, list_commands_for_menu, run_command_from_menu, menu_on_closed, state);
+    if (rust_nfm_show_items_list)
+    {
+        rust_nfm_set_menu_location_monitor_center(state->primaryMonitor);
+        rust_nfm_show_items_list(header, list_commands_for_menu, run_command_from_menu, menu_on_closed, state);
+    }
+    else
+    {
+        nfm_set_menu_location_monitor_center(state->primaryMonitor);
+        nfm_show_items_list(header, list_commands_for_menu, run_command_from_menu, menu_on_closed, state);
+    }
     g_windowManagerState.menuVisible = true;
 }
 
@@ -954,6 +1023,11 @@ void register_list_windows_memu(int modifiers, int virtualKey)
 void register_file_sytem_memu(int modifiers, int virtualKey)
 {
     keybinding_create_with_no_arg("FileSystemMenu", modifiers, virtualKey, run_new_file_system_menu);
+}
+
+void register_rust_file_system_menu(int modifiers, int virtualKey)
+{
+    register_file_sytem_memu(modifiers, virtualKey);
 }
 
 void keybinding_create_with_program_launcher_arg(CHAR *name, int modifiers, unsigned int key, void (*action) (WindowManagerState*, ProgramLauncherMenu*), ProgramLauncherMenu *arg);
@@ -1056,12 +1130,56 @@ void move_focused_window_to_selected_monitor_workspace(WindowManagerState *self)
     move_focused_window_to_workspace(self, workspace);
 }
 
+static VOID CALLBACK finish_workspace_move_focus_preservation(
+    HWND hwnd,
+    UINT message,
+    UINT_PTR timerId,
+    DWORD time)
+{
+    UNREFERENCED_PARAMETER(hwnd);
+    UNREFERENCED_PARAMETER(message);
+    UNREFERENCED_PARAMETER(time);
+
+    KillTimer(NULL, timerId);
+    if(g_workspaceMoveFocusTimer == timerId)
+    {
+        g_workspaceMoveFocusTimer = 0;
+    }
+
+    HWND foregroundHwnd = g_workspaceMoveForegroundHwnd;
+    g_workspaceMoveForegroundHwnd = NULL;
+    if(foregroundHwnd && IsWindow(foregroundHwnd) && GetForegroundWindow() != foregroundHwnd)
+    {
+        keybd_event(0, 0, 0, 0);
+        SetForegroundWindow(foregroundHwnd);
+    }
+}
+
 void move_workspace_to_secondary_monitor_without_focus(WindowManagerState *self, Workspace *workspace)
 {
-    windowManager_move_workspace_to_monitor(self, self->secondaryMonitor, workspace);
-    if(self->primaryMonitor->workspace)
+    HWND foregroundHwnd = GetForegroundWindow();
+    if(g_workspaceMoveFocusTimer)
     {
-        workspace_focus_selected_window(self, self->primaryMonitor->workspace);
+        KillTimer(NULL, g_workspaceMoveFocusTimer);
+        g_workspaceMoveFocusTimer = 0;
+    }
+    g_workspaceMoveForegroundHwnd = foregroundHwnd;
+
+    windowManager_move_workspace_to_monitor(self, self->secondaryMonitor, workspace);
+    if(foregroundHwnd && IsWindow(foregroundHwnd) && GetForegroundWindow() != foregroundHwnd)
+    {
+        keybd_event(0, 0, 0, 0);
+        SetForegroundWindow(foregroundHwnd);
+    }
+
+    g_workspaceMoveFocusTimer = SetTimer(
+        NULL,
+        0,
+        250,
+        finish_workspace_move_focus_preservation);
+    if(!g_workspaceMoveFocusTimer)
+    {
+        g_workspaceMoveForegroundHwnd = NULL;
     }
 }
 
@@ -1442,7 +1560,17 @@ void arrange_clients_in_selected_workspace(WindowManagerState *self)
 {
     self->selectedMonitor->workspace->mainOffset = 0;
     workspace_arrange_windows(self->selectedMonitor->workspace, self);
-    workspace_focus_selected_window(self, self->selectedMonitor->workspace);
+    if(self->menuVisible)
+    {
+        if(rust_nfm_focus)
+        {
+            rust_nfm_focus();
+        }
+    }
+    else
+    {
+        workspace_focus_selected_window(self, self->selectedMonitor->workspace);
+    }
 }
 
 int taskbar_get_height(HWND taskbarHwnd)
@@ -2293,11 +2421,23 @@ BOOL key_bindings_try_handle(KeyBinding *self, DWORD vkCode, int modifiersPresse
 LRESULT CALLBACK handle_key_press(int code, WPARAM w, LPARAM l)
 {
     PKBDLLHOOKSTRUCT p = (PKBDLLHOOKSTRUCT)l;
-    if (code == 0 && (w == WM_KEYDOWN || w == WM_SYSKEYDOWN))
+    if(code == 0 && (w == WM_KEYUP || w == WM_SYSKEYUP))
+    {
+        if(p->vkCode < ARRAYSIZE(g_suppressedKeyUps) && g_suppressedKeyUps[p->vkCode])
+        {
+            g_suppressedKeyUps[p->vkCode] = FALSE;
+            return 1;
+        }
+    }
+    else if (code == 0 && (w == WM_KEYDOWN || w == WM_SYSKEYDOWN))
     {
         int modifiersPressed = get_modifiers_pressed();
         if(key_bindings_try_handle(g_windowManagerState.keyBindings, p->vkCode, modifiersPressed))
         {
+            if(p->vkCode < ARRAYSIZE(g_suppressedKeyUps))
+            {
+                g_suppressedKeyUps[p->vkCode] = TRUE;
+            }
             return 1;
         }
     }
@@ -2568,6 +2708,28 @@ BOOL window_manager_try_handle_foreground_event(WindowManagerState *self, HWND h
     return TRUE;
 }
 
+static BOOL try_preserve_workspace_move_foreground(HWND hwnd)
+{
+    HWND foregroundHwnd = g_workspaceMoveForegroundHwnd;
+    if(!foregroundHwnd)
+    {
+        return FALSE;
+    }
+    if(!IsWindow(foregroundHwnd))
+    {
+        g_workspaceMoveForegroundHwnd = NULL;
+        return FALSE;
+    }
+    if(hwnd == foregroundHwnd)
+    {
+        return FALSE;
+    }
+
+    keybd_event(0, 0, 0, 0);
+    SetForegroundWindow(foregroundHwnd);
+    return TRUE;
+}
+
 void CALLBACK handle_windows_event(
         HWINEVENTHOOK hook,
         DWORD event,
@@ -2633,6 +2795,10 @@ void CALLBACK handle_windows_event(
         }
         else if(event == EVENT_SYSTEM_FOREGROUND)
         {
+            if(try_preserve_workspace_move_foreground(hwnd))
+            {
+                return;
+            }
             if(window_manager_try_handle_foreground_event(&g_windowManagerState, hwnd))
             {
                 return;
@@ -2839,6 +3005,7 @@ void windowManager_move_workspace_to_monitor(WindowManagerState *windowManagerSt
     monitor_set_workspace_and_arrange(workspace, monitor, hdwp, windowManagerState);
     monitor_set_workspace_and_arrange(selectedMonitorCurrentWorkspace, currentMonitor, hdwp, windowManagerState);
     EndDeferWindowPos(hdwp);
+    border_window_update(windowManagerState);
 }
 
 void get_command_line(DWORD processId, Client *target)
@@ -5059,6 +5226,10 @@ void monacleLayout_calculate_and_apply_client_sizes(Workspace *workspace)
 
 void menu_hide(WindowManagerState *windowManagerState)
 {
+    if (rust_nfm_hide)
+    {
+        rust_nfm_hide();
+    }
     nfm_hide();
     windowManagerState->menuVisible = FALSE;
     bar_trigger_selected_window_paint(windowManagerState->selectedMonitor->bar);
@@ -7424,6 +7595,7 @@ int run (void)
     workspace_focus_selected_window(&g_windowManagerState, g_windowManagerState.selectedMonitor->workspace);
     // Load LibNfm only from the same directory as the EXE.
     nfm_load_library();
+    rust_nfm_load_library();
 
     MSG msg;
     while (GetMessage(&msg, NULL, 0, 0))
