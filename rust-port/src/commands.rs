@@ -38,6 +38,7 @@ pub enum Action {
     ShowCommands,
     ShowFloatLogs,
     ShowClientLogs,
+    ShowErrorLogs,
     RunLastMenu,
     Launch(&'static str),
     MoveFloat(i32, i32),

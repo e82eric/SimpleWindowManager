@@ -329,7 +329,7 @@ impl Runtime {
             return false;
         };
         if let Err(error) = self.execute(action) {
-            eprintln!("command {action:?} failed: {error}");
+            crate::error_log::report_win32(format!("command {action:?} failed"), error);
         }
         true
     }
@@ -361,6 +361,7 @@ impl Runtime {
             ShowCommands => self.run_commands_menu(),
             ShowFloatLogs => self.run_float_logs_menu(),
             ShowClientLogs => self.run_client_logs_menu(),
+            ShowErrorLogs => self.run_error_logs_menu(),
             RunLastMenu => self.run_last_menu(),
             Launch(command) => crate::process::start_app(command)?,
             MoveFloat(dx, dy) => self.move_float_or_resize_main(dx, dy)?,
@@ -685,7 +686,9 @@ impl Runtime {
                     });
                     self.configuration.state.menu_visible = true;
                 }
-                Err(error) => eprintln!("failed to start window picker: {error:#}"),
+                Err(error) => {
+                    crate::error_log::report("failed to start window picker", format!("{error:#}"))
+                }
             }
         } else if let Some(menu) = &self.legacy_nfm {
             menu.set_monitor_center(monitor);
@@ -744,7 +747,10 @@ impl Runtime {
                     })
                 }
                 Err(error) => {
-                    eprintln!("failed to start program picker: {error:#}");
+                    crate::error_log::report(
+                        "failed to start program picker",
+                        format!("{error:#}"),
+                    );
                     return;
                 }
             }
@@ -780,7 +786,9 @@ impl Runtime {
                     });
                     self.configuration.state.menu_visible = true;
                 }
-                Err(error) => eprintln!("failed to start process picker: {error:#}"),
+                Err(error) => {
+                    crate::error_log::report("failed to start process picker", format!("{error:#}"))
+                }
             }
             return;
         }
@@ -832,7 +840,9 @@ impl Runtime {
                     });
                     self.configuration.state.menu_visible = true;
                 }
-                Err(error) => eprintln!("failed to start file picker: {error:#}"),
+                Err(error) => {
+                    crate::error_log::report("failed to start file picker", format!("{error:#}"))
+                }
             }
         } else if let Some(menu) = &self.legacy_nfm {
             menu.set_monitor_center(monitor);
@@ -864,6 +874,10 @@ impl Runtime {
     }
     fn run_client_logs_menu(&mut self) {
         crate::platform::show_client_logs_menu(self);
+    }
+
+    fn run_error_logs_menu(&mut self) {
+        crate::platform::show_error_logs_menu(self);
     }
 
     fn move_float_or_resize_main(&mut self, dx: i32, dy: i32) -> Result<(), u32> {
@@ -989,7 +1003,7 @@ impl Runtime {
             crate::process::start_as_explorer_user(value)
         };
         if let Err(error) = result {
-            eprintln!("program launch failed with error {error}");
+            crate::error_log::report_win32("program launch failed", error);
         }
         self.menu_hide();
     }

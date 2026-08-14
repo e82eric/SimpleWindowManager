@@ -22,6 +22,9 @@ where
         let response = task
             .recv()
             .unwrap_or_else(|error| rust_nfm::request::PickerResponse::Error(error.to_string()));
+        if let rust_nfm::request::PickerResponse::Error(error) = &response {
+            crate::error_log::report("picker returned an error", error.to_string());
+        }
         completed(response);
     });
 }
@@ -186,10 +189,14 @@ unsafe extern "C" fn menu_command_selected(
                 .iter()
                 .find(|command| command.name == name)
                 .map(|command| command.action);
-            if let Some(action) = action {
-                let _ = runtime.execute(action);
-            }
+            // Close the commands picker before executing the selection. Menu-opening
+            // actions otherwise create their picker and then immediately hide it.
             runtime.menu_hide();
+            if let Some(action) = action {
+                if let Err(error) = runtime.execute(action) {
+                    crate::error_log::report_win32(format!("command {action:?} failed"), error);
+                }
+            }
         }
     }
 }
@@ -282,6 +289,7 @@ pub(crate) fn binding_name(binding: &crate::commands::KeyBinding) -> String {
         ShowCommands => "ListKeyBindings".into(),
         ShowFloatLogs => "FloatLogsMenu".into(),
         ShowClientLogs => "ClientLogsMenu".into(),
+        ShowErrorLogs => "ErrorLogsMenu".into(),
         RunLastMenu => "LastMenu".into(),
         ShowPrograms(true) => "ProgramLauncherMenu_elevated".into(),
         ShowPrograms(false) => "ProgramLauncherMenu_not_elevated".into(),
@@ -499,6 +507,38 @@ pub(crate) fn show_client_logs_menu(_runtime: &mut Runtime) {
 }
 
 #[cfg(windows)]
+pub(crate) fn show_error_logs_menu(runtime: &mut Runtime) {
+    let rows: Vec<Vec<String>> = crate::error_log::entries()
+        .into_iter()
+        .rev()
+        .map(|entry| {
+            vec![
+                local_log_time(entry.timestamp),
+                entry.context,
+                entry.code.map(|code| code.to_string()).unwrap_or_default(),
+                entry.message,
+            ]
+        })
+        .collect();
+    let rows = if rows.is_empty() {
+        vec![vec![
+            String::new(),
+            "No runtime errors logged".into(),
+            String::new(),
+            String::new(),
+        ]]
+    } else {
+        rows
+    };
+    show_array_columns(
+        runtime,
+        rows,
+        &["Time", "Context", "Code", "Message"],
+        &[0, 1, 2, 3],
+    );
+}
+
+#[cfg(windows)]
 fn show_array_columns(
     runtime: &mut Runtime,
     rows: Vec<Vec<String>>,
@@ -529,7 +569,7 @@ fn show_array_columns(
         match menu.show_structured(picker_columns, picker_rows, None) {
             Ok(task) => consume_picker_task(task, |_| unsafe { menu_on_closed() }),
             Err(error) => {
-                eprintln!("failed to start structured picker: {error:#}");
+                crate::error_log::report("failed to start structured picker", format!("{error:#}"));
                 return;
             }
         }
@@ -664,8 +704,10 @@ fn format_extended_styles(styles: i32) -> String {
 
 #[cfg(windows)]
 pub(crate) fn show_services_menu(runtime: &mut Runtime) {
-    let lines = crate::process::list_services()
-        .unwrap_or_else(|error| vec![format!("Unable to enumerate services: {error}")]);
+    let lines = crate::process::list_services().unwrap_or_else(|error| {
+        crate::error_log::report_win32("unable to enumerate services", error);
+        vec![format!("Unable to enumerate services: {error}")]
+    });
     show_string_items(runtime, "State      Service", lines, menu_string_noop);
 }
 
@@ -709,7 +751,7 @@ fn show_string_items(
                 _ => unsafe { menu_on_closed() },
             }),
             Err(error) => {
-                eprintln!("failed to start item picker: {error:#}");
+                crate::error_log::report("failed to start item picker", format!("{error:#}"));
                 return;
             }
         }
@@ -862,7 +904,7 @@ unsafe extern "system" fn handle_windows_event(
             if is_taskbar(hwnd)
                 && let Err(error) = runtime.taskbar_changed(raw)
             {
-                eprintln!("taskbar resize failed with error {error}");
+                crate::error_log::report_win32("taskbar resize failed", error);
             }
             use windows_sys::Win32::UI::WindowsAndMessaging::{
                 GWL_STYLE, GetWindowLongW, WS_VISIBLE,
@@ -885,7 +927,7 @@ unsafe extern "system" fn handle_windows_event(
         _ => Ok(()),
     };
     if let Err(error) = result {
-        eprintln!("WinEvent {event:#x} failed with error {error}");
+        crate::error_log::report_win32(format!("WinEvent {event:#x} failed"), error);
     }
 }
 

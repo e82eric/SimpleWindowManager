@@ -4,6 +4,7 @@ pub mod cloak;
 pub mod commands;
 pub mod config;
 pub mod drop_target;
+pub mod error_log;
 pub mod layout;
 pub mod list_windows;
 pub mod menu;

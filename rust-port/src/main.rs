@@ -13,7 +13,10 @@ fn main() {
         Ok(Some(handle)) => handle,
         Ok(None) => return,
         Err(error) => {
-            eprintln!("Single-instance initialization failed with error {error}");
+            simple_window_manager_rs::error_log::report_win32(
+                "single-instance initialization failed",
+                error,
+            );
             return;
         }
     };
@@ -23,12 +26,15 @@ fn main() {
         match simple_window_manager_rs::snapshot::capture(configuration.float_uwp_windows) {
             Ok(snapshot) => snapshot,
             Err(error) => {
-                eprintln!("Desktop discovery failed with error {error}");
+                simple_window_manager_rs::error_log::report_win32(
+                    "desktop discovery failed",
+                    error,
+                );
                 return;
             }
         };
     let runtime = simple_window_manager_rs::runtime::Runtime::initialize(configuration, snapshot);
     if let Err(error) = simple_window_manager_rs::platform::run(runtime, instance_mutex) {
-        eprintln!("GetMessageW failed with error {error}");
+        simple_window_manager_rs::error_log::report_win32("GetMessageW failed", error);
     }
 }

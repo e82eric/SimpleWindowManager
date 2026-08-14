@@ -169,6 +169,7 @@ impl Configuration {
             "swap_selected_monitor_to_tile_layout_reversed",
             Action::SetTileReversed,
         );
+        self.command_create("ErrorLogsMenu", Action::ShowErrorLogs);
     }
 
     pub fn keybinding_create(&mut self, binding: KeyBinding) {
@@ -489,8 +490,8 @@ mod parity_tests {
         }
         assert_eq!(
             configuration.commands.len(),
-            configuration.key_bindings.len() + 3,
-            "C keeps the overridden B command plus two unbound layout commands"
+            configuration.key_bindings.len() + 4,
+            "C parity commands plus the Rust error-log menu command"
         );
         assert_eq!(
             configuration.commands[..10]
