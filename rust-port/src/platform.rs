@@ -10,31 +10,6 @@ static MENU_ITEMS: Mutex<Vec<std::ffi::CString>> = Mutex::new(Vec::new());
 #[cfg(windows)]
 static MENU_POINTERS: Mutex<Vec<usize>> = Mutex::new(Vec::new());
 #[cfg(windows)]
-static ARRAY_MENU: Mutex<ArrayMenuStorage> = Mutex::new(ArrayMenuStorage::new());
-
-#[cfg(windows)]
-struct ArrayMenuStorage {
-    strings: Vec<std::ffi::CString>,
-    rows: Vec<Vec<usize>>,
-    row_pointers: Vec<usize>,
-    column_pointers: Vec<usize>,
-    display_columns: Vec<i32>,
-}
-
-#[cfg(windows)]
-impl ArrayMenuStorage {
-    const fn new() -> Self {
-        Self {
-            strings: Vec::new(),
-            rows: Vec::new(),
-            row_pointers: Vec::new(),
-            column_pointers: Vec::new(),
-            display_columns: Vec::new(),
-        }
-    }
-}
-
-#[cfg(windows)]
 use crate::runtime::Runtime;
 
 #[cfg(windows)]
@@ -176,12 +151,7 @@ pub(crate) unsafe extern "C" fn menu_string_noop(
     _value: *mut std::ffi::c_char,
     _state: *mut std::ffi::c_void,
 ) {
-    if let Some(runtime) = RUNTIME.get()
-        && let Ok(runtime) = runtime.try_lock()
-        && let Some(menu) = &runtime.legacy_nfm
-    {
-        unsafe { (menu.hide)() };
-    }
+    unsafe { menu_on_closed() };
 }
 
 #[cfg(windows)]
@@ -526,66 +496,27 @@ fn show_array_columns(
     columns: &[&str],
     display: &[i32],
 ) {
-    let Some(menu) = &runtime.legacy_nfm else {
-        return;
-    };
-    let mut storage = ARRAY_MENU.lock().unwrap();
-    storage.strings.clear();
-    for value in rows.iter().flatten() {
-        let Ok(value) = std::ffi::CString::new(value.as_str()) else {
-            return;
-        };
-        storage.strings.push(value);
-    }
-    for value in columns {
-        let Ok(value) = std::ffi::CString::new(*value) else {
-            return;
-        };
-        storage.strings.push(value);
-    }
-    let cell_count: usize = rows.iter().map(Vec::len).sum();
-    if storage.strings.len() != cell_count + columns.len() {
-        return;
-    }
-    let cell_ptrs: Vec<usize> = storage.strings[..cell_count]
+    let visible_columns: Vec<usize> = display.iter().map(|column| *column as usize).collect();
+    let lines = rows
+        .into_iter()
+        .map(|row| {
+            visible_columns
+                .iter()
+                .filter_map(|index| {
+                    let name = columns.get(*index)?;
+                    let value = row.get(*index)?;
+                    Some(format!("{name}: {}", value.replace(['\r', '\n'], " ")))
+                })
+                .collect::<Vec<_>>()
+                .join(" | ")
+        })
+        .collect();
+    let header = visible_columns
         .iter()
-        .map(|s| s.as_ptr() as usize)
-        .collect();
-    storage.rows.clear();
-    let mut offset = 0;
-    for row in &rows {
-        storage
-            .rows
-            .push(cell_ptrs[offset..offset + row.len()].to_vec());
-        offset += row.len();
-    }
-    storage.row_pointers = storage
-        .rows
-        .iter_mut()
-        .map(|row| row.as_mut_ptr() as usize)
-        .collect();
-    storage.column_pointers = storage.strings[cell_count..]
-        .iter()
-        .map(|s| s.as_ptr() as usize)
-        .collect();
-    storage.display_columns = display.to_vec();
-    menu.set_monitor_center(&runtime.configuration.state.monitors[0]);
-    unsafe {
-        (menu.show_array_columns)(
-            storage.row_pointers.as_mut_ptr() as _,
-            rows.len() as i32,
-            columns.len() as i32,
-            storage.column_pointers.as_mut_ptr() as _,
-            columns.len() as i32,
-            storage.display_columns.as_mut_ptr(),
-            display.len() as i32,
-            1,
-            menu_string_noop,
-            menu_on_closed,
-            std::ptr::null_mut(),
-        );
-    }
-    runtime.configuration.state.menu_visible = true;
+        .filter_map(|index| columns.get(*index).copied())
+        .collect::<Vec<_>>()
+        .join(" | ");
+    show_string_items(runtime, &header, lines, menu_string_noop);
 }
 
 #[cfg(windows)]

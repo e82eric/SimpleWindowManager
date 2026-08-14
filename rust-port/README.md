@@ -16,9 +16,9 @@ the same single-instance mutex.
 
 The Rust menu implementation is linked directly from the sibling
 `../../RustWin32Host` Cargo package, so `rust_nfm.dll` is no longer required.
-`LibNfm.dll` and its companion DLLs remain optional beside the executable for
-the legacy diagnostic column menus and legacy fallback. The C build remains
-independent.
+`LibNfm.dll` and its companion DLLs remain optional beside the executable only
+for legacy fallback behavior such as replaying the last legacy definition. The
+C build remains independent.
 
 The standalone restore helper is built at
 `rust-port\target\release\restore_moved_windows.exe`. Pass `--NoRestore` to
@@ -35,8 +35,8 @@ window routing, all layouts, workspace/monitor movement, taskbar handling,
 bars and status segments, focus border, drag/drop and resize handling,
 minimize-to-hide cloaking, command/process/service/window/program/file menus,
 the diagnostic buffers, and the single-instance lifecycle. The Rust menu is a
-compile-time Cargo dependency; `LibNfm.dll` is only used for legacy menu
-features that do not yet have a Rust crate API.
+compile-time Cargo dependency, including the float and client log menus.
+`LibNfm.dll` is only used for optional legacy fallback features.
 
 The `restore_moved_windows` binary is the Rust counterpart of
 `RestoreMovedWindows.exe`.

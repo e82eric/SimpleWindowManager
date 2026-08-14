@@ -279,7 +279,13 @@ impl Runtime {
                 .as_ref()
                 .unwrap()
                 .workspace;
-            if self.configuration.state.workspaces[workspace.0].selected != Some(client_id) {
+            let selected_monitor_client = self
+                .configuration
+                .state
+                .selected_monitor
+                .and_then(|monitor| self.configuration.state.monitors[monitor.0].workspace)
+                .and_then(|workspace| self.configuration.state.workspaces[workspace.0].selected);
+            if selected_monitor_client != Some(client_id) {
                 self.configuration.state.workspaces[workspace.0].selected = Some(client_id);
                 if let Some(monitor) = self.configuration.state.workspaces[workspace.0].monitor
                     && !self.configuration.state.monitors[monitor.0].is_hidden
