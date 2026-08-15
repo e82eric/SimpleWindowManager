@@ -3,8 +3,6 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, OnceLock};
 
-static MENU_ITEMS: Mutex<Vec<std::ffi::CString>> = Mutex::new(Vec::new());
-static MENU_POINTERS: Mutex<Vec<usize>> = Mutex::new(Vec::new());
 use crate::runtime::Runtime;
 
 pub(crate) fn consume_picker_task<T, F>(task: rust_nfm::runtime::PickerTask<T>, completed: F)
@@ -36,22 +34,6 @@ pub(crate) fn border_is_lost_focus() -> bool {
 }
 
 static SUPPRESSED_KEY_UPS: Mutex<[bool; 256]> = Mutex::new([false; 256]);
-
-pub(crate) fn show_menu_unavailable_warning() {
-    use windows_sys::Win32::UI::WindowsAndMessaging::{MB_ICONWARNING, MB_OK, MessageBoxW};
-    let text: Vec<u16> = "LibNfm.dll not loaded; menu unavailable.\0"
-        .encode_utf16()
-        .collect();
-    let title: Vec<u16> = "SimpleWindowManager\0".encode_utf16().collect();
-    unsafe {
-        MessageBoxW(
-            std::ptr::null_mut(),
-            text.as_ptr(),
-            title.as_ptr(),
-            MB_OK | MB_ICONWARNING,
-        );
-    }
-}
 
 static WORKSPACE_MOVE_TIMER: Mutex<usize> = Mutex::new(0);
 
@@ -130,10 +112,6 @@ pub(crate) unsafe extern "C" fn menu_string_noop(
     _state: *mut std::ffi::c_void,
 ) {
     unsafe { menu_on_closed() };
-}
-
-unsafe extern "C" fn menu_items(_state: *mut std::ffi::c_void) -> *mut *mut std::ffi::c_char {
-    MENU_POINTERS.lock().unwrap().as_mut_ptr() as *mut *mut std::ffi::c_char
 }
 
 unsafe extern "C" fn menu_command_selected(
@@ -663,27 +641,14 @@ pub(crate) fn show_services_menu(runtime: &mut Runtime) {
 
 fn show_string_items(
     runtime: &mut Runtime,
-    header: &str,
+    _header: &str,
     mut lines: Vec<String>,
-    select: crate::menu::OnSelectString,
+    select: unsafe extern "C" fn(*mut std::ffi::c_char, *mut std::ffi::c_void),
 ) {
     if lines.is_empty() {
         lines.push("No entries logged yet".into());
     }
-    let rust_values = lines.clone();
-    let mut items = MENU_ITEMS.lock().unwrap();
-    *items = lines
-        .into_iter()
-        .filter_map(|line| std::ffi::CString::new(line).ok())
-        .collect();
-    let mut pointers = MENU_POINTERS.lock().unwrap();
-    *pointers = items.iter().map(|item| item.as_ptr() as usize).collect();
-    pointers.push(0);
-    drop(pointers);
-    drop(items);
-    let Ok(header) = std::ffi::CString::new(header) else {
-        return;
-    };
+    let rust_values = lines;
     let monitor = &runtime.configuration.state.monitors[0];
     if let Some(menu) = &runtime.rust_nfm {
         menu.set_preferred_center(
@@ -703,18 +668,6 @@ fn show_string_items(
                 crate::error_log::report("failed to start item picker", format!("{error:#}"));
                 return;
             }
-        }
-        runtime.configuration.state.menu_visible = true;
-    } else if let Some(menu) = &runtime.legacy_nfm {
-        menu.set_monitor_center(monitor);
-        unsafe {
-            (menu.show_items_list)(
-                header.as_ptr() as *mut _,
-                menu_items,
-                select,
-                menu_on_closed,
-                std::ptr::null_mut(),
-            );
         }
         runtime.configuration.state.menu_visible = true;
     }

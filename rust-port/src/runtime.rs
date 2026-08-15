@@ -1,6 +1,5 @@
 use crate::commands::{Action, KeyBinding};
 use crate::config::Configuration;
-use crate::menu::LegacyNfm;
 use crate::model::{
     Client, Monitor, MonitorId, Rect, WindowManagerState, WindowRoutingMode, WorkspaceId,
 };
@@ -13,7 +12,7 @@ pub struct Runtime {
     pub hidden_window_monitor: Monitor,
     pub key_bindings: Vec<KeyBinding>,
     pub rust_nfm: Option<rust_nfm::runtime::PickerRuntime>,
-    pub legacy_nfm: Option<LegacyNfm>,
+    last_menu_action: Option<Action>,
     pub bars: Vec<crate::bar::BarWindow>,
     pub drag_drop_state: DragDropState,
     pub regular_resize_client: Option<crate::ClientId>,
@@ -86,7 +85,7 @@ impl Runtime {
             hidden_window_monitor,
             key_bindings,
             rust_nfm: None,
-            legacy_nfm: None,
+            last_menu_action: None,
             bars: Vec::new(),
             drag_drop_state: DragDropState::default(),
             regular_resize_client: None,
@@ -116,10 +115,7 @@ impl Runtime {
 
     pub fn finish_startup(&mut self) {
         self.focus_selected(self.selected_workspace());
-        {
-            self.rust_nfm = rust_nfm::runtime::PickerRuntime::start().ok();
-            self.legacy_nfm = LegacyNfm::load().ok();
-        }
+        self.rust_nfm = rust_nfm::runtime::PickerRuntime::start().ok();
     }
 
     pub fn remove_client_by_hwnd(&mut self, hwnd: isize) -> Result<(), u32> {
@@ -335,6 +331,20 @@ impl Runtime {
 
     pub fn execute(&mut self, action: Action) -> Result<(), u32> {
         use Action::*;
+        if matches!(
+            action,
+            ShowWindows
+                | ShowPrograms(_)
+                | ShowProcesses
+                | ShowServices
+                | ShowFileSystem
+                | ShowCommands
+                | ShowFloatLogs
+                | ShowClientLogs
+                | ShowErrorLogs
+        ) {
+            self.last_menu_action = Some(action);
+        }
         match action {
             Quit => platform_exit(),
             QuitAndRestore => {
@@ -361,7 +371,7 @@ impl Runtime {
             ShowFloatLogs => self.run_float_logs_menu(),
             ShowClientLogs => self.run_client_logs_menu(),
             ShowErrorLogs => self.run_error_logs_menu(),
-            RunLastMenu => self.run_last_menu(),
+            RunLastMenu => self.run_last_menu()?,
             Launch(command) => crate::process::start_app(command)?,
             MoveFloat(dx, dy) => self.move_float_or_resize_main(dx, dy)?,
             MoveFloatToMonitor(index) => self.move_float_to_monitor(index),
@@ -689,23 +699,10 @@ impl Runtime {
                     crate::error_log::report("failed to start window picker", format!("{error:#}"))
                 }
             }
-        } else if let Some(menu) = &self.legacy_nfm {
-            menu.set_monitor_center(monitor);
-            unsafe {
-                (menu.show_windows_list)(
-                    crate::platform::menu_window_selected,
-                    crate::platform::menu_on_closed,
-                    std::ptr::null_mut(),
-                );
-            }
-            self.configuration.state.menu_visible = true;
-        } else {
-            crate::platform::show_menu_unavailable_warning();
         }
     }
 
     fn run_program_launcher_menu(&mut self, elevated: bool) {
-        use std::ffi::CString;
         let Some(definition) = self
             .configuration
             .program_launchers
@@ -714,15 +711,6 @@ impl Runtime {
         else {
             return;
         };
-        let values: Vec<CString> = definition
-            .directories
-            .iter()
-            .filter_map(|value| CString::new(value.as_str()).ok())
-            .collect();
-        let mut pointers: Vec<*mut std::ffi::c_char> = values
-            .iter()
-            .map(|value| value.as_ptr() as *mut _)
-            .collect();
         let monitor = &self.configuration.state.monitors[0];
         if let Some(menu) = &self.rust_nfm {
             menu.set_preferred_center(
@@ -754,20 +742,6 @@ impl Runtime {
                 }
             }
             self.configuration.state.menu_visible = true;
-        } else if let Some(menu) = &self.legacy_nfm {
-            menu.set_monitor_center(monitor);
-            unsafe {
-                (menu.show_programs_list)(
-                    pointers.as_mut_ptr(),
-                    pointers.len() as i32,
-                    crate::platform::menu_program_selected,
-                    crate::platform::menu_on_closed,
-                    elevated as usize as *mut std::ffi::c_void,
-                );
-            }
-            self.configuration.state.menu_visible = true;
-        } else {
-            crate::platform::show_menu_unavailable_warning();
         }
     }
 
@@ -791,19 +765,6 @@ impl Runtime {
             }
             return;
         }
-        if let Some(menu) = &self.legacy_nfm {
-            menu.set_monitor_center(monitor);
-            unsafe {
-                (menu.show_processes_list)(
-                    crate::platform::menu_string_noop,
-                    crate::platform::menu_on_closed,
-                    std::ptr::null_mut(),
-                );
-            }
-            self.configuration.state.menu_visible = true;
-            return;
-        }
-        crate::platform::show_menu_unavailable_warning();
     }
 
     fn run_services_menu(&mut self) {
@@ -843,26 +804,14 @@ impl Runtime {
                     crate::error_log::report("failed to start file picker", format!("{error:#}"))
                 }
             }
-        } else if let Some(menu) = &self.legacy_nfm {
-            menu.set_monitor_center(monitor);
-            unsafe {
-                (menu.show_file_system)(
-                    crate::platform::menu_program_selected,
-                    crate::platform::menu_on_closed,
-                    std::ptr::null_mut(),
-                );
-            }
-            self.configuration.state.menu_visible = true;
-        } else {
-            crate::platform::show_menu_unavailable_warning();
         }
     }
 
-    fn run_last_menu(&mut self) {
-        if let Some(menu) = &self.legacy_nfm {
-            unsafe { (menu.run_last_definition)() };
-            self.configuration.state.menu_visible = true;
+    fn run_last_menu(&mut self) -> Result<(), u32> {
+        if let Some(action) = self.last_menu_action {
+            self.execute(action)?;
         }
+        Ok(())
     }
 
     pub fn run_commands_menu(&mut self) {
@@ -1065,11 +1014,6 @@ impl Runtime {
     pub fn menu_hide(&mut self) {
         if let Some(menu) = &self.rust_nfm {
             menu.hide();
-        }
-        if let Some(menu) = &self.legacy_nfm {
-            unsafe {
-                (menu.hide)();
-            }
         }
         self.configuration.state.menu_visible = false;
         self.redraw_bars();
