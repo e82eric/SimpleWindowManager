@@ -114,16 +114,8 @@ pub(crate) unsafe extern "C" fn menu_string_noop(
     unsafe { menu_on_closed() };
 }
 
-unsafe extern "C" fn menu_command_selected(
-    value: *mut std::ffi::c_char,
-    _state: *mut std::ffi::c_void,
-) {
-    if value.is_null() {
-        return;
-    }
-    let value = unsafe { std::ffi::CStr::from_ptr(value) }.to_string_lossy();
-    let name = value.split_whitespace().next();
-    if let (Some(name), Some(runtime)) = (name, RUNTIME.get()) {
+fn command_selected(name: &str) {
+    if let Some(runtime) = RUNTIME.get() {
         if let Ok(mut runtime) = runtime.try_lock() {
             let action = runtime
                 .configuration
@@ -144,32 +136,48 @@ unsafe extern "C" fn menu_command_selected(
 }
 
 pub(crate) fn show_commands_menu(runtime: &mut Runtime) {
-    let names: Vec<String> = runtime
-        .configuration
-        .commands
-        .iter()
-        .map(|command| command.name.clone())
+    let columns = ["Name", "Type", "KeyBinding", "Description"]
+        .into_iter()
+        .map(str::to_owned)
         .collect();
-    let width = names.iter().map(String::len).max().unwrap_or(0);
-    let lines: Vec<String> = runtime
+    let rows = runtime
         .configuration
         .commands
         .iter()
-        .zip(&names)
-        .map(|(command, name)| {
-            format!(
-                "{name:<width$} {:<25} {:<30} {}",
-                command_type(command.action),
+        .map(|command| {
+            vec![
+                command.name.clone(),
+                command_type(command.action).to_owned(),
                 key_binding_text(command.modifiers, command.key),
-                command_description(runtime, command.action)
-            )
+                command_description(runtime, command.action),
+            ]
         })
         .collect();
-    let header = format!(
-        "{:<width$} {:<25} {:<30} {}",
-        "Name", "Type", "KeyBinding", "Description"
+    let monitor = &runtime.configuration.state.monitors[0];
+    let Some(menu) = &runtime.rust_nfm else {
+        return;
+    };
+    menu.set_preferred_center(
+        monitor.x_offset + monitor.width / 2,
+        (monitor.top + monitor.bottom) / 2,
     );
-    show_string_items(runtime, &header, lines, menu_command_selected);
+    match menu.show_structured(columns, rows, None) {
+        Ok(task) => consume_picker_task(task, |response| match response {
+            rust_nfm::request::PickerResponse::Selected(item) => {
+                if let Some(name) = item.fields.get("Name") {
+                    command_selected(name);
+                } else {
+                    unsafe { menu_on_closed() };
+                }
+            }
+            _ => unsafe { menu_on_closed() },
+        }),
+        Err(error) => {
+            crate::error_log::report("failed to start commands picker", format!("{error:#}"));
+            return;
+        }
+    }
+    runtime.configuration.state.menu_visible = true;
 }
 
 pub(crate) fn binding_name(binding: &crate::commands::KeyBinding) -> String {
