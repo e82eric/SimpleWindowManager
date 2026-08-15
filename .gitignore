@@ -9,3 +9,4 @@ props.mk.local
 logs
 target
 /rust-port/target*/
+/rust-port/build.local.ps1

@@ -1,6 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use simple_window_manager_rs::{Configuration, configure};
+use simple_window_manager_rs::Configuration;
 
 fn main() {
     // The C entry point becomes DPI-aware before reading any monitor or window
@@ -20,7 +20,7 @@ fn main() {
         }
     };
     let mut configuration = Configuration::default();
-    configure(&mut configuration);
+    simple_window_manager_rs::user_config::configure(&mut configuration);
     let snapshot =
         match simple_window_manager_rs::snapshot::capture(configuration.float_uwp_windows) {
             Ok(snapshot) => snapshot,
