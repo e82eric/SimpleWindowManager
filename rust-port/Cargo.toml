@@ -6,6 +6,7 @@ publish = false
 
 [dependencies]
 rust_nfm = { package = "nfm-rust-win32host", path = "../../RustWin32Host" }
+skia-safe = "0.97.2"
 windows = { version = "0.62.2", features = [
     "Win32_Foundation",
     "Win32_Graphics_Direct2D",

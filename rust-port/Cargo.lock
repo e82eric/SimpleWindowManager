@@ -567,6 +567,7 @@ name = "simple-window-manager-rs"
 version = "0.1.0"
 dependencies = [
  "nfm-rust-win32host",
+ "skia-safe",
  "windows",
  "windows-sys",
 ]

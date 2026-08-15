@@ -5,7 +5,6 @@ use simple_window_manager_rs::{Configuration, configure};
 fn main() {
     // The C entry point becomes DPI-aware before reading any monitor or window
     // geometry. Doing this later mixes virtualized and physical coordinates.
-    #[cfg(windows)]
     unsafe {
         windows_sys::Win32::UI::WindowsAndMessaging::SetProcessDPIAware();
     }

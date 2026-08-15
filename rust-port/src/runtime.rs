@@ -116,7 +116,6 @@ impl Runtime {
 
     pub fn finish_startup(&mut self) {
         self.focus_selected(self.selected_workspace());
-        #[cfg(windows)]
         {
             self.rust_nfm = rust_nfm::runtime::PickerRuntime::start().ok();
             self.legacy_nfm = LegacyNfm::load().ok();
@@ -1560,14 +1559,8 @@ impl Runtime {
     }
 }
 
-#[cfg(windows)]
 fn is_iconic(hwnd: isize) -> bool {
     unsafe { windows_sys::Win32::UI::WindowsAndMessaging::IsIconic(hwnd as _) != 0 }
-}
-
-#[cfg(not(windows))]
-fn is_iconic(_hwnd: isize) -> bool {
-    false
 }
 
 fn window_manager_try_add_window(
@@ -1670,7 +1663,6 @@ fn client_should_use_minimize_to_hide(configuration: &Configuration, _client: &C
 }
 
 fn is_float_window(configuration: &Configuration, window: &WindowSnapshot) -> (bool, String) {
-    #[cfg(windows)]
     {
         use windows_sys::Win32::UI::WindowsAndMessaging::{
             WS_EX_APPWINDOW, WS_EX_TOOLWINDOW, WS_SIZEBOX,
@@ -1727,20 +1719,13 @@ fn is_float_window(configuration: &Configuration, window: &WindowSnapshot) -> (b
             (false, "No floating criteria met - will be tiled".into())
         }
     }
-    #[cfg(not(windows))]
-    {
-        let _ = (configuration, window);
-        (false, "No floating criteria met - will be tiled".into())
-    }
 }
 
-#[cfg(windows)]
 fn primary_screen_size() -> (i32, i32) {
     use windows_sys::Win32::UI::WindowsAndMessaging::{GetSystemMetrics, SM_CXSCREEN, SM_CYSCREEN};
     unsafe { (GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN)) }
 }
 
-#[cfg(windows)]
 fn primary_taskbar_height() -> i32 {
     use windows_sys::Win32::UI::WindowsAndMessaging::FindWindowW;
     let class: Vec<u16> = "Shell_TrayWnd\0".encode_utf16().collect();
@@ -1752,17 +1737,10 @@ fn primary_taskbar_height() -> i32 {
     }
 }
 
-#[cfg(not(windows))]
-fn primary_taskbar_height() -> i32 {
-    0
-}
-
-#[cfg(windows)]
 fn foreground_window() -> isize {
     unsafe { windows_sys::Win32::UI::WindowsAndMessaging::GetForegroundWindow() as isize }
 }
 
-#[cfg(windows)]
 fn left_mouse_button_down() -> bool {
     unsafe {
         windows_sys::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState(
@@ -1772,11 +1750,6 @@ fn left_mouse_button_down() -> bool {
             != 0
     }
 }
-#[cfg(not(windows))]
-fn left_mouse_button_down() -> bool {
-    false
-}
-#[cfg(windows)]
 fn left_shift_down() -> bool {
     unsafe {
         windows_sys::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState(
@@ -1786,11 +1759,6 @@ fn left_shift_down() -> bool {
             != 0
     }
 }
-#[cfg(not(windows))]
-fn left_shift_down() -> bool {
-    false
-}
-#[cfg(windows)]
 fn cursor_position() -> Option<(i32, i32)> {
     use std::mem::zeroed;
     use windows_sys::Win32::Foundation::POINT;
@@ -1798,35 +1766,15 @@ fn cursor_position() -> Option<(i32, i32)> {
     (unsafe { windows_sys::Win32::UI::WindowsAndMessaging::GetCursorPos(&mut point) } != 0)
         .then_some((point.x, point.y))
 }
-#[cfg(not(windows))]
-fn cursor_position() -> Option<(i32, i32)> {
-    None
-}
-#[cfg(not(windows))]
-fn foreground_window() -> isize {
-    0
-}
-
-#[cfg(windows)]
 fn set_foreground_window(hwnd: isize) {
     unsafe {
         windows_sys::Win32::UI::WindowsAndMessaging::SetForegroundWindow(hwnd as _);
     }
 }
-#[cfg(not(windows))]
-fn set_foreground_window(_hwnd: isize) {}
-
-#[cfg(windows)]
 fn is_window(hwnd: isize) -> bool {
     unsafe { windows_sys::Win32::UI::WindowsAndMessaging::IsWindow(hwnd as _) != 0 }
 }
 
-#[cfg(not(windows))]
-fn is_window(_hwnd: isize) -> bool {
-    false
-}
-
-#[cfg(windows)]
 fn nudge_set_foreground_window(hwnd: isize) {
     use windows_sys::Win32::UI::Input::KeyboardAndMouse::keybd_event;
     unsafe {
@@ -1835,10 +1783,6 @@ fn nudge_set_foreground_window(hwnd: isize) {
     }
 }
 
-#[cfg(not(windows))]
-fn nudge_set_foreground_window(_hwnd: isize) {}
-
-#[cfg(windows)]
 fn restore_window(hwnd: isize) {
     unsafe {
         windows_sys::Win32::UI::WindowsAndMessaging::ShowWindow(
@@ -1848,10 +1792,6 @@ fn restore_window(hwnd: isize) {
     }
 }
 
-#[cfg(not(windows))]
-fn restore_window(_hwnd: isize) {}
-
-#[cfg(windows)]
 fn show_unmanaged_window_on_selected_monitor(hwnd: isize, monitor: &Monitor) {
     use windows_sys::Win32::UI::WindowsAndMessaging::{
         BringWindowToTop, MoveWindow, SW_SHOWDEFAULT, SetForegroundWindow, ShowWindow,
@@ -1877,19 +1817,11 @@ fn show_unmanaged_window_on_selected_monitor(hwnd: isize, monitor: &Monitor) {
     }
 }
 
-#[cfg(not(windows))]
-fn show_unmanaged_window_on_selected_monitor(_hwnd: isize, _monitor: &Monitor) {}
-
-#[cfg(windows)]
 fn platform_exit() {
     unsafe {
         windows_sys::Win32::System::Threading::ExitProcess(0);
     }
 }
-#[cfg(not(windows))]
-fn platform_exit() {}
-
-#[cfg(windows)]
 fn close_focused_window() {
     unsafe {
         windows_sys::Win32::UI::WindowsAndMessaging::SendMessageW(
@@ -1900,10 +1832,6 @@ fn close_focused_window() {
         );
     }
 }
-#[cfg(not(windows))]
-fn close_focused_window() {}
-
-#[cfg(windows)]
 fn kill_focused_window() -> Result<(), u32> {
     use windows_sys::Win32::Foundation::{CloseHandle, GetLastError};
     use windows_sys::Win32::System::Threading::{OpenProcess, PROCESS_TERMINATE, TerminateProcess};
@@ -1928,12 +1856,6 @@ fn kill_focused_window() -> Result<(), u32> {
         Ok(())
     }
 }
-#[cfg(not(windows))]
-fn kill_focused_window() -> Result<(), u32> {
-    Ok(())
-}
-
-#[cfg(windows)]
 fn minimize_focused_window() {
     unsafe {
         windows_sys::Win32::UI::WindowsAndMessaging::ShowWindow(
@@ -1942,10 +1864,6 @@ fn minimize_focused_window() {
         );
     }
 }
-#[cfg(not(windows))]
-fn minimize_focused_window() {}
-
-#[cfg(windows)]
 fn redraw_focused_window() {
     unsafe {
         windows_sys::Win32::Graphics::Gdi::RedrawWindow(
@@ -1957,10 +1875,6 @@ fn redraw_focused_window() {
         );
     }
 }
-#[cfg(not(windows))]
-fn redraw_focused_window() {}
-
-#[cfg(windows)]
 fn taskbar_toggle() {
     use windows_sys::Win32::UI::WindowsAndMessaging::*;
     let class: Vec<u16> = "Shell_TrayWnd\0".encode_utf16().collect();
@@ -1978,10 +1892,6 @@ fn taskbar_toggle() {
         );
     }
 }
-#[cfg(not(windows))]
-fn taskbar_toggle() {}
-
-#[cfg(windows)]
 fn taskbar_height(hwnd: isize) -> i32 {
     use std::mem::zeroed;
     use windows_sys::Win32::Foundation::RECT;
@@ -1998,12 +1908,6 @@ fn taskbar_height(hwnd: isize) -> i32 {
         }
     }
 }
-#[cfg(not(windows))]
-fn taskbar_height(_hwnd: isize) -> i32 {
-    0
-}
-
-#[cfg(windows)]
 fn stop_managing_window(hwnd: isize, monitor: &Monitor) {
     use windows_sys::Win32::UI::WindowsAndMessaging::{
         SWP_SHOWWINDOW, SetForegroundWindow, SetWindowPos,
@@ -2021,10 +1925,6 @@ fn stop_managing_window(hwnd: isize, monitor: &Monitor) {
         SetForegroundWindow(hwnd as _);
     }
 }
-#[cfg(not(windows))]
-fn stop_managing_window(_hwnd: isize, _monitor: &Monitor) {}
-
-#[cfg(windows)]
 fn move_window_by(hwnd: isize, dx: i32, dy: i32) {
     use std::mem::zeroed;
     use windows_sys::Win32::Foundation::RECT;
@@ -2044,10 +1944,6 @@ fn move_window_by(hwnd: isize, dx: i32, dy: i32) {
     }
 }
 
-#[cfg(not(windows))]
-fn move_window_by(_hwnd: isize, _dx: i32, _dy: i32) {}
-
-#[cfg(windows)]
 fn center_window_on_monitor(hwnd: isize, monitor: &Monitor) {
     use std::mem::zeroed;
     use windows_sys::Win32::Foundation::RECT;
@@ -2072,10 +1968,6 @@ fn center_window_on_monitor(hwnd: isize, monitor: &Monitor) {
     }
 }
 
-#[cfg(not(windows))]
-fn center_window_on_monitor(_hwnd: isize, _monitor: &Monitor) {}
-
-#[cfg(windows)]
 fn window_rect(hwnd: isize) -> Option<Rect> {
     use std::mem::zeroed;
     use windows_sys::Win32::Foundation::RECT;
@@ -2089,12 +1981,6 @@ fn window_rect(hwnd: isize) -> Option<Rect> {
     })
 }
 
-#[cfg(not(windows))]
-fn window_rect(_hwnd: isize) -> Option<Rect> {
-    None
-}
-
-#[cfg(windows)]
 fn hit_test_hwnd(hwnd: isize) -> bool {
     let Some(rect) = window_rect(hwnd) else {
         return false;
@@ -2105,12 +1991,6 @@ fn hit_test_hwnd(hwnd: isize) -> bool {
     x > rect.left && x < rect.right && y > rect.top && y < rect.bottom
 }
 
-#[cfg(not(windows))]
-fn hit_test_hwnd(_hwnd: isize) -> bool {
-    false
-}
-
-#[cfg(windows)]
 fn current_modifiers() -> i32 {
     use crate::commands::{LALT, LCTL, LSHIFT, LWIN, RALT, RSHIFT, RWIN};
     use windows_sys::Win32::UI::Input::KeyboardAndMouse::*;
@@ -2140,12 +2020,6 @@ fn current_modifiers() -> i32 {
     value
 }
 
-#[cfg(not(windows))]
-fn current_modifiers() -> i32 {
-    0
-}
-
-#[cfg(windows)]
 fn has_float_styles(hwnd: isize) -> bool {
     use windows_sys::Win32::UI::WindowsAndMessaging::*;
     let styles = unsafe { GetWindowLongW(hwnd as _, GWL_STYLE) };
@@ -2157,22 +2031,10 @@ fn has_float_styles(hwnd: isize) -> bool {
     }
 }
 
-#[cfg(not(windows))]
-fn has_float_styles(_hwnd: isize) -> bool {
-    false
-}
-
-#[cfg(windows)]
 fn is_zoomed(hwnd: isize) -> bool {
     unsafe { windows_sys::Win32::UI::WindowsAndMessaging::IsZoomed(hwnd as _) != 0 }
 }
 
-#[cfg(not(windows))]
-fn is_zoomed(_hwnd: isize) -> bool {
-    false
-}
-
-#[cfg(windows)]
 fn is_fullscreen(hwnd: isize) -> bool {
     use std::mem::{size_of, zeroed};
     use windows_sys::Win32::Graphics::Gdi::{
@@ -2194,17 +2056,6 @@ fn is_fullscreen(hwnd: isize) -> bool {
         && rect.bottom == info.rcMonitor.bottom
 }
 
-#[cfg(not(windows))]
-fn is_fullscreen(_hwnd: isize) -> bool {
-    false
-}
-
-#[cfg(not(windows))]
-fn primary_screen_size() -> (i32, i32) {
-    (1920, 1080)
-}
-
-#[cfg(windows)]
 fn apply_workspace_windows(
     state: &mut WindowManagerState,
     workspace_id: WorkspaceId,
@@ -2389,15 +2240,4 @@ fn window_matches_target(
         && actual.right == left + width
         && actual.bottom == top + height
         && !cloaked
-}
-
-#[cfg(not(windows))]
-fn apply_workspace_windows(
-    _state: &mut WindowManagerState,
-    _workspace_id: WorkspaceId,
-    _always_redraw: bool,
-    _hidden_x: i32,
-    _use_old_move_logic: bool,
-) -> Result<(), u32> {
-    Ok(())
 }

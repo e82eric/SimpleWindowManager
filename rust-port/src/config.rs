@@ -280,7 +280,8 @@ pub fn configure(configuration: &mut Configuration) {
     use windows_sys::Win32::UI::Input::KeyboardAndMouse::*;
     let modifiers = LALT | LWIN | LCTL;
     configuration.keybindings_register_defaults_with_modifiers(modifiers, LCTL | LALT);
-    configuration.configuration_register_default_text_style("JetBrainsMonoNL NFP Regular", 16, 16);
+    configuration.configuration_register_default_text_style("JetBrainsMonoNL NFP", 18, 22);
+    configuration.bar_height = 52;
     configuration.always_redraw = true;
     configuration.minimize_to_hide_all = true;
     configuration
@@ -420,15 +421,9 @@ pub fn configure(configuration: &mut Configuration) {
     }
 }
 
-#[cfg(windows)]
 fn display_monitor_count() -> usize {
     use windows_sys::Win32::UI::WindowsAndMessaging::{GetSystemMetrics, SM_CMONITORS};
     unsafe { GetSystemMetrics(SM_CMONITORS).max(0) as usize }
-}
-
-#[cfg(not(windows))]
-fn display_monitor_count() -> usize {
-    1
 }
 
 #[cfg(test)]

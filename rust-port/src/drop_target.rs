@@ -3,10 +3,8 @@ pub struct DropTargetWindow {
     pub hwnd: isize,
 }
 
-#[cfg(windows)]
 static SHOULD_PAINT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
-#[cfg(windows)]
 unsafe extern "system" fn window_proc(
     hwnd: windows_sys::Win32::Foundation::HWND,
     message: u32,
@@ -35,7 +33,6 @@ unsafe extern "system" fn window_proc(
     }
 }
 
-#[cfg(windows)]
 pub fn create() -> Result<DropTargetWindow, u32> {
     use std::mem::{size_of, zeroed};
     use windows_sys::Win32::Foundation::GetLastError;
@@ -83,12 +80,6 @@ pub fn create() -> Result<DropTargetWindow, u32> {
     })
 }
 
-#[cfg(not(windows))]
-pub fn create() -> Result<DropTargetWindow, u32> {
-    Ok(DropTargetWindow { hwnd: 0 })
-}
-
-#[cfg(windows)]
 pub fn show(window: &DropTargetWindow, rect: crate::Rect, topmost: bool, should_paint: bool) {
     use windows_sys::Win32::UI::WindowsAndMessaging::*;
     SHOULD_PAINT.store(should_paint, std::sync::atomic::Ordering::Relaxed);
@@ -105,10 +96,6 @@ pub fn show(window: &DropTargetWindow, rect: crate::Rect, topmost: bool, should_
     }
 }
 
-#[cfg(not(windows))]
-pub fn show(_window: &DropTargetWindow, _rect: crate::Rect, _topmost: bool, _should_paint: bool) {}
-
-#[cfg(windows)]
 pub fn hide(window: &DropTargetWindow) {
     unsafe {
         windows_sys::Win32::UI::WindowsAndMessaging::ShowWindow(
@@ -117,6 +104,3 @@ pub fn hide(window: &DropTargetWindow) {
         );
     }
 }
-
-#[cfg(not(windows))]
-pub fn hide(_window: &DropTargetWindow) {}

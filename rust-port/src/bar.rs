@@ -32,7 +32,6 @@ pub struct BarWindow {
     pub monitor_index: usize,
 }
 
-#[cfg(windows)]
 unsafe extern "system" fn bar_message_loop(
     hwnd: windows_sys::Win32::Foundation::HWND,
     message: u32,
@@ -41,11 +40,7 @@ unsafe extern "system" fn bar_message_loop(
 ) -> isize {
     use std::mem::zeroed;
     use windows_sys::Win32::Foundation::RECT;
-    use windows_sys::Win32::Graphics::Gdi::{
-        BeginPaint, CreateSolidBrush, DT_CENTER, DT_LEFT, DT_SINGLELINE, DT_VCENTER, DeleteObject,
-        EndPaint, FillRect, InvalidateRect, PAINTSTRUCT, SelectObject, SetBkMode, SetTextColor,
-        TRANSPARENT,
-    };
+    use windows_sys::Win32::Graphics::Gdi::{BeginPaint, EndPaint, InvalidateRect, PAINTSTRUCT};
     use windows_sys::Win32::UI::WindowsAndMessaging::*;
     match message {
         WM_NCCREATE => {
@@ -63,132 +58,12 @@ unsafe extern "system" fn bar_message_loop(
             };
             let mut paint: PAINTSTRUCT = unsafe { zeroed() };
             let dc = unsafe { BeginPaint(hwnd, &mut paint) };
-            let brush = unsafe { CreateSolidBrush(snapshot.background_color) };
             let mut client: RECT = unsafe { zeroed() };
             unsafe {
                 GetClientRect(hwnd, &mut client);
-                FillRect(dc, &client, brush);
-                SetBkMode(dc, TRANSPARENT as i32);
             }
-            let normal_font = create_font(&snapshot.font_name, snapshot.normal_font_size);
-            let icon_font = create_font(&snapshot.font_name, snapshot.icon_font_size);
-            for (index, (tag, selected, has_clients, is_icon)) in snapshot.tags.iter().enumerate() {
-                let mut rect = RECT {
-                    left: index as i32 * 30,
-                    top: 0,
-                    right: index as i32 * 30 + 30,
-                    bottom: client.bottom,
-                };
-                if *selected {
-                    let selected_brush =
-                        unsafe { CreateSolidBrush(snapshot.focus_background_color) };
-                    unsafe {
-                        FillRect(dc, &rect, selected_brush);
-                        DeleteObject(selected_brush);
-                    }
-                }
-                unsafe {
-                    SetTextColor(
-                        dc,
-                        if *selected {
-                            snapshot.focus_text_color
-                        } else if *has_clients {
-                            snapshot.text_color
-                        } else {
-                            snapshot.disabled_color
-                        },
-                    );
-                    SelectObject(dc, if *is_icon { icon_font } else { normal_font });
-                }
-                draw_text(dc, tag, &mut rect, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
-                if *selected {
-                    let indicator =
-                        unsafe { CreateSolidBrush(snapshot.extra_focus_background_color) };
-                    let indicator_rect = RECT {
-                        left: rect.left,
-                        top: rect.bottom - 3,
-                        right: rect.right,
-                        bottom: rect.bottom,
-                    };
-                    unsafe {
-                        FillRect(dc, &indicator_rect, indicator);
-                        DeleteObject(indicator);
-                    }
-                }
-            }
-            let mut description_rect = RECT {
-                left: snapshot.tags.len() as i32 * 30,
-                top: 0,
-                right: status_left(dc, &snapshot.segments, client.right, normal_font, icon_font),
-                bottom: client.bottom,
-            };
-            if snapshot.selected_monitor {
-                let focus = unsafe { CreateSolidBrush(snapshot.focus_background_color) };
-                unsafe {
-                    FillRect(dc, &description_rect, focus);
-                    DeleteObject(focus);
-                }
-            }
+            paint_skia(dc, client.right, client.bottom, &snapshot);
             unsafe {
-                SetTextColor(dc, snapshot.text_color);
-                SelectObject(dc, normal_font);
-            }
-            draw_text(
-                dc,
-                &snapshot.workspace_info,
-                &mut description_rect,
-                DT_LEFT | DT_VCENTER | DT_SINGLELINE,
-            );
-            let mut focused_rect = client;
-            draw_text(
-                dc,
-                &snapshot.focused_window,
-                &mut focused_rect,
-                DT_CENTER | DT_VCENTER | DT_SINGLELINE,
-            );
-            let mut right = client.right;
-            for (index, segment) in snapshot.segments.iter().enumerate() {
-                let padding = if index == 0 { 10 } else { 0 };
-                right -= padding;
-                right = draw_status_part(
-                    dc,
-                    &segment.value,
-                    segment.value_is_icon,
-                    right,
-                    client.bottom,
-                    snapshot.text_color,
-                    normal_font,
-                    icon_font,
-                );
-                if let Some((header, icon)) = &segment.header {
-                    right = draw_status_part(
-                        dc,
-                        header,
-                        *icon,
-                        right,
-                        client.bottom,
-                        snapshot.info_color,
-                        normal_font,
-                        icon_font,
-                    );
-                }
-                if let Some((separator, icon)) = &segment.separator {
-                    right = draw_status_part(
-                        dc,
-                        separator,
-                        *icon,
-                        right,
-                        client.bottom,
-                        snapshot.info_color,
-                        normal_font,
-                        icon_font,
-                    );
-                }
-            }
-            unsafe {
-                DeleteObject(brush);
-                DeleteObject(normal_font);
-                DeleteObject(icon_font);
                 EndPaint(hwnd, &paint);
             }
             0
@@ -205,10 +80,9 @@ unsafe extern "system" fn bar_message_loop(
                 unsafe { GetWindowLongPtrW(hwnd, GWLP_USERDATA) as usize }.saturating_sub(1);
             let x = lparam as i16 as i32;
             if let Some(snapshot) = crate::platform::bar_snapshot(monitor)
-                && x >= 0
-                && x < snapshot.tags.len() as i32 * 30
+                && let Some(workspace) = workspace_at_x(&snapshot, x)
             {
-                crate::platform::bar_workspace_clicked(monitor, (x / 30) as usize);
+                crate::platform::bar_workspace_clicked(monitor, workspace);
             }
             0
         }
@@ -232,148 +106,297 @@ unsafe extern "system" fn bar_message_loop(
     }
 }
 
-#[cfg(windows)]
-fn status_left(
+const BAR_MARGIN: f32 = 2.0;
+const REGION_GAP: f32 = 12.0;
+const REGION_PADDING: f32 = 14.0;
+const TAG_WIDTH: f32 = 42.0;
+
+fn color_ref(value: u32) -> skia_safe::Color {
+    skia_safe::Color::from_argb(
+        255,
+        (value & 0xff) as u8,
+        ((value >> 8) & 0xff) as u8,
+        ((value >> 16) & 0xff) as u8,
+    )
+}
+
+fn tag_groups(snapshot: &BarSnapshot) -> Vec<(usize, usize, f32, f32)> {
+    if snapshot.tags.is_empty() {
+        Vec::new()
+    } else {
+        let width = REGION_PADDING * 2.0 + snapshot.tags.len() as f32 * TAG_WIDTH;
+        vec![(0, snapshot.tags.len(), BAR_MARGIN, BAR_MARGIN + width)]
+    }
+}
+
+fn workspace_at_x(snapshot: &BarSnapshot, x: i32) -> Option<usize> {
+    let x = x as f32;
+    for (start, end, left, right) in tag_groups(snapshot) {
+        if x >= left + REGION_PADDING && x < right - REGION_PADDING {
+            let index = start + ((x - left - REGION_PADDING) / TAG_WIDTH) as usize;
+            if index < end {
+                return Some(index);
+            }
+        }
+    }
+    None
+}
+
+fn icon_tag(_index: usize, configured: &str, _is_icon: bool) -> String {
+    configured.to_owned()
+}
+
+fn paint_skia(
     dc: windows_sys::Win32::Graphics::Gdi::HDC,
-    segments: &[RenderedSegment],
-    mut right: i32,
-    normal_font: windows_sys::Win32::Graphics::Gdi::HFONT,
-    icon_font: windows_sys::Win32::Graphics::Gdi::HFONT,
-) -> i32 {
-    use windows_sys::Win32::Foundation::RECT;
-    use windows_sys::Win32::Graphics::Gdi::{DT_CALCRECT, DrawTextW, SelectObject};
-    let width = |text: &str, icon: bool| {
-        let wide: Vec<u16> = text.encode_utf16().collect();
-        let mut measured = RECT::default();
-        unsafe {
-            SelectObject(dc, if icon { icon_font } else { normal_font });
-            DrawTextW(
-                dc,
-                wide.as_ptr(),
-                wide.len() as i32,
-                &mut measured,
-                DT_CALCRECT,
+    width: i32,
+    height: i32,
+    snapshot: &BarSnapshot,
+) {
+    use skia_safe::{Font, FontMgr, FontStyle, Paint, Rect, surfaces};
+    use windows_sys::Win32::Graphics::Gdi::{
+        BI_RGB, BITMAPINFO, BITMAPINFOHEADER, DIB_RGB_COLORS, SRCCOPY, StretchDIBits,
+    };
+    if width <= 0 || height <= 0 {
+        return;
+    }
+    let Some(mut surface) = surfaces::raster_n32_premul((width, height)) else {
+        return;
+    };
+    let canvas = surface.canvas();
+    canvas.clear(skia_safe::Color::from_rgb(0x1d, 0x20, 0x21));
+
+    let manager = FontMgr::default();
+    let typeface = resolve_bar_typeface(&manager, &snapshot.font_name, FontStyle::normal())
+        .or_else(|| manager.legacy_make_typeface(None, FontStyle::normal()));
+    let Some(typeface) = typeface else {
+        return;
+    };
+    let mut normal_font = Font::new(typeface.clone(), snapshot.normal_font_size as f32);
+    normal_font.set_subpixel(true);
+    let mut icon_font = Font::new(typeface, snapshot.icon_font_size as f32);
+    icon_font.set_subpixel(true);
+
+    let top = 4.0;
+    let bottom = height as f32 - 4.0;
+    let groups = tag_groups(snapshot);
+    for (start, end, left, right) in &groups {
+        let region = Rect::new(*left, top, *right, bottom);
+        draw_region(canvas, region, snapshot.selected_monitor);
+        for index in *start..*end {
+            let (tag, selected, has_clients, is_icon) = &snapshot.tags[index];
+            let item_left = *left + REGION_PADDING + (index - *start) as f32 * TAG_WIDTH;
+            let item = Rect::new(item_left, top + 3.0, item_left + TAG_WIDTH, bottom - 3.0);
+            if *selected {
+                let mut selected_paint = Paint::default();
+                selected_paint.set_anti_alias(true);
+                selected_paint.set_color(color_ref(snapshot.focus_background_color));
+                canvas.draw_round_rect(item, 7.0, 7.0, &selected_paint);
+            }
+            let color = if *selected {
+                snapshot.focus_text_color
+            } else if *has_clients {
+                snapshot.text_color
+            } else {
+                snapshot.disabled_color
+            };
+            let display_tag = icon_tag(index, tag, *is_icon);
+            draw_centered_text(
+                canvas,
+                &display_tag,
+                item,
+                if *is_icon { &icon_font } else { &normal_font },
+                color_ref(color),
             );
         }
-        measured.right - measured.left
-    };
-    for (index, segment) in segments.iter().enumerate() {
-        if index == 0 {
-            right -= 10;
-        }
-        right -= width(&segment.value, segment.value_is_icon);
-        if let Some((header, icon)) = &segment.header {
-            right -= width(header, *icon);
-        }
-        if let Some((separator, icon)) = &segment.separator {
-            right -= width(separator, *icon);
-        }
     }
-    right
-}
 
-#[cfg(windows)]
-fn draw_status_part(
-    dc: windows_sys::Win32::Graphics::Gdi::HDC,
-    text: &str,
-    icon: bool,
-    right: i32,
-    bottom: i32,
-    color: u32,
-    normal_font: windows_sys::Win32::Graphics::Gdi::HFONT,
-    icon_font: windows_sys::Win32::Graphics::Gdi::HFONT,
-) -> i32 {
-    use windows_sys::Win32::Foundation::RECT;
-    use windows_sys::Win32::Graphics::Gdi::{
-        DT_CALCRECT, DT_LEFT, DT_SINGLELINE, DT_VCENTER, DrawTextW, SelectObject, SetTextColor,
-    };
-    let wide: Vec<u16> = text.encode_utf16().collect();
-    let font = if icon { icon_font } else { normal_font };
-    unsafe {
-        SelectObject(dc, font);
-    }
-    let mut measured = RECT::default();
-    unsafe {
-        DrawTextW(
-            dc,
-            wide.as_ptr(),
-            wide.len() as i32,
-            &mut measured,
-            DT_CALCRECT,
+    let mut left = groups
+        .last()
+        .map(|group| group.3 + REGION_GAP)
+        .unwrap_or(BAR_MARGIN);
+    let status = snapshot
+        .segments
+        .iter()
+        .rev()
+        .map(|segment| {
+            format!(
+                "{}{}{}",
+                segment
+                    .separator
+                    .as_ref()
+                    .map(|part| part.0.as_str())
+                    .unwrap_or(""),
+                segment
+                    .header
+                    .as_ref()
+                    .map(|part| part.0.as_str())
+                    .unwrap_or(""),
+                segment.value
+            )
+        })
+        .collect::<String>();
+    let status_width = text_width(&normal_font, &status) + REGION_PADDING * 2.0;
+    let status_left = (width as f32 - BAR_MARGIN - status_width).max(left);
+
+    let info_width =
+        (text_width(&normal_font, &snapshot.workspace_info) + REGION_PADDING * 2.0).max(180.0);
+    let info = Rect::new(left, top, left + info_width, bottom);
+    draw_region(canvas, info, snapshot.selected_monitor);
+    draw_centered_text(
+        canvas,
+        &snapshot.workspace_info,
+        info,
+        &normal_font,
+        color_ref(snapshot.text_color),
+    );
+    left = info.right + REGION_GAP;
+
+    let desired_focus =
+        (text_width(&normal_font, &snapshot.focused_window) + REGION_PADDING * 2.0).max(240.0);
+    let available_right = status_left - REGION_GAP;
+    let focus_width = desired_focus.min((available_right - left).max(0.0));
+    let centered_left = width as f32 / 2.0 - focus_width / 2.0;
+    let focus_left = centered_left
+        .max(left)
+        .min((available_right - focus_width).max(left));
+    let focus_right = focus_left + focus_width;
+    if focus_width > 0.0 {
+        let focus = Rect::new(focus_left, top, focus_right, bottom);
+        draw_region(canvas, focus, snapshot.selected_monitor);
+        draw_centered_text(
+            canvas,
+            &snapshot.focused_window,
+            focus,
+            &normal_font,
+            color_ref(snapshot.text_color),
         );
     }
-    let left = right - (measured.right - measured.left);
-    let mut rect = RECT {
-        left,
-        top: 0,
-        right,
-        bottom,
-    };
-    unsafe {
-        SetTextColor(dc, color);
-        DrawTextW(
-            dc,
-            wide.as_ptr(),
-            wide.len() as i32,
-            &mut rect,
-            DT_LEFT | DT_VCENTER | DT_SINGLELINE,
+
+    if status_left < width as f32 - BAR_MARGIN {
+        let region = Rect::new(status_left, top, width as f32 - BAR_MARGIN, bottom);
+        draw_region(canvas, region, snapshot.selected_monitor);
+        draw_centered_text(
+            canvas,
+            &status,
+            region,
+            &normal_font,
+            color_ref(snapshot.text_color),
         );
     }
-    left
-}
-
-#[cfg(windows)]
-fn create_font(name: &str, size: i32) -> windows_sys::Win32::Graphics::Gdi::HFONT {
-    use windows_sys::Win32::Graphics::Gdi::*;
-    let name: Vec<u16> = name.encode_utf16().chain([0]).collect();
-    let screen = unsafe { GetDC(std::ptr::null_mut()) };
-    let dpi = unsafe { GetDeviceCaps(screen, LOGPIXELSX as i32) };
-    unsafe { ReleaseDC(std::ptr::null_mut(), screen) };
-    let size = size * dpi / 96;
+    let Some(pixmap) = surface.peek_pixels() else {
+        return;
+    };
+    let Some(bytes) = pixmap.bytes() else {
+        return;
+    };
+    let mut bitmap = BITMAPINFO {
+        bmiHeader: BITMAPINFOHEADER {
+            biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
+            biWidth: width,
+            biHeight: -height,
+            biPlanes: 1,
+            biBitCount: 32,
+            biCompression: BI_RGB,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
     unsafe {
-        CreateFontW(
-            -size,
+        StretchDIBits(
+            dc,
             0,
             0,
+            width,
+            height,
             0,
-            FW_NORMAL as i32,
             0,
-            0,
-            0,
-            DEFAULT_CHARSET as u32,
-            OUT_DEFAULT_PRECIS as u32,
-            CLIP_DEFAULT_PRECIS as u32,
-            DEFAULT_QUALITY as u32,
-            (DEFAULT_PITCH | FF_DONTCARE) as u32,
-            name.as_ptr(),
-        )
+            width,
+            height,
+            bytes.as_ptr().cast(),
+            &mut bitmap,
+            DIB_RGB_COLORS,
+            SRCCOPY,
+        );
     }
 }
 
-#[cfg(windows)]
-fn draw_text(
-    dc: windows_sys::Win32::Graphics::Gdi::HDC,
+fn resolve_bar_typeface(
+    manager: &skia_safe::FontMgr,
+    family: &str,
+    style: skia_safe::FontStyle,
+) -> Option<skia_safe::Typeface> {
+    let supports_bar_icons = |face: &skia_safe::Typeface| {
+        ['\u{f028}', '\u{ea7a}', '\u{f127}', '\u{f128}']
+            .into_iter()
+            .all(|character| face.unichar_to_glyph(character as i32) != 0)
+    };
+    let named = manager.legacy_make_typeface(family, style);
+    if named.as_ref().is_some_and(supports_bar_icons) {
+        return named;
+    }
+    if let Some(fonts) = std::env::var_os("LOCALAPPDATA").map(|root| {
+        std::path::PathBuf::from(root)
+            .join("Microsoft")
+            .join("Windows")
+            .join("Fonts")
+    }) {
+        for file in [
+            "JetBrainsMonoNLNerdFontPropo-Regular.ttf",
+            "JetBrainsMonoNerdFontPropo-Regular.ttf",
+            "JetBrainsMonoNLNerdFontMono-Regular.ttf",
+        ] {
+            if let Ok(bytes) = std::fs::read(fonts.join(file))
+                && let Some(face) = manager.new_from_data(&bytes, None)
+                && supports_bar_icons(&face)
+            {
+                return Some(face);
+            }
+        }
+    }
+    named
+}
+
+fn text_width(font: &skia_safe::Font, text: &str) -> f32 {
+    font.measure_str(text, None).0
+}
+
+fn draw_region(canvas: &skia_safe::Canvas, rect: skia_safe::Rect, _selected_monitor: bool) {
+    use skia_safe::{Color, Paint};
+    let mut shadow = Paint::default();
+    shadow.set_anti_alias(true);
+    shadow.set_color(Color::from_argb(45, 0, 0, 0));
+    shadow.set_mask_filter(skia_safe::MaskFilter::blur(
+        skia_safe::BlurStyle::Normal,
+        2.5,
+        true,
+    ));
+    canvas.draw_round_rect(rect.with_offset((0.0, 2.0)), 8.0, 8.0, &shadow);
+
+    let mut panel = Paint::default();
+    panel.set_anti_alias(true);
+    panel.set_color(Color::from_rgb(0x3c, 0x38, 0x36));
+    canvas.draw_round_rect(rect, 8.0, 8.0, &panel);
+}
+
+fn draw_centered_text(
+    canvas: &skia_safe::Canvas,
     text: &str,
-    rect: &mut windows_sys::Win32::Foundation::RECT,
-    flags: u32,
+    rect: skia_safe::Rect,
+    font: &skia_safe::Font,
+    color: skia_safe::Color,
 ) {
-    let wide: Vec<u16> = text.encode_utf16().collect();
-    unsafe {
-        windows_sys::Win32::Graphics::Gdi::DrawTextW(
-            dc,
-            wide.as_ptr(),
-            wide.len() as i32,
-            rect,
-            flags,
-        );
-    }
+    let mut paint = skia_safe::Paint::default();
+    paint.set_anti_alias(true);
+    paint.set_color(color);
+    let (width, bounds) = font.measure_str(text, Some(&paint));
+    let x = rect.left + (rect.width() - width) / 2.0;
+    let y = rect.center_y() - (bounds.top + bounds.bottom) / 2.0;
+    canvas.draw_str(text, (x, y), font, &paint);
 }
 
-#[cfg(windows)]
 pub fn create_bars(monitors: &[crate::Monitor], bar_height: i32) -> Result<Vec<BarWindow>, u32> {
     use std::mem::{size_of, zeroed};
     use windows_sys::Win32::Foundation::GetLastError;
-    use windows_sys::Win32::Graphics::Gdi::COLOR_WINDOW;
     use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
     use windows_sys::Win32::UI::Controls::ShowScrollBar;
     use windows_sys::Win32::UI::WindowsAndMessaging::*;
@@ -387,7 +410,7 @@ pub fn create_bars(monitors: &[crate::Monitor], bar_height: i32) -> Result<Vec<B
     class.hCursor = unsafe { LoadCursorW(std::ptr::null_mut(), IDC_ARROW) };
     class.hIcon = unsafe { LoadIconW(std::ptr::null_mut(), IDI_APPLICATION) };
     class.hIconSm = class.hIcon;
-    class.hbrBackground = (COLOR_WINDOW as usize + 1) as _;
+    class.hbrBackground = std::ptr::null_mut();
     unsafe {
         RegisterClassExW(&class);
     }
@@ -439,12 +462,6 @@ pub fn create_bars(monitors: &[crate::Monitor], bar_height: i32) -> Result<Vec<B
     Ok(result)
 }
 
-#[cfg(not(windows))]
-pub fn create_bars(_monitors: &[crate::Monitor], _bar_height: i32) -> Result<Vec<BarWindow>, u32> {
-    Ok(Vec::new())
-}
-
-#[cfg(windows)]
 pub fn redraw(bars: &[BarWindow]) {
     for bar in bars {
         unsafe {
@@ -452,9 +469,6 @@ pub fn redraw(bars: &[BarWindow]) {
         }
     }
 }
-
-#[cfg(not(windows))]
-pub fn redraw(_bars: &[BarWindow]) {}
 
 pub fn status_text(segments: &[crate::config::BarSegmentConfiguration]) -> String {
     segments
@@ -509,7 +523,6 @@ fn segment_value(value: crate::config::BarSegmentValue) -> String {
     }
 }
 
-#[cfg(windows)]
 fn system_time(local: bool) -> String {
     use std::mem::zeroed;
     use windows_sys::Win32::Foundation::SYSTEMTIME;
@@ -523,11 +536,6 @@ fn system_time(local: bool) -> String {
     }
     format!("{:02}:{:02}", time.wHour, time.wMinute)
 }
-#[cfg(not(windows))]
-fn system_time(_local: bool) -> String {
-    String::new()
-}
-#[cfg(windows)]
 fn local_date() -> String {
     use std::mem::zeroed;
     use windows_sys::Win32::Foundation::SYSTEMTIME;
@@ -537,11 +545,6 @@ fn local_date() -> String {
     }
     format!("{:04}-{:02}-{:02}", time.wYear, time.wMonth, time.wDay)
 }
-#[cfg(not(windows))]
-fn local_date() -> String {
-    String::new()
-}
-#[cfg(windows)]
 fn memory_percent() -> String {
     use std::mem::{size_of, zeroed};
     use windows_sys::Win32::System::SystemInformation::{GlobalMemoryStatusEx, MEMORYSTATUSEX};
@@ -553,7 +556,6 @@ fn memory_percent() -> String {
     format!("{:3}%", value.dwMemoryLoad)
 }
 
-#[cfg(windows)]
 fn cpu_percent() -> String {
     use std::mem::zeroed;
     use std::sync::Mutex;
@@ -590,12 +592,4 @@ fn cpu_percent() -> String {
     state.1 = kernel;
     state.2 = user;
     format!("{:3}%", state.3)
-}
-#[cfg(not(windows))]
-fn cpu_percent() -> String {
-    String::new()
-}
-#[cfg(not(windows))]
-fn memory_percent() -> String {
-    String::new()
 }

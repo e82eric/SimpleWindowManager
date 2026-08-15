@@ -1,4 +1,3 @@
-#[cfg(windows)]
 pub fn restore_moved_windows_to_screen(no_restore: bool) -> Result<(), u32> {
     use std::mem::zeroed;
     use windows_sys::Win32::Foundation::{GetLastError, HWND, RECT};
@@ -59,10 +58,5 @@ pub fn restore_moved_windows_to_screen(no_restore: bool) -> Result<(), u32> {
             }
         }
     }
-    Ok(())
-}
-
-#[cfg(not(windows))]
-pub fn restore_moved_windows_to_screen(_no_restore: bool) -> Result<(), u32> {
     Ok(())
 }

@@ -1,4 +1,3 @@
-#[cfg(windows)]
 pub fn set_cloak_for_window(hwnd: isize, cloak_type: i32, cloak_flag: i32) -> i32 {
     use std::ffi::c_void;
     use windows_sys::Win32::System::Com::{CLSCTX_ALL, CoCreateInstance};
@@ -75,9 +74,4 @@ pub fn set_cloak_for_window(hwnd: isize, cloak_type: i32, cloak_flag: i32) -> i3
         release(provider);
         result
     }
-}
-
-#[cfg(not(windows))]
-pub fn set_cloak_for_window(_hwnd: isize, _cloak_type: i32, _cloak_flag: i32) -> i32 {
-    0
 }

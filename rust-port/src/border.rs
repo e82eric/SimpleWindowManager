@@ -12,7 +12,6 @@ pub fn border_rect(target: crate::Rect) -> crate::Rect {
     }
 }
 
-#[cfg(windows)]
 mod dcomp {
     use std::cell::RefCell;
     use windows::Win32::Foundation::{HMODULE, HWND};
@@ -261,7 +260,6 @@ mod dcomp {
     }
 }
 
-#[cfg(windows)]
 unsafe extern "system" fn border_message_loop(
     hwnd: windows_sys::Win32::Foundation::HWND,
     message: u32,
@@ -306,7 +304,6 @@ unsafe extern "system" fn border_message_loop(
     }
 }
 
-#[cfg(windows)]
 pub fn create_border_window(normal: u32, lost: u32) -> Result<BorderWindow, u32> {
     use std::mem::{size_of, zeroed};
     use windows_sys::Win32::Foundation::GetLastError;
@@ -352,12 +349,6 @@ pub fn create_border_window(normal: u32, lost: u32) -> Result<BorderWindow, u32>
     })
 }
 
-#[cfg(not(windows))]
-pub fn create_border_window(_normal: u32, _lost: u32) -> Result<BorderWindow, u32> {
-    Ok(BorderWindow { hwnd: 0 })
-}
-
-#[cfg(windows)]
 pub fn update_border(window: &BorderWindow, target: Option<crate::Rect>) {
     use windows_sys::Win32::Graphics::Gdi::InvalidateRect;
     use windows_sys::Win32::UI::WindowsAndMessaging::*;
@@ -411,11 +402,7 @@ pub fn update_border(window: &BorderWindow, target: Option<crate::Rect>) {
     }
 }
 
-#[cfg(not(windows))]
-pub fn update_border(_window: &BorderWindow, _target: Option<crate::Rect>) {}
-
 pub fn clean() {
-    #[cfg(windows)]
     dcomp::clean();
 }
 

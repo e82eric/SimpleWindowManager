@@ -1,4 +1,3 @@
-#[cfg(windows)]
 pub fn start_app(command: &str) -> Result<(), u32> {
     use windows_sys::Win32::Foundation::GetLastError;
     use windows_sys::Win32::UI::Shell::ShellExecuteW;
@@ -22,7 +21,6 @@ pub fn start_app(command: &str) -> Result<(), u32> {
     }
 }
 
-#[cfg(windows)]
 pub fn start_as_explorer_user(command: &str) -> Result<(), u32> {
     use std::mem::{size_of, zeroed};
     use windows_sys::Win32::Foundation::{CloseHandle, GetLastError};
@@ -114,16 +112,6 @@ pub fn start_as_explorer_user(command: &str) -> Result<(), u32> {
     }
 }
 
-#[cfg(not(windows))]
-pub fn start_app(_command: &str) -> Result<(), u32> {
-    Ok(())
-}
-#[cfg(not(windows))]
-pub fn start_as_explorer_user(_command: &str) -> Result<(), u32> {
-    Ok(())
-}
-
-#[cfg(windows)]
 pub fn list_services() -> Result<Vec<String>, u32> {
     use windows_sys::Win32::Foundation::GetLastError;
     use windows_sys::Win32::System::Services::*;
@@ -200,9 +188,4 @@ pub fn list_services() -> Result<Vec<String>, u32> {
         CloseServiceHandle(manager);
         Ok(result)
     }
-}
-
-#[cfg(not(windows))]
-pub fn list_services() -> Result<Vec<String>, u32> {
-    Ok(Vec::new())
 }

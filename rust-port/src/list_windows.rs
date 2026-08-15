@@ -49,7 +49,6 @@ pub fn parse_selected_hwnd(selection: &str) -> Option<isize> {
         .map(|value| value as isize)
 }
 
-#[cfg(windows)]
 pub fn focus_selected_window(selection: &str) -> bool {
     use windows_sys::Win32::UI::WindowsAndMessaging::{
         SW_RESTORE, SetForegroundWindow, ShowWindow,
@@ -61,11 +60,6 @@ pub fn focus_selected_window(selection: &str) -> bool {
         ShowWindow(hwnd as _, SW_RESTORE);
         SetForegroundWindow(hwnd as _) != 0
     }
-}
-
-#[cfg(not(windows))]
-pub fn focus_selected_window(_selection: &str) -> bool {
-    false
 }
 
 #[cfg(test)]

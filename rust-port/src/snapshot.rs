@@ -16,7 +16,6 @@ pub struct WindowSnapshot {
     pub normal_rect: Rect,
 }
 
-#[cfg(windows)]
 unsafe fn process_is_elevated(process: windows_sys::Win32::Foundation::HANDLE) -> bool {
     use std::mem::{size_of, zeroed};
     use windows_sys::Win32::Foundation::CloseHandle;
@@ -42,7 +41,6 @@ unsafe fn process_is_elevated(process: windows_sys::Win32::Foundation::HANDLE) -
     result
 }
 
-#[cfg(windows)]
 pub fn is_root_window_handle(hwnd: isize, float_uwp_windows: bool) -> bool {
     use windows_sys::Win32::Foundation::{HANDLE, HWND};
     use windows_sys::Win32::UI::WindowsAndMessaging::*;
@@ -105,12 +103,6 @@ pub fn is_root_window_handle(hwnd: isize, float_uwp_windows: bool) -> bool {
     }
 }
 
-#[cfg(not(windows))]
-pub fn is_root_window_handle(_hwnd: isize, _float_uwp_windows: bool) -> bool {
-    false
-}
-
-#[cfg(windows)]
 fn capture_window_data(hwnd: isize, require_visible: bool) -> Option<WindowSnapshot> {
     use std::mem::{size_of, zeroed};
     use windows_sys::Win32::Foundation::CloseHandle;
@@ -179,7 +171,6 @@ fn capture_window_data(hwnd: isize, require_visible: bool) -> Option<WindowSnaps
     })
 }
 
-#[cfg(windows)]
 pub fn capture_window(
     hwnd: isize,
     require_visible: bool,
@@ -190,12 +181,10 @@ pub fn capture_window(
         .flatten()
 }
 
-#[cfg(windows)]
 pub fn capture_foreground_window(hwnd: isize) -> Option<WindowSnapshot> {
     capture_window_data(hwnd, false)
 }
 
-#[cfg(windows)]
 pub fn is_list_window_handle(hwnd: isize) -> bool {
     use std::mem::size_of;
     use windows_sys::Win32::Graphics::Dwm::{DWMWA_CLOAKED, DwmGetWindowAttribute};
@@ -251,7 +240,6 @@ pub fn is_list_window_handle(hwnd: isize) -> bool {
     }
 }
 
-#[cfg(windows)]
 pub fn capture_list_windows() -> Result<Vec<WindowSnapshot>, u32> {
     use windows_sys::Win32::Foundation::{GetLastError, HWND, LPARAM};
     use windows_sys::Win32::UI::WindowsAndMessaging::EnumWindows;
@@ -275,31 +263,6 @@ pub fn capture_list_windows() -> Result<Vec<WindowSnapshot>, u32> {
     }
 }
 
-#[cfg(not(windows))]
-pub fn capture_window(
-    _hwnd: isize,
-    _require_visible: bool,
-    _float_uwp_windows: bool,
-) -> Option<WindowSnapshot> {
-    None
-}
-
-#[cfg(not(windows))]
-pub fn capture_foreground_window(_hwnd: isize) -> Option<WindowSnapshot> {
-    None
-}
-
-#[cfg(not(windows))]
-pub fn is_list_window_handle(_hwnd: isize) -> bool {
-    false
-}
-
-#[cfg(not(windows))]
-pub fn capture_list_windows() -> Result<Vec<WindowSnapshot>, u32> {
-    Ok(Vec::new())
-}
-
-#[cfg(windows)]
 pub fn capture(float_uwp_windows: bool) -> Result<DesktopSnapshot, u32> {
     use std::mem::{size_of, zeroed};
     use windows_sys::Win32::Foundation::{CloseHandle, GetLastError, HWND, LPARAM, RECT};
@@ -484,9 +447,4 @@ pub fn capture(float_uwp_windows: bool) -> Result<DesktopSnapshot, u32> {
         snapshot.windows = window_context.0;
     }
     Ok(snapshot)
-}
-
-#[cfg(not(windows))]
-pub fn capture(_float_uwp_windows: bool) -> Result<DesktopSnapshot, u32> {
-    Ok(DesktopSnapshot::default())
 }

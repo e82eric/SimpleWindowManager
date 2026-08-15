@@ -1,18 +1,12 @@
 //! The only module that should directly expose Win32 callback and handle unsafety.
 
-#[cfg(windows)]
 use std::sync::atomic::{AtomicBool, Ordering};
-#[cfg(windows)]
 use std::sync::{Mutex, OnceLock};
 
-#[cfg(windows)]
 static MENU_ITEMS: Mutex<Vec<std::ffi::CString>> = Mutex::new(Vec::new());
-#[cfg(windows)]
 static MENU_POINTERS: Mutex<Vec<usize>> = Mutex::new(Vec::new());
-#[cfg(windows)]
 use crate::runtime::Runtime;
 
-#[cfg(windows)]
 pub(crate) fn consume_picker_task<T, F>(task: rust_nfm::runtime::PickerTask<T>, completed: F)
 where
     T: Send + 'static,
@@ -29,34 +23,20 @@ where
     });
 }
 
-#[cfg(windows)]
 static RUNTIME: OnceLock<Mutex<Runtime>> = OnceLock::new();
 
-#[cfg(windows)]
 static BORDER_LOST_FOCUS: AtomicBool = AtomicBool::new(false);
 
-#[cfg(windows)]
 pub(crate) fn set_border_lost_focus(value: bool) {
     BORDER_LOST_FOCUS.store(value, Ordering::Relaxed);
 }
 
-#[cfg(windows)]
 pub(crate) fn border_is_lost_focus() -> bool {
     BORDER_LOST_FOCUS.load(Ordering::Relaxed)
 }
 
-#[cfg(not(windows))]
-pub(crate) fn set_border_lost_focus(_value: bool) {}
-
-#[cfg(not(windows))]
-pub(crate) fn border_is_lost_focus() -> bool {
-    false
-}
-
-#[cfg(windows)]
 static SUPPRESSED_KEY_UPS: Mutex<[bool; 256]> = Mutex::new([false; 256]);
 
-#[cfg(windows)]
 pub(crate) fn show_menu_unavailable_warning() {
     use windows_sys::Win32::UI::WindowsAndMessaging::{MB_ICONWARNING, MB_OK, MessageBoxW};
     let text: Vec<u16> = "LibNfm.dll not loaded; menu unavailable.\0"
@@ -73,12 +53,8 @@ pub(crate) fn show_menu_unavailable_warning() {
     }
 }
 
-#[cfg(not(windows))]
-pub(crate) fn show_menu_unavailable_warning() {}
-#[cfg(windows)]
 static WORKSPACE_MOVE_TIMER: Mutex<usize> = Mutex::new(0);
 
-#[cfg(windows)]
 unsafe extern "system" fn finish_workspace_move_focus_preservation(
     _hwnd: windows_sys::Win32::Foundation::HWND,
     _message: u32,
@@ -99,7 +75,6 @@ unsafe extern "system" fn finish_workspace_move_focus_preservation(
     }
 }
 
-#[cfg(windows)]
 pub(crate) fn schedule_workspace_move_focus_finish() -> bool {
     use windows_sys::Win32::UI::WindowsAndMessaging::{KillTimer, SetTimer};
     let mut current = WORKSPACE_MOVE_TIMER.lock().unwrap();
@@ -119,12 +94,6 @@ pub(crate) fn schedule_workspace_move_focus_finish() -> bool {
     timer != 0
 }
 
-#[cfg(not(windows))]
-pub(crate) fn schedule_workspace_move_focus_finish() -> bool {
-    true
-}
-
-#[cfg(windows)]
 pub(crate) unsafe extern "C" fn menu_window_selected(hwnd: isize, _state: *mut std::ffi::c_void) {
     if let Some(runtime) = RUNTIME.get() {
         if let Ok(mut runtime) = runtime.try_lock() {
@@ -133,7 +102,6 @@ pub(crate) unsafe extern "C" fn menu_window_selected(hwnd: isize, _state: *mut s
     }
 }
 
-#[cfg(windows)]
 pub(crate) unsafe extern "C" fn menu_program_selected(
     value: *mut std::ffi::c_char,
     state: *mut std::ffi::c_void,
@@ -149,7 +117,6 @@ pub(crate) unsafe extern "C" fn menu_program_selected(
     }
 }
 
-#[cfg(windows)]
 pub(crate) unsafe extern "C" fn menu_on_closed() {
     if let Some(runtime) = RUNTIME.get() {
         if let Ok(mut runtime) = runtime.try_lock() {
@@ -158,7 +125,6 @@ pub(crate) unsafe extern "C" fn menu_on_closed() {
     }
 }
 
-#[cfg(windows)]
 pub(crate) unsafe extern "C" fn menu_string_noop(
     _value: *mut std::ffi::c_char,
     _state: *mut std::ffi::c_void,
@@ -166,12 +132,10 @@ pub(crate) unsafe extern "C" fn menu_string_noop(
     unsafe { menu_on_closed() };
 }
 
-#[cfg(windows)]
 unsafe extern "C" fn menu_items(_state: *mut std::ffi::c_void) -> *mut *mut std::ffi::c_char {
     MENU_POINTERS.lock().unwrap().as_mut_ptr() as *mut *mut std::ffi::c_char
 }
 
-#[cfg(windows)]
 unsafe extern "C" fn menu_command_selected(
     value: *mut std::ffi::c_char,
     _state: *mut std::ffi::c_void,
@@ -201,7 +165,6 @@ unsafe extern "C" fn menu_command_selected(
     }
 }
 
-#[cfg(windows)]
 pub(crate) fn show_commands_menu(runtime: &mut Runtime) {
     let names: Vec<String> = runtime
         .configuration
@@ -231,7 +194,6 @@ pub(crate) fn show_commands_menu(runtime: &mut Runtime) {
     show_string_items(runtime, &header, lines, menu_command_selected);
 }
 
-#[cfg(windows)]
 pub(crate) fn binding_name(binding: &crate::commands::KeyBinding) -> String {
     use crate::commands::Action::*;
     let suffix = |i: usize| {
@@ -307,7 +269,6 @@ pub(crate) fn binding_name(binding: &crate::commands::KeyBinding) -> String {
     }
 }
 
-#[cfg(windows)]
 fn command_type(action: crate::commands::Action) -> &'static str {
     use crate::commands::Action::*;
     match action {
@@ -321,7 +282,6 @@ fn command_type(action: crate::commands::Action) -> &'static str {
     }
 }
 
-#[cfg(windows)]
 fn command_description(runtime: &Runtime, action: crate::commands::Action) -> String {
     use crate::commands::Action::*;
     match action {
@@ -342,7 +302,6 @@ fn command_description(runtime: &Runtime, action: crate::commands::Action) -> St
     }
 }
 
-#[cfg(windows)]
 fn key_binding_text(modifiers: Option<i32>, key: Option<u32>) -> String {
     use crate::commands::{LALT, LCTL, LSHIFT, LWIN};
     let (Some(modifiers), Some(key)) = (modifiers, key) else {
@@ -365,7 +324,6 @@ fn key_binding_text(modifiers: Option<i32>, key: Option<u32>) -> String {
     parts.join("+")
 }
 
-#[cfg(windows)]
 fn key_name(key: u32) -> String {
     use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
         GetKeyNameTextW, MAPVK_VK_TO_VSC, MapVirtualKeyW,
@@ -385,7 +343,6 @@ fn key_name(key: u32) -> String {
     String::from_utf16_lossy(&buffer[..length.max(0) as usize])
 }
 
-#[cfg(windows)]
 pub(crate) fn show_float_logs_menu(_runtime: &mut Runtime) {
     let rows: Vec<Vec<String>> = _runtime
         .configuration
@@ -448,7 +405,6 @@ pub(crate) fn show_float_logs_menu(_runtime: &mut Runtime) {
     );
 }
 
-#[cfg(windows)]
 pub(crate) fn show_client_logs_menu(_runtime: &mut Runtime) {
     let rows: Vec<Vec<String>> = _runtime
         .configuration
@@ -506,7 +462,6 @@ pub(crate) fn show_client_logs_menu(_runtime: &mut Runtime) {
     );
 }
 
-#[cfg(windows)]
 pub(crate) fn show_error_logs_menu(runtime: &mut Runtime) {
     let rows: Vec<Vec<String>> = crate::error_log::entries()
         .into_iter()
@@ -538,7 +493,6 @@ pub(crate) fn show_error_logs_menu(runtime: &mut Runtime) {
     );
 }
 
-#[cfg(windows)]
 fn show_array_columns(
     runtime: &mut Runtime,
     rows: Vec<Vec<String>>,
@@ -598,7 +552,6 @@ fn show_array_columns(
     show_string_items(runtime, &header, lines, menu_string_noop);
 }
 
-#[cfg(windows)]
 fn local_log_time(value: std::time::SystemTime) -> String {
     use std::mem::zeroed;
     use windows_sys::Win32::Foundation::{FILETIME, SYSTEMTIME};
@@ -625,7 +578,6 @@ fn local_log_time(value: std::time::SystemTime) -> String {
     )
 }
 
-#[cfg(windows)]
 fn format_window_styles(styles: i32) -> String {
     use windows_sys::Win32::UI::WindowsAndMessaging::*;
     let mut names = Vec::new();
@@ -663,7 +615,6 @@ fn format_window_styles(styles: i32) -> String {
         names.join("\n    ")
     }
 }
-#[cfg(windows)]
 fn format_extended_styles(styles: i32) -> String {
     use windows_sys::Win32::UI::WindowsAndMessaging::*;
     let mut names = Vec::new();
@@ -702,7 +653,6 @@ fn format_extended_styles(styles: i32) -> String {
     }
 }
 
-#[cfg(windows)]
 pub(crate) fn show_services_menu(runtime: &mut Runtime) {
     let lines = crate::process::list_services().unwrap_or_else(|error| {
         crate::error_log::report_win32("unable to enumerate services", error);
@@ -711,7 +661,6 @@ pub(crate) fn show_services_menu(runtime: &mut Runtime) {
     show_string_items(runtime, "State      Service", lines, menu_string_noop);
 }
 
-#[cfg(windows)]
 fn show_string_items(
     runtime: &mut Runtime,
     header: &str,
@@ -771,12 +720,10 @@ fn show_string_items(
     }
 }
 
-#[cfg(windows)]
 pub(crate) fn bar_snapshot(monitor: usize) -> Option<crate::bar::BarSnapshot> {
     RUNTIME.get()?.try_lock().ok()?.bar_snapshot(monitor)
 }
 
-#[cfg(windows)]
 pub(crate) fn bar_workspace_clicked(monitor: usize, workspace: usize) {
     if let Some(runtime) = RUNTIME.get() {
         if let Ok(mut runtime) = runtime.try_lock() {
@@ -785,7 +732,6 @@ pub(crate) fn bar_workspace_clicked(monitor: usize, workspace: usize) {
     }
 }
 
-#[cfg(windows)]
 pub(crate) fn bar_commands_clicked() {
     if let Some(runtime) = RUNTIME.get() {
         if let Ok(mut runtime) = runtime.try_lock() {
@@ -794,7 +740,6 @@ pub(crate) fn bar_commands_clicked() {
     }
 }
 
-#[cfg(windows)]
 fn get_modifiers_pressed() -> i32 {
     use crate::commands::{LALT, LCTL, LSHIFT, LWIN, RALT, RSHIFT, RWIN};
     use windows_sys::Win32::UI::Input::KeyboardAndMouse::*;
@@ -824,7 +769,6 @@ fn get_modifiers_pressed() -> i32 {
     result
 }
 
-#[cfg(windows)]
 unsafe extern "system" fn handle_key_press(code: i32, wparam: usize, lparam: isize) -> isize {
     use windows_sys::Win32::UI::WindowsAndMessaging::{
         CallNextHookEx, KBDLLHOOKSTRUCT, WM_KEYDOWN, WM_KEYUP, WM_SYSKEYDOWN, WM_SYSKEYUP,
@@ -856,7 +800,6 @@ unsafe extern "system" fn handle_key_press(code: i32, wparam: usize, lparam: isi
     unsafe { CallNextHookEx(std::ptr::null_mut(), code, wparam, lparam) }
 }
 
-#[cfg(windows)]
 unsafe extern "system" fn handle_mouse(code: i32, wparam: usize, lparam: isize) -> isize {
     use windows_sys::Win32::UI::WindowsAndMessaging::{CallNextHookEx, WM_LBUTTONUP};
     if code >= 0 && wparam as u32 == WM_LBUTTONUP {
@@ -869,7 +812,6 @@ unsafe extern "system" fn handle_mouse(code: i32, wparam: usize, lparam: isize) 
     unsafe { CallNextHookEx(std::ptr::null_mut(), code, wparam, lparam) }
 }
 
-#[cfg(windows)]
 unsafe extern "system" fn handle_windows_event(
     _hook: windows_sys::Win32::UI::Accessibility::HWINEVENTHOOK,
     event: u32,
@@ -931,7 +873,6 @@ unsafe extern "system" fn handle_windows_event(
     }
 }
 
-#[cfg(windows)]
 fn is_taskbar(hwnd: windows_sys::Win32::Foundation::HWND) -> bool {
     let mut buffer = [0u16; 256];
     let length = unsafe {
@@ -950,7 +891,6 @@ fn is_taskbar(hwnd: windows_sys::Win32::Foundation::HWND) -> bool {
     )
 }
 
-#[cfg(windows)]
 fn install_win_event_hooks() -> Vec<windows_sys::Win32::UI::Accessibility::HWINEVENTHOOK> {
     use windows_sys::Win32::UI::Accessibility::SetWinEventHook;
     use windows_sys::Win32::UI::WindowsAndMessaging::{
@@ -986,7 +926,6 @@ fn install_win_event_hooks() -> Vec<windows_sys::Win32::UI::Accessibility::HWINE
         .collect()
 }
 
-#[cfg(windows)]
 pub fn run_message_loop() -> Result<(), u32> {
     use std::mem::zeroed;
     use windows_sys::Win32::Foundation::HWND;
@@ -1009,7 +948,6 @@ pub fn run_message_loop() -> Result<(), u32> {
     }
 }
 
-#[cfg(windows)]
 pub fn acquire_single_instance() -> Result<Option<isize>, u32> {
     use windows_sys::Win32::Foundation::{CloseHandle, ERROR_ALREADY_EXISTS, GetLastError};
     use windows_sys::Win32::System::Threading::CreateMutexW;
@@ -1036,12 +974,6 @@ pub fn acquire_single_instance() -> Result<Option<isize>, u32> {
     }
 }
 
-#[cfg(not(windows))]
-pub fn acquire_single_instance() -> Result<Option<isize>, u32> {
-    Ok(Some(0))
-}
-
-#[cfg(windows)]
 pub fn run(runtime: Runtime, instance_mutex: isize) -> Result<(), u32> {
     use windows_sys::Win32::Foundation::{CloseHandle, GetLastError};
     use windows_sys::Win32::System::Com::{
@@ -1126,14 +1058,4 @@ pub fn run(runtime: Runtime, instance_mutex: isize) -> Result<(), u32> {
         CloseHandle(instance_mutex as _);
     }
     result
-}
-
-#[cfg(not(windows))]
-pub fn run(_runtime: crate::runtime::Runtime, _instance_mutex: isize) -> Result<(), u32> {
-    Ok(())
-}
-
-#[cfg(not(windows))]
-pub fn run_message_loop() -> Result<(), u32> {
-    Ok(())
 }

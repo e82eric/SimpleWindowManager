@@ -1,4 +1,3 @@
-#[cfg(windows)]
 mod windows_impl {
     use std::ffi::c_void;
     use std::sync::Mutex;
@@ -158,17 +157,4 @@ mod windows_impl {
     }
 }
 
-#[cfg(windows)]
 pub use windows_impl::*;
-#[cfg(not(windows))]
-pub fn initialize() {}
-#[cfg(not(windows))]
-pub fn shutdown() {}
-#[cfg(not(windows))]
-pub fn volume_percent() -> String {
-    String::new()
-}
-#[cfg(not(windows))]
-pub fn internet_icon() -> String {
-    String::new()
-}

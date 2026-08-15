@@ -18,14 +18,12 @@ pub type ShowArrayColumns = unsafe extern "C" fn(
     *mut c_void,
 );
 
-#[cfg(windows)]
 unsafe fn load_export<T: Copy>(module: isize, name: &'static [u8]) -> Option<T> {
     use windows_sys::Win32::System::LibraryLoader::GetProcAddress;
     let address = unsafe { GetProcAddress(module as _, name.as_ptr()) }?;
     Some(unsafe { std::mem::transmute_copy(&address) })
 }
 
-#[cfg(windows)]
 fn load_adjacent(name: &str) -> Result<isize, u32> {
     use windows_sys::Win32::Foundation::GetLastError;
     use windows_sys::Win32::System::LibraryLoader::{
@@ -52,11 +50,9 @@ fn load_adjacent(name: &str) -> Result<isize, u32> {
     }
 }
 
-#[cfg(windows)]
 use std::os::windows::ffi::OsStrExt;
 
 pub struct LegacyNfm {
-    #[cfg(windows)]
     module: isize,
     pub initialize: unsafe extern "C" fn(),
     pub show_windows_list: unsafe extern "C" fn(OnSelectWindow, OnClosed, *mut c_void),
@@ -72,7 +68,6 @@ pub struct LegacyNfm {
     pub set_menu_location: Option<unsafe extern "C" fn(i32, i32)>,
 }
 
-#[cfg(windows)]
 impl LegacyNfm {
     pub fn load() -> Result<Self, u32> {
         let module = load_adjacent("LibNfm.dll")?;
@@ -108,7 +103,6 @@ impl LegacyNfm {
     }
 }
 
-#[cfg(windows)]
 impl Drop for LegacyNfm {
     fn drop(&mut self) {
         unsafe {
