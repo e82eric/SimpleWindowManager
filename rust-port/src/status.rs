@@ -52,14 +52,17 @@ mod windows_impl {
     pub fn initialize() {
         unsafe {
             let mut enumerator: *mut c_void = std::ptr::null_mut();
-            if CoCreateInstance(
+            let audio_result = CoCreateInstance(
                 &CLSID_MM_DEVICE_ENUMERATOR,
                 std::ptr::null_mut(),
                 CLSCTX_ALL,
                 &IID_MM_DEVICE_ENUMERATOR,
                 &mut enumerator,
-            ) >= 0
-                && !enumerator.is_null()
+            );
+            if crate::error_log::check_hresult(
+                "CoCreateInstance(MMDeviceEnumerator) failed",
+                audio_result,
+            ) && !enumerator.is_null()
             {
                 let get_default: unsafe extern "system" fn(
                     *mut c_void,
@@ -68,7 +71,12 @@ mod windows_impl {
                     *mut *mut c_void,
                 ) -> i32 = std::mem::transmute(method(enumerator, 4));
                 let mut device: *mut c_void = std::ptr::null_mut();
-                if get_default(enumerator, 0, 1, &mut device) >= 0 && !device.is_null() {
+                let default_result = get_default(enumerator, 0, 1, &mut device);
+                if crate::error_log::check_hresult(
+                    "IMMDeviceEnumerator::GetDefaultAudioEndpoint failed",
+                    default_result,
+                ) && !device.is_null()
+                {
                     let activate: unsafe extern "system" fn(
                         *mut c_void,
                         *const GUID,
@@ -77,14 +85,17 @@ mod windows_impl {
                         *mut *mut c_void,
                     ) -> i32 = std::mem::transmute(method(device, 3));
                     let mut endpoint: *mut c_void = std::ptr::null_mut();
-                    if activate(
+                    let activate_result = activate(
                         device,
                         &IID_AUDIO_ENDPOINT_VOLUME,
                         CLSCTX_ALL,
                         std::ptr::null_mut(),
                         &mut endpoint,
-                    ) >= 0
-                        && !endpoint.is_null()
+                    );
+                    if crate::error_log::check_hresult(
+                        "IMMDevice::Activate(IAudioEndpointVolume) failed",
+                        activate_result,
+                    ) && !endpoint.is_null()
                     {
                         *AUDIO.lock().unwrap() = Some(endpoint as usize);
                     }
@@ -93,14 +104,17 @@ mod windows_impl {
                 release(enumerator as usize);
             }
             let mut network: *mut c_void = std::ptr::null_mut();
-            if CoCreateInstance(
+            let network_result = CoCreateInstance(
                 &CLSID_NETWORK_LIST_MANAGER,
                 std::ptr::null_mut(),
                 CLSCTX_ALL,
                 &IID_NETWORK_LIST_MANAGER,
                 &mut network,
-            ) >= 0
-                && !network.is_null()
+            );
+            if crate::error_log::check_hresult(
+                "CoCreateInstance(NetworkListManager) failed",
+                network_result,
+            ) && !network.is_null()
             {
                 *NETWORK.lock().unwrap() = Some(network as usize);
             }
@@ -129,8 +143,18 @@ mod windows_impl {
                 std::mem::transmute(method(endpoint as _, 15));
             let mut scalar = 0.0;
             let mut muted = 0;
-            get_scalar(endpoint as _, &mut scalar);
-            get_mute(endpoint as _, &mut muted);
+            if !crate::error_log::check_hresult(
+                "IAudioEndpointVolume::GetMasterVolumeLevelScalar failed",
+                get_scalar(endpoint as _, &mut scalar),
+            ) {
+                return "  ?%".into();
+            }
+            if !crate::error_log::check_hresult(
+                "IAudioEndpointVolume::GetMute failed",
+                get_mute(endpoint as _, &mut muted),
+            ) {
+                return "  ?%".into();
+            }
             if muted != 0 {
                 scalar = 0.0;
             }
@@ -146,7 +170,11 @@ mod windows_impl {
             let get_connected: unsafe extern "system" fn(*mut c_void, *mut i16) -> i32 =
                 std::mem::transmute(method(network as _, 11));
             let mut connected = 0i16;
-            if get_connected(network as _, &mut connected) < 0 {
+            let result = get_connected(network as _, &mut connected);
+            if !crate::error_log::check_hresult(
+                "INetworkListManager::get_IsConnectedToInternet failed",
+                result,
+            ) {
                 "\u{f128}".into()
             } else if connected != 0 {
                 "\u{ea7a}".into()

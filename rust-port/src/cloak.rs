@@ -40,6 +40,9 @@ pub fn set_cloak_for_window(hwnd: isize, cloak_type: i32, cloak_flag: i32) -> i3
             &mut provider,
         );
         if result < 0 || provider.is_null() {
+            if result < 0 {
+                crate::error_log::report_hresult("CoCreateInstance(ImmersiveShell) failed", result);
+            }
             return result;
         }
         let query: unsafe extern "system" fn(
@@ -55,6 +58,12 @@ pub fn set_cloak_for_window(hwnd: isize, cloak_type: i32, cloak_flag: i32) -> i3
             &IID_APP_VIEW_COLLECTION,
             &mut collection,
         );
+        if result < 0 {
+            crate::error_log::report_hresult(
+                "IServiceProvider::QueryService(ApplicationViewCollection) failed",
+                result,
+            );
+        }
         if result >= 0 && !collection.is_null() {
             let get_view: unsafe extern "system" fn(
                 *mut c_void,
@@ -63,10 +72,19 @@ pub fn set_cloak_for_window(hwnd: isize, cloak_type: i32, cloak_flag: i32) -> i3
             ) -> i32 = std::mem::transmute(method(collection, 6));
             let mut view: *mut c_void = std::ptr::null_mut();
             result = get_view(collection, hwnd as *mut c_void, &mut view);
+            if result < 0 {
+                crate::error_log::report_hresult(
+                    "IApplicationViewCollection::GetViewForHwnd failed",
+                    result,
+                );
+            }
             if result >= 0 && !view.is_null() {
                 let set_cloak: unsafe extern "system" fn(*mut c_void, i32, i32) -> i32 =
                     std::mem::transmute(method(view, 12));
                 result = set_cloak(view, cloak_type, cloak_flag);
+                if result < 0 {
+                    crate::error_log::report_hresult("IApplicationView::SetCloak failed", result);
+                }
                 release(view);
             }
             release(collection);

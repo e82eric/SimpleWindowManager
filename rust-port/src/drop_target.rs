@@ -17,16 +17,37 @@ unsafe extern "system" fn window_proc(
     if message == WM_PAINT {
         let mut paint: PAINTSTRUCT = unsafe { zeroed() };
         let dc = unsafe { BeginPaint(hwnd, &mut paint) };
+        if dc.is_null() {
+            crate::error_log::last_win32("BeginPaint(drop target) failed");
+            return 0;
+        }
         if SHOULD_PAINT.load(std::sync::atomic::Ordering::Relaxed) {
             let brush = unsafe { CreateSolidBrush(0x005a5a00) };
+            if brush.is_null() {
+                crate::error_log::report(
+                    "CreateSolidBrush(drop target) failed",
+                    "returned a null brush",
+                );
+            }
             let mut client = windows_sys::Win32::Foundation::RECT::default();
-            unsafe {
-                GetClientRect(hwnd, &mut client);
-                FillRect(dc, &client, brush);
-                DeleteObject(brush);
+            if unsafe { GetClientRect(hwnd, &mut client) } == 0 {
+                crate::error_log::last_win32("GetClientRect(drop target) failed");
+            }
+            if !brush.is_null() {
+                if unsafe { FillRect(dc, &client, brush) } == 0 {
+                    crate::error_log::report("FillRect(drop target) failed", "returned zero");
+                }
+                if unsafe { DeleteObject(brush) } == 0 {
+                    crate::error_log::report(
+                        "DeleteObject(drop target brush) failed",
+                        "returned zero",
+                    );
+                }
             }
         }
-        unsafe { EndPaint(hwnd, &paint) };
+        if unsafe { EndPaint(hwnd, &paint) } == 0 {
+            crate::error_log::last_win32("EndPaint(drop target) failed");
+        }
         0
     } else {
         unsafe { DefWindowProcW(hwnd, message, wparam, lparam) }
@@ -44,17 +65,36 @@ pub fn create() -> Result<DropTargetWindow, u32> {
         .collect();
     let title: Vec<u16> = "SimpleWM Drop Target\0".encode_utf16().collect();
     let instance = unsafe { GetModuleHandleW(std::ptr::null()) };
+    if instance.is_null() {
+        return Err(crate::error_log::last_win32(
+            "GetModuleHandleW(drop target) failed",
+        ));
+    }
     let mut class: WNDCLASSEXW = unsafe { zeroed() };
     class.cbSize = size_of::<WNDCLASSEXW>() as u32;
     class.style = CS_DBLCLKS | CS_OWNDC | CS_HREDRAW | CS_VREDRAW;
     class.lpfnWndProc = Some(window_proc);
     class.hInstance = instance;
     class.hIcon = unsafe { LoadIconW(std::ptr::null_mut(), IDI_APPLICATION) };
+    if class.hIcon.is_null() {
+        crate::error_log::last_win32("LoadIconW(drop target) failed");
+    }
     class.hIconSm = class.hIcon;
     class.hCursor = unsafe { LoadCursorW(std::ptr::null_mut(), IDC_ARROW) };
+    if class.hCursor.is_null() {
+        crate::error_log::last_win32("LoadCursorW(drop target) failed");
+    }
     class.hbrBackground = unsafe { GetStockObject(BLACK_BRUSH) } as _;
+    if class.hbrBackground.is_null() {
+        crate::error_log::report(
+            "GetStockObject(BLACK_BRUSH) failed",
+            "returned a null object",
+        );
+    }
     class.lpszClassName = name.as_ptr();
-    unsafe { RegisterClassExW(&class) };
+    if unsafe { RegisterClassExW(&class) } == 0 {
+        crate::error_log::last_win32("RegisterClassExW(drop target) failed");
+    }
     let hwnd = unsafe {
         CreateWindowExW(
             WS_EX_PALETTEWINDOW | WS_EX_NOACTIVATE | WS_EX_LAYERED,
@@ -72,9 +112,13 @@ pub fn create() -> Result<DropTargetWindow, u32> {
         )
     };
     if hwnd.is_null() {
-        return Err(unsafe { GetLastError() });
+        let error = unsafe { GetLastError() };
+        crate::error_log::report_win32("CreateWindowExW(drop target) failed", error);
+        return Err(error);
     }
-    unsafe { SetLayeredWindowAttributes(hwnd, 0x00ff_ffff, 127, LWA_ALPHA) };
+    if unsafe { SetLayeredWindowAttributes(hwnd, 0x00ff_ffff, 127, LWA_ALPHA) } == 0 {
+        crate::error_log::last_win32("SetLayeredWindowAttributes(drop target) failed");
+    }
     Ok(DropTargetWindow {
         hwnd: hwnd as isize,
     })
@@ -84,7 +128,7 @@ pub fn show(window: &DropTargetWindow, rect: crate::Rect, topmost: bool, should_
     use windows_sys::Win32::UI::WindowsAndMessaging::*;
     SHOULD_PAINT.store(should_paint, std::sync::atomic::Ordering::Relaxed);
     unsafe {
-        SetWindowPos(
+        if SetWindowPos(
             window.hwnd as _,
             if topmost { HWND_TOPMOST } else { HWND_TOP },
             rect.left,
@@ -92,7 +136,10 @@ pub fn show(window: &DropTargetWindow, rect: crate::Rect, topmost: bool, should_
             rect.right - rect.left,
             rect.bottom - rect.top,
             SWP_SHOWWINDOW,
-        );
+        ) == 0
+        {
+            crate::error_log::last_win32("SetWindowPos(show drop target) failed");
+        }
     }
 }
 

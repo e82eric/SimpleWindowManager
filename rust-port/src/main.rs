@@ -3,10 +3,13 @@
 use simple_window_manager_rs::Configuration;
 
 fn main() {
+    simple_window_manager_rs::error_log::initialize();
     // The C entry point becomes DPI-aware before reading any monitor or window
     // geometry. Doing this later mixes virtualized and physical coordinates.
     unsafe {
-        windows_sys::Win32::UI::WindowsAndMessaging::SetProcessDPIAware();
+        if windows_sys::Win32::UI::WindowsAndMessaging::SetProcessDPIAware() == 0 {
+            simple_window_manager_rs::error_log::last_win32("SetProcessDPIAware failed");
+        }
     }
     let instance_mutex = match simple_window_manager_rs::platform::acquire_single_instance() {
         Ok(Some(handle)) => handle,

@@ -32,6 +32,7 @@ pub fn restore_moved_windows_to_screen(no_restore: bool) -> Result<(), u32> {
             let hwnd = window.data.hwnd as HWND;
             let mut rect: RECT = zeroed();
             if GetWindowRect(hwnd, &mut rect) == 0 {
+                crate::error_log::last_win32("GetWindowRect(restore moved window) failed");
                 continue;
             }
             if rect.right > screen_right
@@ -53,7 +54,12 @@ pub fn restore_moved_windows_to_screen(no_restore: bool) -> Result<(), u32> {
                         SWP_NOSIZE | SWP_NOZORDER,
                     ) == 0
                 {
-                    return Err(GetLastError());
+                    let error = GetLastError();
+                    crate::error_log::report_win32(
+                        "SetWindowPos(restore moved window) failed",
+                        error,
+                    );
+                    return Err(error);
                 }
             }
         }

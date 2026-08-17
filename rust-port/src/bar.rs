@@ -2,7 +2,7 @@
 pub struct BarSnapshot {
     pub monitor_index: usize,
     pub selected_monitor: bool,
-    pub tags: Vec<(String, bool, bool, bool)>,
+    pub tags: Vec<(usize, String, bool, bool, bool)>,
     pub workspace_info: String,
     pub focused_window: String,
     pub segments: Vec<RenderedSegment>,
@@ -46,38 +46,64 @@ unsafe extern "system" fn bar_message_loop(
         WM_NCCREATE => {
             let create = unsafe { &*(lparam as *const CREATESTRUCTW) };
             unsafe {
+                windows_sys::Win32::Foundation::SetLastError(0);
                 SetWindowLongPtrW(hwnd, GWLP_USERDATA, create.lpCreateParams as isize);
+                let error = windows_sys::Win32::Foundation::GetLastError();
+                if error != 0 {
+                    crate::error_log::report_win32("SetWindowLongPtrW(bar userdata) failed", error);
+                    return 0;
+                }
             }
             1
         }
         WM_PAINT => {
-            let monitor =
-                unsafe { GetWindowLongPtrW(hwnd, GWLP_USERDATA) as usize }.saturating_sub(1);
+            unsafe { windows_sys::Win32::Foundation::SetLastError(0) };
+            let userdata = unsafe { GetWindowLongPtrW(hwnd, GWLP_USERDATA) };
+            let userdata_error = unsafe { windows_sys::Win32::Foundation::GetLastError() };
+            if userdata == 0 && userdata_error != 0 {
+                crate::error_log::report_win32(
+                    "GetWindowLongPtrW(bar userdata) failed",
+                    userdata_error,
+                );
+            }
+            let monitor = (userdata as usize).saturating_sub(1);
             let Some(snapshot) = crate::platform::bar_snapshot(monitor) else {
                 return unsafe { DefWindowProcW(hwnd, message, wparam, lparam) };
             };
             let mut paint: PAINTSTRUCT = unsafe { zeroed() };
             let dc = unsafe { BeginPaint(hwnd, &mut paint) };
+            if dc.is_null() {
+                crate::error_log::last_win32("BeginPaint(bar) failed");
+                return 0;
+            }
             let mut client: RECT = unsafe { zeroed() };
-            unsafe {
-                GetClientRect(hwnd, &mut client);
+            if unsafe { GetClientRect(hwnd, &mut client) } == 0 {
+                crate::error_log::last_win32("GetClientRect(bar) failed");
             }
             paint_skia(dc, client.right, client.bottom, &snapshot);
-            unsafe {
-                EndPaint(hwnd, &paint);
+            if unsafe { EndPaint(hwnd, &paint) } == 0 {
+                crate::error_log::last_win32("EndPaint(bar) failed");
             }
             0
         }
         WM_TIMER => {
-            unsafe {
-                InvalidateRect(hwnd, std::ptr::null(), 0);
+            if unsafe { InvalidateRect(hwnd, std::ptr::null(), 0) } == 0 {
+                crate::error_log::last_win32("InvalidateRect(bar timer) failed");
             }
             0
         }
         WM_ERASEBKGND => 1,
         WM_LBUTTONDOWN => {
-            let monitor =
-                unsafe { GetWindowLongPtrW(hwnd, GWLP_USERDATA) as usize }.saturating_sub(1);
+            unsafe { windows_sys::Win32::Foundation::SetLastError(0) };
+            let userdata = unsafe { GetWindowLongPtrW(hwnd, GWLP_USERDATA) };
+            let userdata_error = unsafe { windows_sys::Win32::Foundation::GetLastError() };
+            if userdata == 0 && userdata_error != 0 {
+                crate::error_log::report_win32(
+                    "GetWindowLongPtrW(bar userdata) failed",
+                    userdata_error,
+                );
+            }
+            let monitor = (userdata as usize).saturating_sub(1);
             let x = lparam as i16 as i32;
             if let Some(snapshot) = crate::platform::bar_snapshot(monitor)
                 && let Some(workspace) = workspace_at_x(&snapshot, x)
@@ -91,8 +117,8 @@ unsafe extern "system" fn bar_message_loop(
             0
         }
         WM_CLOSE => {
-            unsafe {
-                DestroyWindow(hwnd);
+            if unsafe { DestroyWindow(hwnd) } == 0 {
+                crate::error_log::last_win32("DestroyWindow(bar) failed");
             }
             0
         }
@@ -135,7 +161,7 @@ fn workspace_at_x(snapshot: &BarSnapshot, x: i32) -> Option<usize> {
         if x >= left + REGION_PADDING && x < right - REGION_PADDING {
             let index = start + ((x - left - REGION_PADDING) / TAG_WIDTH) as usize;
             if index < end {
-                return Some(index);
+                return Some(snapshot.tags[index].0);
             }
         }
     }
@@ -163,7 +189,8 @@ fn paint_skia(
         return;
     };
     let canvas = surface.canvas();
-    canvas.clear(skia_safe::Color::from_rgb(0x1d, 0x20, 0x21));
+    // canvas.clear(skia_safe::Color::from_rgb(0x1d, 0x20, 0x21));
+    canvas.clear(skia_safe::Color::from_rgb(0x3c, 0x38, 0x36));
 
     let manager = FontMgr::default();
     let typeface = resolve_bar_typeface(&manager, &snapshot.font_name, FontStyle::normal())
@@ -183,7 +210,7 @@ fn paint_skia(
         let region = Rect::new(*left, top, *right, bottom);
         draw_region(canvas, region, snapshot.selected_monitor);
         for index in *start..*end {
-            let (tag, selected, has_clients, is_icon) = &snapshot.tags[index];
+            let (_, tag, selected, has_clients, is_icon) = &snapshot.tags[index];
             let item_left = *left + REGION_PADDING + (index - *start) as f32 * TAG_WIDTH;
             let item = Rect::new(item_left, top + 3.0, item_left + TAG_WIDTH, bottom - 3.0);
             if *selected {
@@ -302,7 +329,7 @@ fn paint_skia(
         ..Default::default()
     };
     unsafe {
-        StretchDIBits(
+        let copied = StretchDIBits(
             dc,
             0,
             0,
@@ -317,6 +344,9 @@ fn paint_skia(
             DIB_RGB_COLORS,
             SRCCOPY,
         );
+        if copied == -1 {
+            crate::error_log::last_win32("StretchDIBits(bar) failed");
+        }
     }
 }
 
@@ -374,7 +404,8 @@ fn draw_region(canvas: &skia_safe::Canvas, rect: skia_safe::Rect, _selected_moni
 
     let mut panel = Paint::default();
     panel.set_anti_alias(true);
-    panel.set_color(Color::from_rgb(0x3c, 0x38, 0x36));
+    // panel.set_color(Color::from_rgb(0x3c, 0x38, 0x36));
+    panel.set_color(Color::from_rgb(0x28, 0x28, 0x28));
     canvas.draw_round_rect(rect, 8.0, 8.0, &panel);
 }
 
@@ -402,17 +433,28 @@ pub fn create_bars(monitors: &[crate::Monitor], bar_height: i32) -> Result<Vec<B
     use windows_sys::Win32::UI::WindowsAndMessaging::*;
     let class_name: Vec<u16> = "keys2BarWindowClass\0".encode_utf16().collect();
     let instance = unsafe { GetModuleHandleW(std::ptr::null()) };
+    if instance.is_null() {
+        return Err(crate::error_log::last_win32("GetModuleHandleW(bar) failed"));
+    }
     let mut class: WNDCLASSEXW = unsafe { zeroed() };
     class.cbSize = size_of::<WNDCLASSEXW>() as u32;
     class.lpfnWndProc = Some(bar_message_loop);
     class.hInstance = instance;
     class.lpszClassName = class_name.as_ptr();
     class.hCursor = unsafe { LoadCursorW(std::ptr::null_mut(), IDC_ARROW) };
+    if class.hCursor.is_null() {
+        crate::error_log::last_win32("LoadCursorW(bar) failed");
+    }
     class.hIcon = unsafe { LoadIconW(std::ptr::null_mut(), IDI_APPLICATION) };
+    if class.hIcon.is_null() {
+        crate::error_log::last_win32("LoadIconW(bar) failed");
+    }
     class.hIconSm = class.hIcon;
     class.hbrBackground = std::ptr::null_mut();
     unsafe {
-        RegisterClassExW(&class);
+        if RegisterClassExW(&class) == 0 {
+            crate::error_log::last_win32("RegisterClassExW(bar) failed");
+        }
     }
     let title: Vec<u16> = "SimpleWM Bar\0".encode_utf16().collect();
     let mut result = Vec::new();
@@ -446,13 +488,21 @@ pub fn create_bars(monitors: &[crate::Monitor], bar_height: i32) -> Result<Vec<B
             )
         };
         if hwnd.is_null() {
-            return Err(unsafe { GetLastError() });
+            let error = unsafe { GetLastError() };
+            crate::error_log::report_win32("CreateWindowExW(bar) failed", error);
+            return Err(error);
         }
         unsafe {
-            ShowScrollBar(hwnd, SB_BOTH, 0);
-            SetTimer(hwnd, 0, 1500, None);
+            if ShowScrollBar(hwnd, SB_BOTH, 0) == 0 {
+                crate::error_log::last_win32("ShowScrollBar(bar) failed");
+            }
+            if SetTimer(hwnd, 0, 1500, None) == 0 {
+                crate::error_log::last_win32("SetTimer(bar) failed");
+            }
             ShowWindow(hwnd, SW_SHOWDEFAULT);
-            windows_sys::Win32::Graphics::Gdi::UpdateWindow(hwnd);
+            if windows_sys::Win32::Graphics::Gdi::UpdateWindow(hwnd) == 0 {
+                crate::error_log::last_win32("UpdateWindow(bar) failed");
+            }
         }
         result.push(BarWindow {
             hwnd: hwnd as isize,
@@ -465,7 +515,11 @@ pub fn create_bars(monitors: &[crate::Monitor], bar_height: i32) -> Result<Vec<B
 pub fn redraw(bars: &[BarWindow]) {
     for bar in bars {
         unsafe {
-            windows_sys::Win32::Graphics::Gdi::InvalidateRect(bar.hwnd as _, std::ptr::null(), 0);
+            if windows_sys::Win32::Graphics::Gdi::InvalidateRect(bar.hwnd as _, std::ptr::null(), 0)
+                == 0
+            {
+                crate::error_log::last_win32("InvalidateRect(bar redraw) failed");
+            }
         }
     }
 }
@@ -551,7 +605,9 @@ fn memory_percent() -> String {
     let mut value: MEMORYSTATUSEX = unsafe { zeroed() };
     value.dwLength = size_of::<MEMORYSTATUSEX>() as u32;
     unsafe {
-        GlobalMemoryStatusEx(&mut value);
+        if GlobalMemoryStatusEx(&mut value) == 0 {
+            crate::error_log::last_win32("GlobalMemoryStatusEx failed");
+        }
     }
     format!("{:3}%", value.dwMemoryLoad)
 }
@@ -575,6 +631,7 @@ fn cpu_percent() -> String {
     let mut kernel: FILETIME = unsafe { zeroed() };
     let mut user: FILETIME = unsafe { zeroed() };
     if unsafe { GetSystemTimes(&mut idle, &mut kernel, &mut user) } == 0 {
+        crate::error_log::last_win32("GetSystemTimes failed");
         return "  0%".into();
     }
     let value = |time: FILETIME| (time.dwHighDateTime as u64) << 32 | time.dwLowDateTime as u64;

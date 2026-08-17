@@ -58,7 +58,14 @@ pub fn focus_selected_window(selection: &str) -> bool {
     };
     unsafe {
         ShowWindow(hwnd as _, SW_RESTORE);
-        SetForegroundWindow(hwnd as _) != 0
+        let focused = SetForegroundWindow(hwnd as _) != 0;
+        if !focused {
+            crate::error_log::report(
+                "SetForegroundWindow(selected window) was denied",
+                "returned zero",
+            );
+        }
+        focused
     }
 }
 

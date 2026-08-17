@@ -149,6 +149,7 @@ impl Runtime {
         Ok(())
     }
 
+    #[tracing::instrument(skip(self), fields(hwnd = hwnd as usize))]
     pub fn refresh_window(&mut self, hwnd: isize) -> Result<(), u32> {
         if let Some(client) = self
             .configuration
@@ -194,6 +195,7 @@ impl Runtime {
         Ok(())
     }
 
+    #[tracing::instrument(skip(self), fields(hwnd = hwnd as usize))]
     pub fn location_changed(&mut self, hwnd: isize) -> Result<(), u32> {
         let client_id = self
             .configuration
@@ -253,6 +255,7 @@ impl Runtime {
         )
     }
 
+    #[tracing::instrument(skip(self), fields(hwnd = hwnd as usize))]
     pub fn foreground_changed(&mut self, hwnd: isize) {
         if let Some(preserved) = self.workspace_move_foreground {
             if hwnd != preserved && is_window(preserved) {
@@ -329,6 +332,7 @@ impl Runtime {
         true
     }
 
+    #[tracing::instrument(skip(self))]
     pub fn execute(&mut self, action: Action) -> Result<(), u32> {
         use Action::*;
         if matches!(
@@ -446,6 +450,7 @@ impl Runtime {
             .unwrap()
     }
 
+    #[tracing::instrument(skip(self), fields(workspace = workspace.0))]
     fn apply_workspace(&mut self, workspace: WorkspaceId) -> Result<(), u32> {
         self.configuration.state.arrange_workspace(workspace);
         apply_workspace_windows(
@@ -874,6 +879,10 @@ impl Runtime {
         center_window_on_monitor(hwnd, monitor);
     }
 
+    #[tracing::instrument(
+        skip(self),
+        fields(workspace = workspace.0, monitor = monitor.0)
+    )]
     fn move_workspace_to_monitor(
         &mut self,
         workspace: WorkspaceId,
@@ -1081,8 +1090,11 @@ impl Runtime {
             .state
             .workspaces
             .iter()
-            .map(|item| {
+            .enumerate()
+            .filter(|(_, item)| item.monitor.is_some() || !item.clients.is_empty())
+            .map(|(index, item)| {
                 (
+                    index,
                     item.tag.clone(),
                     item.monitor == Some(MonitorId(monitor_index)),
                     !item.clients.is_empty(),
@@ -1707,13 +1719,17 @@ fn cursor_position() -> Option<(i32, i32)> {
     use std::mem::zeroed;
     use windows_sys::Win32::Foundation::POINT;
     let mut point: POINT = unsafe { zeroed() };
-    (unsafe { windows_sys::Win32::UI::WindowsAndMessaging::GetCursorPos(&mut point) } != 0)
-        .then_some((point.x, point.y))
+    if unsafe { windows_sys::Win32::UI::WindowsAndMessaging::GetCursorPos(&mut point) } == 0 {
+        crate::error_log::last_win32("GetCursorPos failed");
+        None
+    } else {
+        Some((point.x, point.y))
+    }
 }
 fn set_foreground_window(hwnd: isize) {
-    unsafe {
-        windows_sys::Win32::UI::WindowsAndMessaging::SetForegroundWindow(hwnd as _);
-    }
+    // Windows may deny foreground activation as normal focus-stealing policy.
+    // Callers already preserve their state and retry where appropriate.
+    let _ = unsafe { windows_sys::Win32::UI::WindowsAndMessaging::SetForegroundWindow(hwnd as _) };
 }
 fn is_window(hwnd: isize) -> bool {
     unsafe { windows_sys::Win32::UI::WindowsAndMessaging::IsWindow(hwnd as _) != 0 }
@@ -1723,7 +1739,7 @@ fn nudge_set_foreground_window(hwnd: isize) {
     use windows_sys::Win32::UI::Input::KeyboardAndMouse::keybd_event;
     unsafe {
         keybd_event(0, 0, 0, 0);
-        windows_sys::Win32::UI::WindowsAndMessaging::SetForegroundWindow(hwnd as _);
+        let _ = windows_sys::Win32::UI::WindowsAndMessaging::SetForegroundWindow(hwnd as _);
     }
 }
 
@@ -1741,21 +1757,26 @@ fn show_unmanaged_window_on_selected_monitor(hwnd: isize, monitor: &Monitor) {
         BringWindowToTop, MoveWindow, SW_SHOWDEFAULT, SetForegroundWindow, ShowWindow,
     };
     unsafe {
-        SetForegroundWindow(hwnd as _);
+        let _ = SetForegroundWindow(hwnd as _);
         ShowWindow(hwnd as _, SW_SHOWDEFAULT);
-        BringWindowToTop(hwnd as _);
+        if BringWindowToTop(hwnd as _) == 0 {
+            crate::error_log::last_win32("BringWindowToTop(unmanaged window) failed");
+        }
     }
     if let Some(rect) = window_rect(hwnd) {
         if rect.left > monitor.x_offset + monitor.width || rect.left < monitor.x_offset {
             unsafe {
-                MoveWindow(
+                if MoveWindow(
                     hwnd as _,
                     monitor.x_offset + monitor.gap_width * 2,
                     rect.top,
                     rect.right - rect.left,
                     rect.bottom - rect.top,
                     1,
-                );
+                ) == 0
+                {
+                    crate::error_log::last_win32("MoveWindow(unmanaged window) failed");
+                }
             }
         }
     }
@@ -1783,19 +1804,26 @@ fn kill_focused_window() -> Result<(), u32> {
         GetForegroundWindow, GetWindowThreadProcessId,
     };
     let mut process_id = 0;
-    unsafe {
-        GetWindowThreadProcessId(GetForegroundWindow(), &mut process_id);
+    if unsafe { GetWindowThreadProcessId(GetForegroundWindow(), &mut process_id) } == 0 {
+        return Err(crate::error_log::last_win32(
+            "GetWindowThreadProcessId(focused window) failed",
+        ));
     }
     let process = unsafe { OpenProcess(PROCESS_TERMINATE, 0, process_id) };
     if process.is_null() {
-        return Err(unsafe { GetLastError() });
+        let error = unsafe { GetLastError() };
+        crate::error_log::report_win32("OpenProcess(PROCESS_TERMINATE) failed", error);
+        return Err(error);
     }
     let result = unsafe { TerminateProcess(process, 1) };
-    unsafe {
-        CloseHandle(process);
+    let terminate_error = (result == 0).then(|| unsafe { GetLastError() });
+    if unsafe { CloseHandle(process) } == 0 {
+        crate::error_log::last_win32("CloseHandle(terminated process) failed");
     }
     if result == 0 {
-        Err(unsafe { GetLastError() })
+        let error = terminate_error.unwrap();
+        crate::error_log::report_win32("TerminateProcess failed", error);
+        Err(error)
     } else {
         Ok(())
     }
@@ -1809,14 +1837,17 @@ fn minimize_focused_window() {
     }
 }
 fn redraw_focused_window() {
-    unsafe {
+    if unsafe {
         windows_sys::Win32::Graphics::Gdi::RedrawWindow(
             windows_sys::Win32::UI::WindowsAndMessaging::GetForegroundWindow(),
             std::ptr::null(),
             std::ptr::null_mut(),
             windows_sys::Win32::Graphics::Gdi::RDW_ERASE
                 | windows_sys::Win32::Graphics::Gdi::RDW_INVALIDATE,
-        );
+        )
+    } == 0
+    {
+        crate::error_log::last_win32("RedrawWindow(focused window) failed");
     }
 }
 fn taskbar_toggle() {
@@ -1827,7 +1858,7 @@ fn taskbar_toggle() {
         if hwnd.is_null() {
             return;
         }
-        let visible = GetWindowLongW(hwnd, GWL_STYLE) & WS_VISIBLE as i32 != 0;
+        let visible = runtime_window_long(hwnd as isize, GWL_STYLE) & WS_VISIBLE as i32 != 0;
         ShowWindow(hwnd, if visible { SW_HIDE } else { SW_SHOW });
         let secondary: Vec<u16> = "Shell_SecondaryTrayWnd\0".encode_utf16().collect();
         ShowWindow(
@@ -1841,11 +1872,12 @@ fn taskbar_height(hwnd: isize) -> i32 {
     use windows_sys::Win32::Foundation::RECT;
     use windows_sys::Win32::UI::WindowsAndMessaging::*;
     unsafe {
-        if GetWindowLongW(hwnd as _, GWL_STYLE) & WS_VISIBLE as i32 == 0 {
+        if runtime_window_long(hwnd, GWL_STYLE) & WS_VISIBLE as i32 == 0 {
             return 0;
         }
         let mut rect: RECT = zeroed();
         if GetWindowRect(hwnd as _, &mut rect) == 0 {
+            crate::error_log::last_win32("GetWindowRect(taskbar) failed");
             0
         } else {
             rect.bottom - rect.top
@@ -1857,7 +1889,7 @@ fn stop_managing_window(hwnd: isize, monitor: &Monitor) {
         SWP_SHOWWINDOW, SetForegroundWindow, SetWindowPos,
     };
     unsafe {
-        SetWindowPos(
+        if SetWindowPos(
             hwnd as _,
             std::ptr::null_mut(),
             monitor.x_offset,
@@ -1865,8 +1897,16 @@ fn stop_managing_window(hwnd: isize, monitor: &Monitor) {
             monitor.width,
             monitor.height,
             SWP_SHOWWINDOW,
-        );
-        SetForegroundWindow(hwnd as _);
+        ) == 0
+        {
+            crate::error_log::last_win32("SetWindowPos(stop managing) failed");
+        }
+        if SetForegroundWindow(hwnd as _) == 0 {
+            crate::error_log::report(
+                "SetForegroundWindow(stop managing) was denied",
+                "returned zero",
+            );
+        }
     }
 }
 fn move_window_by(hwnd: isize, dx: i32, dy: i32) {
@@ -1876,15 +1916,20 @@ fn move_window_by(hwnd: isize, dx: i32, dy: i32) {
     let mut rect: RECT = unsafe { zeroed() };
     if unsafe { GetWindowRect(hwnd as _, &mut rect) } != 0 {
         unsafe {
-            MoveWindow(
+            if MoveWindow(
                 hwnd as _,
                 rect.left + dx,
                 rect.top + dy,
                 rect.right - rect.left,
                 rect.bottom - rect.top,
                 0,
-            );
+            ) == 0
+            {
+                crate::error_log::last_win32("MoveWindow(offset) failed");
+            }
         }
+    } else {
+        crate::error_log::last_win32("GetWindowRect(move by offset) failed");
     }
 }
 
@@ -1899,7 +1944,7 @@ fn center_window_on_monitor(hwnd: isize, monitor: &Monitor) {
         let x = monitor.x_offset + (monitor.width - (rect.right - rect.left)) / 2;
         let y = (monitor.height - (rect.bottom - rect.top)) / 2;
         unsafe {
-            SetWindowPos(
+            if SetWindowPos(
                 hwnd as _,
                 std::ptr::null_mut(),
                 x,
@@ -1907,8 +1952,13 @@ fn center_window_on_monitor(hwnd: isize, monitor: &Monitor) {
                 0,
                 0,
                 SWP_NOSIZE | SWP_NOZORDER,
-            );
+            ) == 0
+            {
+                crate::error_log::last_win32("SetWindowPos(center window) failed");
+            }
         }
+    } else {
+        crate::error_log::last_win32("GetWindowRect(center window) failed");
     }
 }
 
@@ -1917,12 +1967,17 @@ fn window_rect(hwnd: isize) -> Option<Rect> {
     use windows_sys::Win32::Foundation::RECT;
     use windows_sys::Win32::UI::WindowsAndMessaging::GetWindowRect;
     let mut rect: RECT = unsafe { zeroed() };
-    (unsafe { GetWindowRect(hwnd as _, &mut rect) } != 0).then_some(Rect {
-        left: rect.left,
-        top: rect.top,
-        right: rect.right,
-        bottom: rect.bottom,
-    })
+    if unsafe { GetWindowRect(hwnd as _, &mut rect) } == 0 {
+        crate::error_log::last_win32("GetWindowRect failed");
+        None
+    } else {
+        Some(Rect {
+            left: rect.left,
+            top: rect.top,
+            right: rect.right,
+            bottom: rect.bottom,
+        })
+    }
 }
 
 fn hit_test_hwnd(hwnd: isize) -> bool {
@@ -1966,12 +2021,26 @@ fn current_modifiers() -> i32 {
 
 fn has_float_styles(hwnd: isize) -> bool {
     use windows_sys::Win32::UI::WindowsAndMessaging::*;
-    let styles = unsafe { GetWindowLongW(hwnd as _, GWL_STYLE) };
-    let ex_styles = unsafe { GetWindowLongW(hwnd as _, GWL_EXSTYLE) };
+    let styles = runtime_window_long(hwnd, GWL_STYLE);
+    let ex_styles = runtime_window_long(hwnd, GWL_EXSTYLE);
     if ex_styles & WS_EX_APPWINDOW as i32 != 0 {
         false
     } else {
         ex_styles & WS_EX_TOOLWINDOW as i32 != 0 || styles & WS_SIZEBOX as i32 == 0
+    }
+}
+
+fn runtime_window_long(hwnd: isize, index: i32) -> i32 {
+    use windows_sys::Win32::Foundation::{GetLastError, SetLastError};
+    use windows_sys::Win32::UI::WindowsAndMessaging::GetWindowLongW;
+    unsafe {
+        SetLastError(0);
+        let value = GetWindowLongW(hwnd as _, index);
+        let error = GetLastError();
+        if value == 0 && error != 0 {
+            crate::error_log::report_win32(format!("GetWindowLongW({index}) failed"), error);
+        }
+        value
     }
 }
 
@@ -1989,17 +2058,25 @@ fn is_fullscreen(hwnd: isize) -> bool {
     };
     let mut info: MONITORINFO = unsafe { zeroed() };
     info.cbSize = size_of::<MONITORINFO>() as u32;
-    (unsafe {
-        GetMonitorInfoW(
-            MonitorFromWindow(hwnd as _, MONITOR_DEFAULTTOPRIMARY),
-            &mut info,
-        ) != 0
-    }) && rect.left == info.rcMonitor.left
+    let monitor = unsafe { MonitorFromWindow(hwnd as _, MONITOR_DEFAULTTOPRIMARY) };
+    if monitor.is_null() {
+        crate::error_log::report("MonitorFromWindow failed", "returned a null monitor");
+        return false;
+    }
+    if unsafe { GetMonitorInfoW(monitor, &mut info) } == 0 {
+        crate::error_log::last_win32("GetMonitorInfoW(fullscreen check) failed");
+        return false;
+    }
+    rect.left == info.rcMonitor.left
         && rect.top == info.rcMonitor.top
         && rect.right == info.rcMonitor.right
         && rect.bottom == info.rcMonitor.bottom
 }
 
+#[tracing::instrument(
+    skip(state),
+    fields(workspace = workspace_id.0, always_redraw, hidden_x, use_old_move_logic)
+)]
 fn apply_workspace_windows(
     state: &mut WindowManagerState,
     workspace_id: WorkspaceId,
@@ -2021,7 +2098,9 @@ fn apply_workspace_windows(
         .is_some_and(|monitor| state.monitors[monitor.0].is_hidden);
     let mut defer = unsafe { BeginDeferWindowPos(workspace.clients.len() as i32 + 1) };
     if defer.is_null() {
-        return Err(unsafe { GetLastError() });
+        let error = unsafe { GetLastError() };
+        crate::error_log::report_win32("BeginDeferWindowPos failed", error);
+        return Err(error);
     }
     for client_id in workspace.clients.iter().rev() {
         let client = state.clients[client_id.0].as_mut().unwrap();
@@ -2035,13 +2114,21 @@ fn apply_workspace_windows(
         let hwnd = client.data.hwnd as HWND;
         let mut window_rect: RECT = unsafe { zeroed() };
         let mut frame_rect: RECT = unsafe { zeroed() };
-        unsafe {
-            GetWindowRect(hwnd, &mut window_rect);
+        if unsafe { GetWindowRect(hwnd, &mut window_rect) } == 0 {
+            crate::error_log::last_win32("GetWindowRect(arrange workspace) failed");
+        }
+        let frame_result = unsafe {
             DwmGetWindowAttribute(
                 hwnd,
                 9,
                 &mut frame_rect as *mut _ as _,
                 size_of::<RECT>() as u32,
+            )
+        };
+        if frame_result < 0 {
+            crate::error_log::report_hresult(
+                "DwmGetWindowAttribute(extended frame bounds) failed",
+                frame_result,
             );
         }
         let left_border = frame_rect.left - window_rect.left;
@@ -2058,12 +2145,18 @@ fn apply_workspace_windows(
         let target_height =
             client.data.rect.bottom - client.data.rect.top + top_border + bottom_border;
         let mut cloaked = 0u32;
-        unsafe {
+        let cloak_result = unsafe {
             DwmGetWindowAttribute(
                 hwnd,
                 DWMWA_CLOAKED as u32,
                 &mut cloaked as *mut _ as _,
                 size_of::<u32>() as u32,
+            )
+        };
+        if cloak_result < 0 {
+            crate::error_log::report_hresult(
+                "DwmGetWindowAttribute(cloaked state) failed",
+                cloak_result,
             );
         }
         if window_matches_target(
@@ -2084,17 +2177,20 @@ fn apply_workspace_windows(
         }
         if use_old_move_logic {
             unsafe {
-                MoveWindow(
+                if MoveWindow(
                     hwnd,
                     target_left,
                     target_top,
                     target_width,
                     target_height,
                     0,
-                );
+                ) == 0
+                {
+                    crate::error_log::last_win32("MoveWindow(arrange workspace) failed");
+                }
                 ShowWindow(hwnd, SW_RESTORE);
                 if client.is_visible {
-                    SetWindowPos(
+                    if SetWindowPos(
                         hwnd,
                         HWND_TOPMOST,
                         0,
@@ -2102,8 +2198,11 @@ fn apply_workspace_windows(
                         0,
                         0,
                         SWP_SHOWWINDOW | SWP_NOSIZE | SWP_NOMOVE,
-                    );
-                    SetWindowPos(
+                    ) == 0
+                    {
+                        crate::error_log::last_win32("SetWindowPos(set topmost) failed");
+                    }
+                    if SetWindowPos(
                         hwnd,
                         HWND_NOTOPMOST,
                         0,
@@ -2111,9 +2210,12 @@ fn apply_workspace_windows(
                         0,
                         0,
                         SWP_SHOWWINDOW | SWP_NOSIZE | SWP_NOMOVE,
-                    );
+                    ) == 0
+                    {
+                        crate::error_log::last_win32("SetWindowPos(clear topmost) failed");
+                    }
                 } else {
-                    SetWindowPos(
+                    if SetWindowPos(
                         hwnd,
                         HWND_BOTTOM,
                         0,
@@ -2121,7 +2223,10 @@ fn apply_workspace_windows(
                         0,
                         0,
                         SWP_SHOWWINDOW | SWP_NOSIZE | SWP_NOMOVE,
-                    );
+                    ) == 0
+                    {
+                        crate::error_log::last_win32("SetWindowPos(hidden window z-order) failed");
+                    }
                 }
             }
             client.data.is_dirty = false;
@@ -2145,7 +2250,9 @@ fn apply_workspace_windows(
             )
         };
         if defer.is_null() {
-            return Err(unsafe { GetLastError() });
+            let error = unsafe { GetLastError() };
+            crate::error_log::report_win32("DeferWindowPos failed", error);
+            return Err(error);
         }
         client.data.is_dirty = false;
         if client.data.use_minimize_to_hide && !workspace_hidden {
@@ -2153,7 +2260,9 @@ fn apply_workspace_windows(
         }
     }
     if unsafe { EndDeferWindowPos(defer) } == 0 {
-        return Err(unsafe { GetLastError() });
+        let error = unsafe { GetLastError() };
+        crate::error_log::report_win32("EndDeferWindowPos failed", error);
+        return Err(error);
     }
     Ok(())
 }

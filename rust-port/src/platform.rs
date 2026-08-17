@@ -10,7 +10,9 @@ where
     T: Send + 'static,
     F: FnOnce(rust_nfm::request::PickerResponse<T>) + Send + 'static,
 {
+    let parent = tracing::Span::current();
     std::thread::spawn(move || {
+        let _entered = parent.enter();
         let response = task
             .recv()
             .unwrap_or_else(|error| rust_nfm::request::PickerResponse::Error(error.to_string()));
@@ -43,8 +45,15 @@ unsafe extern "system" fn finish_workspace_move_focus_preservation(
     timer_id: usize,
     _time: u32,
 ) {
+    let span = tracing::info_span!(
+        "finish_workspace_move_focus_preservation",
+        timer_id = timer_id as u64
+    );
+    let _entered = span.enter();
     use windows_sys::Win32::UI::WindowsAndMessaging::KillTimer;
-    unsafe { KillTimer(std::ptr::null_mut(), timer_id) };
+    if unsafe { KillTimer(std::ptr::null_mut(), timer_id) } == 0 {
+        crate::error_log::last_win32("KillTimer(workspace focus callback) failed");
+    }
     let mut current = WORKSPACE_MOVE_TIMER.lock().unwrap();
     if *current == timer_id {
         *current = 0;
@@ -61,7 +70,9 @@ pub(crate) fn schedule_workspace_move_focus_finish() -> bool {
     use windows_sys::Win32::UI::WindowsAndMessaging::{KillTimer, SetTimer};
     let mut current = WORKSPACE_MOVE_TIMER.lock().unwrap();
     if *current != 0 {
-        unsafe { KillTimer(std::ptr::null_mut(), *current) };
+        if unsafe { KillTimer(std::ptr::null_mut(), *current) } == 0 {
+            crate::error_log::last_win32("KillTimer(replace workspace focus timer) failed");
+        }
         *current = 0;
     }
     let timer = unsafe {
@@ -73,6 +84,9 @@ pub(crate) fn schedule_workspace_move_focus_finish() -> bool {
         )
     };
     *current = timer;
+    if timer == 0 {
+        crate::error_log::last_win32("SetTimer(workspace focus) failed");
+    }
     timer != 0
 }
 
@@ -314,10 +328,15 @@ fn key_name(key: u32) -> String {
     use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
         GetKeyNameTextW, MAPVK_VK_TO_VSC, MapVirtualKeyW,
     };
-    if (0x7c..=0x82).contains(&key) {
-        return format!("F{}", key - 0x7c + 13);
+    const VK_F1_VALUE: u32 = 0x70;
+    const VK_F24_VALUE: u32 = 0x87;
+    if (VK_F1_VALUE..=VK_F24_VALUE).contains(&key) {
+        return format!("F{}", key - VK_F1_VALUE + 1);
     }
     let mut scan = unsafe { MapVirtualKeyW(key, MAPVK_VK_TO_VSC) };
+    if scan == 0 {
+        return format!("VK_{key:02X}");
+    }
     if matches!(
         key,
         0x21 | 0x22 | 0x23 | 0x24 | 0x25 | 0x26 | 0x27 | 0x28 | 0x2d | 0x2e | 0x6f | 0x90
@@ -325,8 +344,30 @@ fn key_name(key: u32) -> String {
         scan |= 0x100;
     }
     let mut buffer = [0u16; 256];
+    unsafe { windows_sys::Win32::Foundation::SetLastError(0) };
     let length = unsafe { GetKeyNameTextW((scan << 16) as i32, buffer.as_mut_ptr(), 256) };
+    if length == 0 {
+        let error = unsafe { windows_sys::Win32::Foundation::GetLastError() };
+        if error == 0 {
+            crate::error_log::report("GetKeyNameTextW failed", "returned zero");
+        } else {
+            crate::error_log::report_win32("GetKeyNameTextW failed", error);
+        }
+        return format!("VK_{key:02X}");
+    }
     String::from_utf16_lossy(&buffer[..length.max(0) as usize])
+}
+
+#[cfg(test)]
+mod key_name_tests {
+    #[test]
+    fn formats_all_function_keys_without_scan_code_lookup() {
+        assert_eq!(super::key_name(0x70), "F1");
+        assert_eq!(super::key_name(0x7c), "F13");
+        assert_eq!(super::key_name(0x83), "F20");
+        assert_eq!(super::key_name(0x84), "F21");
+        assert_eq!(super::key_name(0x87), "F24");
+    }
 }
 
 pub(crate) fn show_float_logs_menu(_runtime: &mut Runtime) {
@@ -453,20 +494,45 @@ pub(crate) fn show_error_logs_menu(runtime: &mut Runtime) {
         .into_iter()
         .rev()
         .map(|entry| {
+            let properties = entry
+                .frames
+                .iter()
+                .flat_map(|frame| {
+                    frame
+                        .fields
+                        .iter()
+                        .map(move |(name, value)| format!("{}.{}={value}", frame.method, name))
+                })
+                .collect::<Vec<_>>()
+                .join(" | ");
+            let source = entry
+                .line
+                .map_or(entry.file.clone(), |line| format!("{}:{line}", entry.file));
             vec![
                 local_log_time(entry.timestamp),
+                entry.entry_method,
+                entry.current_method,
                 entry.context,
                 entry.code.map(|code| code.to_string()).unwrap_or_default(),
                 entry.message,
+                properties,
+                source,
             ]
         })
         .collect();
     let rows = if rows.is_empty() {
+        let log_path = crate::error_log::log_file_path()
+            .map(|path| path.display().to_string())
+            .unwrap_or_else(|| "File logging unavailable: LOCALAPPDATA is not set".into());
         vec![vec![
+            String::new(),
+            String::new(),
             String::new(),
             "No runtime errors logged".into(),
             String::new(),
             String::new(),
+            String::new(),
+            log_path,
         ]]
     } else {
         rows
@@ -474,8 +540,17 @@ pub(crate) fn show_error_logs_menu(runtime: &mut Runtime) {
     show_array_columns(
         runtime,
         rows,
-        &["Time", "Context", "Code", "Message"],
-        &[0, 1, 2, 3],
+        &[
+            "Time",
+            "Entry",
+            "Current",
+            "Context",
+            "Code",
+            "Message",
+            "Properties",
+            "Source",
+        ],
+        &[0, 1, 2, 3, 4, 5, 6, 7],
     );
 }
 
@@ -554,9 +629,11 @@ fn local_log_time(value: std::time::SystemTime) -> String {
     };
     let mut utc: SYSTEMTIME = unsafe { zeroed() };
     let mut local: SYSTEMTIME = unsafe { zeroed() };
-    unsafe {
-        FileTimeToSystemTime(&file, &mut utc);
-        SystemTimeToTzSpecificLocalTime(std::ptr::null(), &utc, &mut local);
+    if unsafe { FileTimeToSystemTime(&file, &mut utc) } == 0 {
+        crate::error_log::last_win32("FileTimeToSystemTime(log timestamp) failed");
+    }
+    if unsafe { SystemTimeToTzSpecificLocalTime(std::ptr::null(), &utc, &mut local) } == 0 {
+        crate::error_log::last_win32("SystemTimeToTzSpecificLocalTime(log timestamp) failed");
     }
     format!(
         "{:02}:{:02}:{:02}",
@@ -797,22 +874,57 @@ unsafe extern "system" fn handle_windows_event(
         return;
     };
     let raw = hwnd as isize;
+    // A destroy event is delivered after the HWND may already be invalid. The
+    // client lookup only compares the stored handle, so remove it before any
+    // Win32 property query such as `is_root_window`.
+    // if event == EVENT_OBJECT_DESTROY
+    //     || unsafe { windows_sys::Win32::UI::WindowsAndMessaging::IsWindow(hwnd) } == 0
+    // {
+    //     if let Err(error) = runtime.remove_client_by_hwnd(raw) {
+    //         report_win_event_error(
+    //             event,
+    //             raw,
+    //             id_object,
+    //             id_child,
+    //             "client removal failed",
+    //             error,
+    //         );
+    //     }
+    //     return;
+    // }
     if !runtime.is_root_window(raw) {
         let _ = runtime.remove_client_by_hwnd(raw);
         return;
     }
     let result = match event {
-        EVENT_OBJECT_DESTROY => runtime.remove_client_by_hwnd(raw),
+        EVENT_OBJECT_DESTROY => {
+            if let Err(error) = runtime.remove_client_by_hwnd(raw) {
+                report_win_event_error(
+                    event,
+                    raw,
+                    id_object,
+                    id_child,
+                    "client removal failed",
+                    error,
+                );
+            }
+            Ok(())
+        },
         EVENT_OBJECT_HIDE => {
             if is_taskbar(hwnd)
                 && let Err(error) = runtime.taskbar_changed(raw)
             {
-                crate::error_log::report_win32("taskbar resize failed", error);
+                report_win_event_error(
+                    event,
+                    raw,
+                    id_object,
+                    id_child,
+                    "taskbar resize failed",
+                    error,
+                );
             }
-            use windows_sys::Win32::UI::WindowsAndMessaging::{
-                GWL_STYLE, GetWindowLongW, WS_VISIBLE,
-            };
-            if unsafe { GetWindowLongW(hwnd, GWL_STYLE) } & WS_VISIBLE as i32 == 0 {
+            use windows_sys::Win32::UI::WindowsAndMessaging::{GWL_STYLE, WS_VISIBLE};
+            if platform_window_long(hwnd, GWL_STYLE) & WS_VISIBLE as i32 == 0 {
                 runtime.remove_client_by_hwnd(raw)
             } else {
                 Ok(())
@@ -830,7 +942,40 @@ unsafe extern "system" fn handle_windows_event(
         _ => Ok(()),
     };
     if let Err(error) = result {
-        crate::error_log::report_win32(format!("WinEvent {event:#x} failed"), error);
+        report_win_event_error(event, raw, id_object, id_child, "WinEvent failed", error);
+    }
+}
+
+fn report_win_event_error(
+    event: u32,
+    hwnd: isize,
+    object: i32,
+    child: i32,
+    operation: &str,
+    error: u32,
+) {
+    let span = tracing::error_span!(
+        "handle_windows_event",
+        event,
+        hwnd = hwnd as usize,
+        object,
+        child
+    );
+    let _entered = span.enter();
+    crate::error_log::report_win32(operation, error);
+}
+
+fn platform_window_long(hwnd: windows_sys::Win32::Foundation::HWND, index: i32) -> i32 {
+    use windows_sys::Win32::Foundation::{GetLastError, SetLastError};
+    use windows_sys::Win32::UI::WindowsAndMessaging::GetWindowLongW;
+    unsafe {
+        SetLastError(0);
+        let value = GetWindowLongW(hwnd, index);
+        let error = GetLastError();
+        if value == 0 && error != 0 {
+            crate::error_log::report_win32(format!("GetWindowLongW({index}) failed"), error);
+        }
+        value
     }
 }
 
@@ -844,6 +989,7 @@ fn is_taskbar(hwnd: windows_sys::Win32::Foundation::HWND) -> bool {
         )
     };
     if length <= 0 {
+        crate::error_log::last_win32("GetClassNameW(taskbar) failed");
         return false;
     }
     matches!(
@@ -882,11 +1028,15 @@ fn install_win_event_hooks() -> Vec<windows_sys::Win32::UI::Accessibility::HWINE
                     flags,
                 )
             };
+            if hook.is_null() {
+                crate::error_log::last_win32(format!("SetWinEventHook({min:#x}-{max:#x}) failed"));
+            }
             (!hook.is_null()).then_some(hook)
         })
         .collect()
 }
 
+#[tracing::instrument]
 pub fn run_message_loop() -> Result<(), u32> {
     use std::mem::zeroed;
     use windows_sys::Win32::Foundation::HWND;
@@ -898,7 +1048,9 @@ pub fn run_message_loop() -> Result<(), u32> {
         loop {
             let result = GetMessageW(&mut message, 0 as HWND, 0, 0);
             if result == -1 {
-                return Err(windows_sys::Win32::Foundation::GetLastError());
+                let error = windows_sys::Win32::Foundation::GetLastError();
+                crate::error_log::report_win32("GetMessageW failed", error);
+                return Err(error);
             }
             if result == 0 {
                 return Ok(());
@@ -909,6 +1061,7 @@ pub fn run_message_loop() -> Result<(), u32> {
     }
 }
 
+#[tracing::instrument]
 pub fn acquire_single_instance() -> Result<Option<isize>, u32> {
     use windows_sys::Win32::Foundation::{CloseHandle, ERROR_ALREADY_EXISTS, GetLastError};
     use windows_sys::Win32::System::Threading::CreateMutexW;
@@ -918,16 +1071,20 @@ pub fn acquire_single_instance() -> Result<Option<isize>, u32> {
         .collect();
     let mutex = unsafe { CreateMutexW(std::ptr::null(), 1, mutex_name.as_ptr()) };
     if mutex.is_null() {
-        return Err(unsafe { GetLastError() });
+        let error = unsafe { GetLastError() };
+        crate::error_log::report_win32("CreateMutexW failed", error);
+        return Err(error);
     }
     if unsafe { GetLastError() } == ERROR_ALREADY_EXISTS {
         let text: Vec<u16> = "SimpleWindowManager is already running\0"
             .encode_utf16()
             .collect();
         let title: Vec<u16> = "SimpleWindowManager\0".encode_utf16().collect();
-        unsafe {
-            MessageBoxW(std::ptr::null_mut(), text.as_ptr(), title.as_ptr(), MB_OK);
-            CloseHandle(mutex);
+        if unsafe { MessageBoxW(std::ptr::null_mut(), text.as_ptr(), title.as_ptr(), MB_OK) } == 0 {
+            crate::error_log::last_win32("MessageBoxW(already running) failed");
+        }
+        if unsafe { CloseHandle(mutex) } == 0 {
+            crate::error_log::last_win32("CloseHandle(single-instance mutex) failed");
         }
         Ok(None)
     } else {
@@ -935,6 +1092,7 @@ pub fn acquire_single_instance() -> Result<Option<isize>, u32> {
     }
 }
 
+#[tracing::instrument(skip(runtime), fields(instance_mutex = instance_mutex as usize))]
 pub fn run(runtime: Runtime, instance_mutex: isize) -> Result<(), u32> {
     use windows_sys::Win32::Foundation::{CloseHandle, GetLastError};
     use windows_sys::Win32::System::Com::{
@@ -946,8 +1104,9 @@ pub fn run(runtime: Runtime, instance_mutex: isize) -> Result<(), u32> {
     use windows_sys::Win32::UI::WindowsAndMessaging::{
         SetWindowsHookExW, UnhookWindowsHookEx, WH_KEYBOARD_LL, WH_MOUSE_LL,
     };
-    unsafe {
-        CoInitializeEx(std::ptr::null(), COINIT_MULTITHREADED as u32);
+    let com_result = unsafe { CoInitializeEx(std::ptr::null(), COINIT_MULTITHREADED as u32) };
+    crate::error_log::check_hresult("CoInitializeEx failed", com_result);
+    let security_result = unsafe {
         CoInitializeSecurity(
             std::ptr::null_mut(),
             -1,
@@ -958,8 +1117,9 @@ pub fn run(runtime: Runtime, instance_mutex: isize) -> Result<(), u32> {
             std::ptr::null(),
             EOAC_NONE as u32,
             std::ptr::null(),
-        );
-    }
+        )
+    };
+    crate::error_log::check_hresult("CoInitializeSecurity failed", security_result);
     crate::status::initialize();
     RUNTIME
         .set(Mutex::new(runtime))
@@ -972,29 +1132,31 @@ pub fn run(runtime: Runtime, instance_mutex: isize) -> Result<(), u32> {
         runtime.create_drop_target_window()?;
     }
     let keyboard_hook = unsafe {
-        SetWindowsHookExW(
-            WH_KEYBOARD_LL,
-            Some(handle_key_press),
-            GetModuleHandleW(std::ptr::null()),
-            0,
-        )
+        let module = GetModuleHandleW(std::ptr::null());
+        if module.is_null() {
+            crate::error_log::last_win32("GetModuleHandleW(keyboard hook) failed");
+        }
+        SetWindowsHookExW(WH_KEYBOARD_LL, Some(handle_key_press), module, 0)
     };
     if keyboard_hook.is_null() {
-        return Err(unsafe { GetLastError() });
+        let error = unsafe { GetLastError() };
+        crate::error_log::report_win32("SetWindowsHookExW(keyboard) failed", error);
+        return Err(error);
     }
     let mouse_hook = unsafe {
-        SetWindowsHookExW(
-            WH_MOUSE_LL,
-            Some(handle_mouse),
-            GetModuleHandleW(std::ptr::null()),
-            0,
-        )
+        let module = GetModuleHandleW(std::ptr::null());
+        if module.is_null() {
+            crate::error_log::last_win32("GetModuleHandleW(mouse hook) failed");
+        }
+        SetWindowsHookExW(WH_MOUSE_LL, Some(handle_mouse), module, 0)
     };
     if mouse_hook.is_null() {
-        unsafe {
-            UnhookWindowsHookEx(keyboard_hook);
+        let error = unsafe { GetLastError() };
+        if unsafe { UnhookWindowsHookEx(keyboard_hook) } == 0 {
+            crate::error_log::last_win32("UnhookWindowsHookEx(keyboard cleanup) failed");
         }
-        return Err(unsafe { GetLastError() });
+        crate::error_log::report_win32("SetWindowsHookExW(mouse) failed", error);
+        return Err(error);
     }
     let hooks = install_win_event_hooks();
     if let Some(runtime) = RUNTIME.get() {
@@ -1002,21 +1164,31 @@ pub fn run(runtime: Runtime, instance_mutex: isize) -> Result<(), u32> {
     }
     let result = run_message_loop();
     for hook in hooks {
-        unsafe {
-            UnhookWinEvent(hook);
+        if unsafe { UnhookWinEvent(hook) } == 0 {
+            crate::error_log::last_win32("UnhookWinEvent failed");
         }
     }
     unsafe {
         let timer = *WORKSPACE_MOVE_TIMER.lock().unwrap();
         if timer != 0 {
-            windows_sys::Win32::UI::WindowsAndMessaging::KillTimer(std::ptr::null_mut(), timer);
+            if windows_sys::Win32::UI::WindowsAndMessaging::KillTimer(std::ptr::null_mut(), timer)
+                == 0
+            {
+                crate::error_log::last_win32("KillTimer(workspace focus shutdown) failed");
+            }
         }
-        UnhookWindowsHookEx(keyboard_hook);
-        UnhookWindowsHookEx(mouse_hook);
+        if UnhookWindowsHookEx(keyboard_hook) == 0 {
+            crate::error_log::last_win32("UnhookWindowsHookEx(keyboard) failed");
+        }
+        if UnhookWindowsHookEx(mouse_hook) == 0 {
+            crate::error_log::last_win32("UnhookWindowsHookEx(mouse) failed");
+        }
         crate::border::clean();
         crate::status::shutdown();
         CoUninitialize();
-        CloseHandle(instance_mutex as _);
+        if CloseHandle(instance_mutex as _) == 0 {
+            crate::error_log::last_win32("CloseHandle(single-instance mutex) failed");
+        }
     }
     result
 }

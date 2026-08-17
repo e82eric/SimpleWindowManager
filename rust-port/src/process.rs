@@ -1,5 +1,10 @@
+unsafe fn close_handle(handle: windows_sys::Win32::Foundation::HANDLE, context: &'static str) {
+    if !handle.is_null() && unsafe { windows_sys::Win32::Foundation::CloseHandle(handle) } == 0 {
+        crate::error_log::last_win32(context);
+    }
+}
+
 pub fn start_app(command: &str) -> Result<(), u32> {
-    use windows_sys::Win32::Foundation::GetLastError;
     use windows_sys::Win32::UI::Shell::ShellExecuteW;
     use windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
     let operation: Vec<u16> = "open\0".encode_utf16().collect();
@@ -15,7 +20,9 @@ pub fn start_app(command: &str) -> Result<(), u32> {
         )
     } as isize;
     if result <= 32 {
-        Err(unsafe { GetLastError() })
+        let code = result as u32;
+        crate::error_log::report_win32("ShellExecuteW failed", code);
+        Err(code)
     } else {
         Ok(())
     }
@@ -23,7 +30,7 @@ pub fn start_app(command: &str) -> Result<(), u32> {
 
 pub fn start_as_explorer_user(command: &str) -> Result<(), u32> {
     use std::mem::{size_of, zeroed};
-    use windows_sys::Win32::Foundation::{CloseHandle, GetLastError};
+    use windows_sys::Win32::Foundation::ERROR_NOT_FOUND;
     use windows_sys::Win32::Security::{
         DuplicateTokenEx, SecurityImpersonation, TOKEN_DUPLICATE, TOKEN_QUERY, TokenPrimary,
     };
@@ -37,22 +44,24 @@ pub fn start_as_explorer_user(command: &str) -> Result<(), u32> {
     };
     let shell = unsafe { GetShellWindow() };
     if shell.is_null() {
-        return Err(unsafe { GetLastError() });
+        crate::error_log::report("GetShellWindow failed", "returned a null window handle");
+        return Err(ERROR_NOT_FOUND);
     }
     let mut pid = 0;
-    unsafe {
-        GetWindowThreadProcessId(shell, &mut pid);
+    if unsafe { GetWindowThreadProcessId(shell, &mut pid) } == 0 {
+        return Err(crate::error_log::last_win32(
+            "GetWindowThreadProcessId(shell) failed",
+        ));
     }
     let process = unsafe { OpenProcess(PROCESS_QUERY_INFORMATION, 0, pid) };
     if process.is_null() {
-        return Err(unsafe { GetLastError() });
+        return Err(crate::error_log::last_win32("OpenProcess(shell) failed"));
     }
     let mut token = std::ptr::null_mut();
     if unsafe { OpenProcessToken(process, TOKEN_DUPLICATE | TOKEN_QUERY, &mut token) } == 0 {
-        unsafe {
-            CloseHandle(process);
-        }
-        return Err(unsafe { GetLastError() });
+        let error = crate::error_log::last_win32("OpenProcessToken(shell) failed");
+        unsafe { close_handle(process, "CloseHandle(shell process) failed") };
+        return Err(error);
     }
     let mut primary = std::ptr::null_mut();
     if unsafe {
@@ -66,11 +75,12 @@ pub fn start_as_explorer_user(command: &str) -> Result<(), u32> {
         )
     } == 0
     {
+        let error = crate::error_log::last_win32("DuplicateTokenEx(shell token) failed");
         unsafe {
-            CloseHandle(token);
-            CloseHandle(process);
+            close_handle(token, "CloseHandle(shell token) failed");
+            close_handle(process, "CloseHandle(shell process) failed");
         }
-        return Err(unsafe { GetLastError() });
+        return Err(error);
     }
     let mut startup: STARTUPINFOW = unsafe { zeroed() };
     startup.cb = size_of::<STARTUPINFOW>() as u32;
@@ -94,26 +104,24 @@ pub fn start_as_explorer_user(command: &str) -> Result<(), u32> {
             &mut info,
         )
     };
+    let create_error =
+        (result == 0).then(|| crate::error_log::last_win32("CreateProcessWithTokenW failed"));
     unsafe {
-        if !info.hProcess.is_null() {
-            CloseHandle(info.hProcess);
-        }
-        if !info.hThread.is_null() {
-            CloseHandle(info.hThread);
-        }
-        CloseHandle(primary);
-        CloseHandle(token);
-        CloseHandle(process);
+        close_handle(info.hProcess, "CloseHandle(created process) failed");
+        close_handle(info.hThread, "CloseHandle(created thread) failed");
+        close_handle(primary, "CloseHandle(primary token) failed");
+        close_handle(token, "CloseHandle(shell token) failed");
+        close_handle(process, "CloseHandle(shell process) failed");
     }
-    if result == 0 {
-        Err(unsafe { GetLastError() })
+    if let Some(error) = create_error {
+        Err(error)
     } else {
         Ok(())
     }
 }
 
 pub fn list_services() -> Result<Vec<String>, u32> {
-    use windows_sys::Win32::Foundation::GetLastError;
+    use windows_sys::Win32::Foundation::{ERROR_MORE_DATA, GetLastError};
     use windows_sys::Win32::System::Services::*;
     unsafe {
         let manager = OpenSCManagerW(
@@ -122,12 +130,12 @@ pub fn list_services() -> Result<Vec<String>, u32> {
             SC_MANAGER_ENUMERATE_SERVICE,
         );
         if manager.is_null() {
-            return Err(GetLastError());
+            return Err(crate::error_log::last_win32("OpenSCManagerW failed"));
         }
         let mut needed = 0;
         let mut count = 0;
         let mut resume = 0;
-        EnumServicesStatusExW(
+        let size_result = EnumServicesStatusExW(
             manager,
             SC_ENUM_PROCESS_INFO,
             SERVICE_WIN32,
@@ -139,6 +147,16 @@ pub fn list_services() -> Result<Vec<String>, u32> {
             &mut resume,
             std::ptr::null(),
         );
+        if size_result == 0 {
+            let error = GetLastError();
+            if error != ERROR_MORE_DATA {
+                crate::error_log::report_win32("EnumServicesStatusExW(size query) failed", error);
+                if CloseServiceHandle(manager) == 0 {
+                    crate::error_log::last_win32("CloseServiceHandle failed");
+                }
+                return Err(error);
+            }
+        }
         let mut bytes = vec![0u8; needed as usize];
         let ok = EnumServicesStatusExW(
             manager,
@@ -154,7 +172,10 @@ pub fn list_services() -> Result<Vec<String>, u32> {
         );
         if ok == 0 {
             let error = GetLastError();
-            CloseServiceHandle(manager);
+            crate::error_log::report_win32("EnumServicesStatusExW failed", error);
+            if CloseServiceHandle(manager) == 0 {
+                crate::error_log::last_win32("CloseServiceHandle failed");
+            }
             return Err(error);
         }
         let entries = std::slice::from_raw_parts(
@@ -185,7 +206,9 @@ pub fn list_services() -> Result<Vec<String>, u32> {
                 )
             })
             .collect();
-        CloseServiceHandle(manager);
+        if CloseServiceHandle(manager) == 0 {
+            crate::error_log::last_win32("CloseServiceHandle failed");
+        }
         Ok(result)
     }
 }

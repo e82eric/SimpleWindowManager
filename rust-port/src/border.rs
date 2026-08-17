@@ -28,6 +28,16 @@ mod dcomp {
         static STATE: RefCell<Option<State>> = const { RefCell::new(None) };
     }
 
+    fn logged<T>(
+        context: &'static str,
+        result: windows::core::Result<T>,
+    ) -> windows::core::Result<T> {
+        result.map_err(|error| {
+            crate::error_log::report_hresult(context, error.code().0);
+            error
+        })
+    }
+
     struct State {
         hwnd: isize,
         _d3d: ID3D11Device,
@@ -61,22 +71,29 @@ mod dcomp {
         unsafe fn new(hwnd: isize, normal: u32, lost: u32) -> windows::core::Result<Self> {
             let mut d3d = None;
             unsafe {
-                D3D11CreateDevice(
-                    None::<&IDXGIAdapter>,
-                    D3D_DRIVER_TYPE_HARDWARE,
-                    HMODULE::default(),
-                    D3D11_CREATE_DEVICE_BGRA_SUPPORT,
-                    None,
-                    D3D11_SDK_VERSION,
-                    Some(&mut d3d),
-                    None,
-                    None,
+                logged(
+                    "D3D11CreateDevice failed",
+                    D3D11CreateDevice(
+                        None::<&IDXGIAdapter>,
+                        D3D_DRIVER_TYPE_HARDWARE,
+                        HMODULE::default(),
+                        D3D11_CREATE_DEVICE_BGRA_SUPPORT,
+                        None,
+                        D3D11_SDK_VERSION,
+                        Some(&mut d3d),
+                        None,
+                        None,
+                    ),
                 )?;
             }
             let d3d = d3d.unwrap();
-            let dxgi: IDXGIDevice = d3d.cast()?;
-            let factory: IDXGIFactory2 =
-                unsafe { CreateDXGIFactory2(DXGI_CREATE_FACTORY_FLAGS(0))? };
+            let dxgi: IDXGIDevice = logged(
+                "ID3D11Device::QueryInterface(IDXGIDevice) failed",
+                d3d.cast(),
+            )?;
+            let factory: IDXGIFactory2 = logged("CreateDXGIFactory2 failed", unsafe {
+                CreateDXGIFactory2(DXGI_CREATE_FACTORY_FLAGS(0))
+            })?;
             let mut description: DXGI_SWAP_CHAIN_DESC1 = unsafe { std::mem::zeroed() };
             description.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
             description.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
@@ -85,28 +102,52 @@ mod dcomp {
             description.SampleDesc.Count = 1;
             description.AlphaMode = DXGI_ALPHA_MODE_PREMULTIPLIED;
             let mut initial_rect = windows_sys::Win32::Foundation::RECT::default();
-            unsafe {
+            if unsafe {
                 windows_sys::Win32::UI::WindowsAndMessaging::GetClientRect(
                     hwnd as _,
                     &mut initial_rect,
-                );
+                )
+            } == 0
+            {
+                crate::error_log::last_win32("GetClientRect(border initialization) failed");
             }
             description.Width = (initial_rect.right - initial_rect.left).max(1) as u32;
             description.Height = (initial_rect.bottom - initial_rect.top).max(1) as u32;
-            let swap_chain = unsafe {
-                factory.CreateSwapChainForComposition(&dxgi, &description, None::<&IDXGIOutput>)?
-            };
-            let d2_factory: ID2D1Factory2 =
-                unsafe { D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, None)? };
-            let d2_device = unsafe { d2_factory.CreateDevice(&dxgi)? };
-            let dc = unsafe { d2_device.CreateDeviceContext(D2D1_DEVICE_CONTEXT_OPTIONS_NONE)? };
+            let swap_chain = logged(
+                "IDXGIFactory2::CreateSwapChainForComposition failed",
+                unsafe {
+                    factory.CreateSwapChainForComposition(&dxgi, &description, None::<&IDXGIOutput>)
+                },
+            )?;
+            let d2_factory: ID2D1Factory2 = logged("D2D1CreateFactory failed", unsafe {
+                D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, None)
+            })?;
+            let d2_device = logged("ID2D1Factory2::CreateDevice failed", unsafe {
+                d2_factory.CreateDevice(&dxgi)
+            })?;
+            let dc = logged("ID2D1Device1::CreateDeviceContext failed", unsafe {
+                d2_device.CreateDeviceContext(D2D1_DEVICE_CONTEXT_OPTIONS_NONE)
+            })?;
             let normal_color = color_ref(normal);
             let lost_color = color_ref(lost);
-            let normal_brush = unsafe { dc.CreateSolidColorBrush(&normal_color, None)? };
-            let lost_focus_brush = unsafe { dc.CreateSolidColorBrush(&lost_color, None)? };
-            let dcomp_device: IDCompositionDevice = unsafe { DCompositionCreateDevice(&dxgi)? };
-            let target = unsafe { dcomp_device.CreateTargetForHwnd(HWND(hwnd as _), true)? };
-            let visual = unsafe { dcomp_device.CreateVisual()? };
+            let normal_brush = logged(
+                "ID2D1DeviceContext::CreateSolidColorBrush(normal) failed",
+                unsafe { dc.CreateSolidColorBrush(&normal_color, None) },
+            )?;
+            let lost_focus_brush = logged(
+                "ID2D1DeviceContext::CreateSolidColorBrush(lost focus) failed",
+                unsafe { dc.CreateSolidColorBrush(&lost_color, None) },
+            )?;
+            let dcomp_device: IDCompositionDevice =
+                logged("DCompositionCreateDevice failed", unsafe {
+                    DCompositionCreateDevice(&dxgi)
+                })?;
+            let target = logged("IDCompositionDevice::CreateTargetForHwnd failed", unsafe {
+                dcomp_device.CreateTargetForHwnd(HWND(hwnd as _), true)
+            })?;
+            let visual = logged("IDCompositionDevice::CreateVisual failed", unsafe {
+                dcomp_device.CreateVisual()
+            })?;
             let mut state = Self {
                 hwnd,
                 _d3d: d3d,
@@ -132,11 +173,14 @@ mod dcomp {
 
         unsafe fn client_size(&self) -> (u32, u32) {
             let mut rect = windows_sys::Win32::Foundation::RECT::default();
-            unsafe {
+            if unsafe {
                 windows_sys::Win32::UI::WindowsAndMessaging::GetClientRect(
                     self.hwnd as _,
                     &mut rect,
-                );
+                )
+            } == 0
+            {
+                crate::error_log::last_win32("GetClientRect(border) failed");
             }
             (
                 (rect.right - rect.left).max(0) as u32,
@@ -152,24 +196,29 @@ mod dcomp {
             if width == 0 || height == 0 {
                 return Ok(());
             }
-            unsafe {
+            logged("IDXGISwapChain1::ResizeBuffers failed", unsafe {
                 self.swap_chain.ResizeBuffers(
                     2,
                     width,
                     height,
                     DXGI_FORMAT_B8G8R8A8_UNORM,
                     DXGI_SWAP_CHAIN_FLAG(0),
-                )?;
-            }
-            let surface: IDXGISurface2 = unsafe { self.swap_chain.GetBuffer(0)? };
+                )
+            })?;
+            let surface: IDXGISurface2 = logged("IDXGISwapChain1::GetBuffer failed", unsafe {
+                self.swap_chain.GetBuffer(0)
+            })?;
             let mut properties: D2D1_BITMAP_PROPERTIES1 = unsafe { std::mem::zeroed() };
             properties.pixelFormat.alphaMode = D2D1_ALPHA_MODE_PREMULTIPLIED;
             properties.pixelFormat.format = DXGI_FORMAT_B8G8R8A8_UNORM;
             properties.bitmapOptions = D2D1_BITMAP_OPTIONS_TARGET | D2D1_BITMAP_OPTIONS_CANNOT_DRAW;
-            let bitmap = unsafe {
-                self.dc
-                    .CreateBitmapFromDxgiSurface(&surface, Some(&properties))?
-            };
+            let bitmap = logged(
+                "ID2D1DeviceContext::CreateBitmapFromDxgiSurface failed",
+                unsafe {
+                    self.dc
+                        .CreateBitmapFromDxgiSurface(&surface, Some(&properties))
+                },
+            )?;
             self.surface = Some(surface);
             self.bitmap = Some(bitmap);
             Ok(())
@@ -217,10 +266,9 @@ mod dcomp {
                 dashOffset: 0.0,
                 transformType: D2D1_STROKE_TRANSFORM_TYPE_NORMAL,
             };
-            let stroke = unsafe {
-                self.d2_factory
-                    .CreateStrokeStyle(&stroke_properties, None)?
-            };
+            let stroke = logged("ID2D1Factory2::CreateStrokeStyle failed", unsafe {
+                self.d2_factory.CreateStrokeStyle(&stroke_properties, None)
+            })?;
             let brush = if lost_focus {
                 &self.lost_focus_brush
             } else {
@@ -228,11 +276,26 @@ mod dcomp {
             };
             unsafe {
                 self.dc.DrawRoundedRectangle(&rounded, brush, 5.0, &stroke);
-                self.dc.EndDraw(None, None)?;
-                self.swap_chain.Present(1, DXGI_PRESENT(0)).ok()?;
-                self.visual.SetContent(&self.swap_chain)?;
-                self.target.SetRoot(&self.visual)?;
-                self.dcomp_device.Commit()?;
+                logged(
+                    "ID2D1DeviceContext::EndDraw failed",
+                    self.dc.EndDraw(None, None),
+                )?;
+                logged(
+                    "IDXGISwapChain1::Present failed",
+                    self.swap_chain.Present(1, DXGI_PRESENT(0)).ok(),
+                )?;
+                logged(
+                    "IDCompositionVisual::SetContent failed",
+                    self.visual.SetContent(&self.swap_chain),
+                )?;
+                logged(
+                    "IDCompositionTarget::SetRoot failed",
+                    self.target.SetRoot(&self.visual),
+                )?;
+                logged(
+                    "IDCompositionDevice::Commit failed",
+                    self.dcomp_device.Commit(),
+                )?;
             }
             self.old_width = width;
             self.old_height = height;
@@ -285,9 +348,15 @@ unsafe extern "system" fn border_message_loop(
         }
         WM_PAINT => {
             let mut paint: PAINTSTRUCT = unsafe { std::mem::zeroed() };
-            unsafe { BeginPaint(hwnd, &mut paint) };
+            let dc = unsafe { BeginPaint(hwnd, &mut paint) };
+            if dc.is_null() {
+                crate::error_log::last_win32("BeginPaint(border) failed");
+                return 0;
+            }
             let mut rect = windows_sys::Win32::Foundation::RECT::default();
-            unsafe { GetClientRect(hwnd, &mut rect) };
+            if unsafe { GetClientRect(hwnd, &mut rect) } == 0 {
+                crate::error_log::last_win32("GetClientRect(border paint) failed");
+            }
             let lost = crate::platform::border_is_lost_focus();
             unsafe {
                 dcomp::draw(
@@ -296,7 +365,9 @@ unsafe extern "system" fn border_message_loop(
                     lost,
                 )
             };
-            unsafe { EndPaint(hwnd, &paint) };
+            if unsafe { EndPaint(hwnd, &paint) } == 0 {
+                crate::error_log::last_win32("EndPaint(border) failed");
+            }
             0
         }
         WM_ERASEBKGND => 1,
@@ -312,14 +383,24 @@ pub fn create_border_window(normal: u32, lost: u32) -> Result<BorderWindow, u32>
     let class_name: Vec<u16> = "nwm_dcomp_border_class\0".encode_utf16().collect();
     let title: Vec<u16> = "nwm_dcomp_border\0".encode_utf16().collect();
     let instance = unsafe { GetModuleHandleW(std::ptr::null()) };
+    if instance.is_null() {
+        return Err(crate::error_log::last_win32(
+            "GetModuleHandleW(border) failed",
+        ));
+    }
     let mut class: WNDCLASSEXW = unsafe { zeroed() };
     class.cbSize = size_of::<WNDCLASSEXW>() as u32;
     class.style = CS_HREDRAW | CS_VREDRAW;
     class.lpfnWndProc = Some(border_message_loop);
     class.hInstance = instance;
     class.hCursor = unsafe { LoadCursorW(std::ptr::null_mut(), IDC_ARROW) };
+    if class.hCursor.is_null() {
+        crate::error_log::last_win32("LoadCursorW(border) failed");
+    }
     class.lpszClassName = class_name.as_ptr();
-    unsafe { RegisterClassExW(&class) };
+    if unsafe { RegisterClassExW(&class) } == 0 {
+        crate::error_log::last_win32("RegisterClassExW(border) failed");
+    }
     let hwnd = unsafe {
         CreateWindowExW(
             WS_EX_NOREDIRECTIONBITMAP | WS_EX_NOACTIVATE,
@@ -337,11 +418,22 @@ pub fn create_border_window(normal: u32, lost: u32) -> Result<BorderWindow, u32>
         )
     };
     if hwnd.is_null() {
-        return Err(unsafe { GetLastError() });
+        let error = unsafe { GetLastError() };
+        crate::error_log::report_win32("CreateWindowExW(border) failed", error);
+        return Err(error);
     }
-    unsafe { SetWindowLongW(hwnd, GWL_STYLE, 0) };
+    unsafe {
+        windows_sys::Win32::Foundation::SetLastError(0);
+        SetWindowLongW(hwnd, GWL_STYLE, 0);
+        let error = GetLastError();
+        if error != 0 {
+            crate::error_log::report_win32("SetWindowLongW(border style) failed", error);
+        }
+    }
     if let Err(error) = unsafe { dcomp::initialize(hwnd as isize, normal, lost) } {
-        unsafe { DestroyWindow(hwnd) };
+        if unsafe { DestroyWindow(hwnd) } == 0 {
+            crate::error_log::last_win32("DestroyWindow(border initialization cleanup) failed");
+        }
         return Err(error.code().0 as u32);
     }
     Ok(BorderWindow {
@@ -354,7 +446,7 @@ pub fn update_border(window: &BorderWindow, target: Option<crate::Rect>) {
     use windows_sys::Win32::UI::WindowsAndMessaging::*;
     unsafe {
         let Some(target) = target else {
-            SetWindowPos(
+            if SetWindowPos(
                 window.hwnd as _,
                 HWND_BOTTOM,
                 0,
@@ -362,14 +454,19 @@ pub fn update_border(window: &BorderWindow, target: Option<crate::Rect>) {
                 0,
                 0,
                 SWP_HIDEWINDOW | SWP_NOSIZE,
-            );
+            ) == 0
+            {
+                crate::error_log::last_win32("SetWindowPos(hide border) failed");
+            }
             return;
         };
         let target = border_rect(target);
         let width = target.right - target.left;
         let height = target.bottom - target.top;
         let mut current = windows_sys::Win32::Foundation::RECT::default();
-        GetWindowRect(window.hwnd as _, &mut current);
+        if GetWindowRect(window.hwnd as _, &mut current) == 0 {
+            crate::error_log::last_win32("GetWindowRect(border) failed");
+        }
         let visible = IsWindowVisible(window.hwnd as _) != 0;
         let flags = if current.right - current.left == width
             && current.bottom - current.top == height
@@ -384,7 +481,7 @@ pub fn update_border(window: &BorderWindow, target: Option<crate::Rect>) {
             || flags == SWP_SHOWWINDOW
             || !visible
         {
-            SetWindowPos(
+            if SetWindowPos(
                 window.hwnd as _,
                 HWND_BOTTOM,
                 target.left,
@@ -392,12 +489,19 @@ pub fn update_border(window: &BorderWindow, target: Option<crate::Rect>) {
                 width,
                 height,
                 flags,
-            );
+            ) == 0
+            {
+                crate::error_log::last_win32("SetWindowPos(show border) failed");
+            }
             if flags == SWP_SHOWWINDOW || !visible {
-                InvalidateRect(window.hwnd as _, std::ptr::null(), 0);
+                if InvalidateRect(window.hwnd as _, std::ptr::null(), 0) == 0 {
+                    crate::error_log::last_win32("InvalidateRect(border) failed");
+                }
             }
         } else {
-            InvalidateRect(window.hwnd as _, std::ptr::null(), 0);
+            if InvalidateRect(window.hwnd as _, std::ptr::null(), 0) == 0 {
+                crate::error_log::last_win32("InvalidateRect(border) failed");
+            }
         }
     }
 }
