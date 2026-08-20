@@ -136,6 +136,9 @@ const BAR_MARGIN: f32 = 2.0;
 const REGION_GAP: f32 = 12.0;
 const REGION_PADDING: f32 = 14.0;
 const TAG_WIDTH: f32 = 42.0;
+const SELECTED_MONITOR_DOT_RADIUS: f32 = 5.0;
+const SELECTED_MONITOR_DOT_GAP: f32 = 11.0;
+const SELECTED_MONITOR_DOT_COUNT: usize = 4;
 
 fn color_ref(value: u32) -> skia_safe::Color {
     skia_safe::Color::from_argb(
@@ -277,6 +280,26 @@ fn paint_skia(
         color_ref(snapshot.text_color),
     );
     left = info.right + REGION_GAP;
+
+    if snapshot.selected_monitor {
+        let diameter = SELECTED_MONITOR_DOT_RADIUS * 2.0;
+        let indicator_width = SELECTED_MONITOR_DOT_COUNT as f32 * diameter
+            + (SELECTED_MONITOR_DOT_COUNT - 1) as f32 * SELECTED_MONITOR_DOT_GAP;
+        let mut dot_paint = Paint::default();
+        dot_paint.set_anti_alias(true);
+        dot_paint.set_color(skia_safe::Color::from_rgb(0xfa, 0xbd, 0x2f));
+        for index in 0..SELECTED_MONITOR_DOT_COUNT {
+            let center_x = left
+                + SELECTED_MONITOR_DOT_RADIUS
+                + index as f32 * (diameter + SELECTED_MONITOR_DOT_GAP);
+            canvas.draw_circle(
+                (center_x, (top + bottom) / 2.0),
+                SELECTED_MONITOR_DOT_RADIUS,
+                &dot_paint,
+            );
+        }
+        left += indicator_width + REGION_GAP;
+    }
 
     let desired_focus =
         (text_width(&normal_font, &snapshot.focused_window) + REGION_PADDING * 2.0).max(240.0);

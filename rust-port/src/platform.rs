@@ -1,5 +1,6 @@
 //! The only module that should directly expose Win32 callback and handle unsafety.
 
+use std::backtrace::Backtrace;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, OnceLock};
 
@@ -874,28 +875,12 @@ unsafe extern "system" fn handle_windows_event(
         return;
     };
     let raw = hwnd as isize;
-    // A destroy event is delivered after the HWND may already be invalid. The
-    // client lookup only compares the stored handle, so remove it before any
-    // Win32 property query such as `is_root_window`.
-    // if event == EVENT_OBJECT_DESTROY
-    //     || unsafe { windows_sys::Win32::UI::WindowsAndMessaging::IsWindow(hwnd) } == 0
-    // {
-    //     if let Err(error) = runtime.remove_client_by_hwnd(raw) {
-    //         report_win_event_error(
-    //             event,
-    //             raw,
-    //             id_object,
-    //             id_child,
-    //             "client removal failed",
-    //             error,
-    //         );
-    //     }
+
+    // if !runtime.is_root_window(raw) {
+    //     debug_out(&format!("removing {raw:#X}"));
+    //     let _ = runtime.remove_client_by_hwnd(raw);
     //     return;
     // }
-    if !runtime.is_root_window(raw) {
-        let _ = runtime.remove_client_by_hwnd(raw);
-        return;
-    }
     let result = match event {
         EVENT_OBJECT_DESTROY => {
             if let Err(error) = runtime.remove_client_by_hwnd(raw) {
@@ -909,7 +894,7 @@ unsafe extern "system" fn handle_windows_event(
                 );
             }
             Ok(())
-        },
+        }
         EVENT_OBJECT_HIDE => {
             if is_taskbar(hwnd)
                 && let Err(error) = runtime.taskbar_changed(raw)
