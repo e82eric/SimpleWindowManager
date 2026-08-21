@@ -7,8 +7,10 @@ publish = false
 [dependencies]
 rust_nfm = { package = "nfm-rust-win32host", path = "../../RustWin32Host" }
 skia-safe = "0.97.2"
+serde_json = "1"
 tracing = { version = "0.1", features = ["attributes"] }
-tracing-subscriber = "0.3"
+tracing-appender = "0.2"
+tracing-subscriber = { version = "0.3", features = ["json"] }
 windows = { version = "0.62.2", features = [
     "Win32_Foundation",
     "Win32_Graphics_Direct2D",
@@ -43,4 +45,5 @@ windows-sys = { version = "0.61.2", features = [
 [profile.release]
 lto = "thin"
 codegen-units = 1
+debug = "line-tables-only"
 strip = "symbols"

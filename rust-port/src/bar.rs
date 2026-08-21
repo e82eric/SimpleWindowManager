@@ -42,6 +42,22 @@ unsafe extern "system" fn bar_message_loop(
     use windows_sys::Win32::Foundation::RECT;
     use windows_sys::Win32::Graphics::Gdi::{BeginPaint, EndPaint, InvalidateRect, PAINTSTRUCT};
     use windows_sys::Win32::UI::WindowsAndMessaging::*;
+    let span = matches!(
+        message,
+        WM_NCCREATE | WM_PAINT | WM_TIMER | WM_LBUTTONDOWN | WM_RBUTTONDOWN | WM_CLOSE | WM_DESTROY
+    )
+    .then(|| {
+        tracing::info_span!(
+            "window_message",
+            component = "bar",
+            message_name = crate::platform::window_message_name(message),
+            message,
+            hwnd = hwnd as usize,
+            wparam,
+            lparam,
+        )
+    });
+    let _entered = span.as_ref().map(tracing::Span::enter);
     match message {
         WM_NCCREATE => {
             let create = unsafe { &*(lparam as *const CREATESTRUCTW) };

@@ -331,6 +331,18 @@ unsafe extern "system" fn border_message_loop(
 ) -> isize {
     use windows_sys::Win32::Graphics::Gdi::{BeginPaint, EndPaint, PAINTSTRUCT};
     use windows_sys::Win32::UI::WindowsAndMessaging::*;
+    let span = matches!(message, WM_SIZE | WM_WINDOWPOSCHANGING | WM_PAINT).then(|| {
+        tracing::info_span!(
+            "window_message",
+            component = "border",
+            message_name = crate::platform::window_message_name(message),
+            message,
+            hwnd = hwnd as usize,
+            wparam,
+            lparam,
+        )
+    });
+    let _entered = span.as_ref().map(tracing::Span::enter);
     match message {
         WM_SIZE => {
             let width = lparam as u32 & 0xffff;

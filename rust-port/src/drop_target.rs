@@ -14,6 +14,18 @@ unsafe extern "system" fn window_proc(
     use std::mem::zeroed;
     use windows_sys::Win32::Graphics::Gdi::*;
     use windows_sys::Win32::UI::WindowsAndMessaging::*;
+    let span = (message == WM_PAINT).then(|| {
+        tracing::info_span!(
+            "window_message",
+            component = "drop_target",
+            message_name = crate::platform::window_message_name(message),
+            message,
+            hwnd = hwnd as usize,
+            wparam,
+            lparam,
+        )
+    });
+    let _entered = span.as_ref().map(tracing::Span::enter);
     if message == WM_PAINT {
         let mut paint: PAINTSTRUCT = unsafe { zeroed() };
         let dc = unsafe { BeginPaint(hwnd, &mut paint) };

@@ -1,6 +1,5 @@
 //! The only module that should directly expose Win32 callback and handle unsafety.
 
-use std::backtrace::Backtrace;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, OnceLock};
 
@@ -34,6 +33,25 @@ pub(crate) fn set_border_lost_focus(value: bool) {
 
 pub(crate) fn border_is_lost_focus() -> bool {
     BORDER_LOST_FOCUS.load(Ordering::Relaxed)
+}
+
+pub(crate) fn window_message_name(message: u32) -> &'static str {
+    use windows_sys::Win32::UI::WindowsAndMessaging::*;
+    match message {
+        WM_NCCREATE => "WM_NCCREATE",
+        WM_CREATE => "WM_CREATE",
+        WM_SIZE => "WM_SIZE",
+        WM_WINDOWPOSCHANGING => "WM_WINDOWPOSCHANGING",
+        WM_PAINT => "WM_PAINT",
+        WM_ERASEBKGND => "WM_ERASEBKGND",
+        WM_TIMER => "WM_TIMER",
+        WM_LBUTTONDOWN => "WM_LBUTTONDOWN",
+        WM_LBUTTONUP => "WM_LBUTTONUP",
+        WM_RBUTTONDOWN => "WM_RBUTTONDOWN",
+        WM_CLOSE => "WM_CLOSE",
+        WM_DESTROY => "WM_DESTROY",
+        _ => "UNKNOWN_WINDOW_MESSAGE",
+    }
 }
 
 static SUPPRESSED_KEY_UPS: Mutex<[bool; 256]> = Mutex::new([false; 256]);
@@ -92,6 +110,8 @@ pub(crate) fn schedule_workspace_move_focus_finish() -> bool {
 }
 
 pub(crate) unsafe extern "C" fn menu_window_selected(hwnd: isize, _state: *mut std::ffi::c_void) {
+    let span = tracing::info_span!("menu_window_selected", hwnd = hwnd as usize);
+    let _entered = span.enter();
     if let Some(runtime) = RUNTIME.get() {
         if let Ok(mut runtime) = runtime.try_lock() {
             runtime.menu_window_selected(hwnd);
@@ -107,14 +127,19 @@ pub(crate) unsafe extern "C" fn menu_program_selected(
         return;
     }
     let value = unsafe { std::ffi::CStr::from_ptr(value) }.to_string_lossy();
+    let elevated = state as usize != 0;
+    let span = tracing::info_span!("menu_program_selected", command = %value, elevated);
+    let _entered = span.enter();
     if let Some(runtime) = RUNTIME.get() {
         if let Ok(mut runtime) = runtime.try_lock() {
-            runtime.menu_program_selected(&value, state as usize != 0);
+            runtime.menu_program_selected(&value, elevated);
         }
     }
 }
 
 pub(crate) unsafe extern "C" fn menu_on_closed() {
+    let span = tracing::info_span!("menu_closed");
+    let _entered = span.enter();
     if let Some(runtime) = RUNTIME.get() {
         if let Ok(mut runtime) = runtime.try_lock() {
             runtime.menu_closed();
@@ -142,6 +167,8 @@ fn command_selected(name: &str) {
             // actions otherwise create their picker and then immediately hide it.
             runtime.menu_hide();
             if let Some(action) = action {
+                let span = tracing::info_span!("command_selected", name, action = ?action);
+                let _entered = span.enter();
                 if let Err(error) = runtime.execute(action) {
                     crate::error_log::report_win32(format!("command {action:?} failed"), error);
                 }
@@ -764,6 +791,8 @@ pub(crate) fn bar_snapshot(monitor: usize) -> Option<crate::bar::BarSnapshot> {
 }
 
 pub(crate) fn bar_workspace_clicked(monitor: usize, workspace: usize) {
+    let span = tracing::info_span!("bar_workspace_clicked", monitor, workspace);
+    let _entered = span.enter();
     if let Some(runtime) = RUNTIME.get() {
         if let Ok(mut runtime) = runtime.try_lock() {
             runtime.bar_workspace_clicked(monitor, workspace);
@@ -772,6 +801,8 @@ pub(crate) fn bar_workspace_clicked(monitor: usize, workspace: usize) {
 }
 
 pub(crate) fn bar_commands_clicked() {
+    let span = tracing::info_span!("bar_commands_clicked");
+    let _entered = span.enter();
     if let Some(runtime) = RUNTIME.get() {
         if let Ok(mut runtime) = runtime.try_lock() {
             runtime.run_commands_menu();
@@ -842,9 +873,18 @@ unsafe extern "system" fn handle_key_press(code: i32, wparam: usize, lparam: isi
 unsafe extern "system" fn handle_mouse(code: i32, wparam: usize, lparam: isize) -> isize {
     use windows_sys::Win32::UI::WindowsAndMessaging::{CallNextHookEx, WM_LBUTTONUP};
     if code >= 0 && wparam as u32 == WM_LBUTTONUP {
+        let span = tracing::info_span!(
+            "mouse_hook",
+            event_name = "WM_LBUTTONUP",
+            message = wparam as u32,
+            hook_code = code,
+        );
+        let _entered = span.enter();
         if let Some(runtime) = RUNTIME.get() {
             if let Ok(mut runtime) = runtime.try_lock() {
-                let _ = runtime.drag_drop_try_handle_left_mouse_up();
+                if let Err(error) = runtime.drag_drop_try_handle_left_mouse_up() {
+                    crate::error_log::report_win32("drag/drop mouse-up handling failed", error);
+                }
             }
         }
     }
@@ -868,6 +908,15 @@ unsafe extern "system" fn handle_windows_event(
     if hwnd.is_null() || id_child != CHILDID_SELF as i32 || id_object != OBJID_WINDOW {
         return;
     }
+    let span = tracing::info_span!(
+        "windows_event",
+        event_name = win_event_name(event),
+        event,
+        hwnd = hwnd as usize,
+        object = id_object,
+        child = id_child,
+    );
+    let _entered = span.enter();
     let Some(runtime) = RUNTIME.get() else {
         return;
     };
@@ -928,6 +977,23 @@ unsafe extern "system" fn handle_windows_event(
     };
     if let Err(error) = result {
         report_win_event_error(event, raw, id_object, id_child, "WinEvent failed", error);
+    }
+}
+
+fn win_event_name(event: u32) -> &'static str {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        EVENT_OBJECT_DESTROY, EVENT_OBJECT_HIDE, EVENT_OBJECT_LOCATIONCHANGE, EVENT_OBJECT_SHOW,
+        EVENT_OBJECT_UNCLOAKED, EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_MINIMIZESTART,
+    };
+    match event {
+        EVENT_OBJECT_DESTROY => "EVENT_OBJECT_DESTROY",
+        EVENT_OBJECT_HIDE => "EVENT_OBJECT_HIDE",
+        EVENT_OBJECT_LOCATIONCHANGE => "EVENT_OBJECT_LOCATIONCHANGE",
+        EVENT_OBJECT_SHOW => "EVENT_OBJECT_SHOW",
+        EVENT_OBJECT_UNCLOAKED => "EVENT_OBJECT_UNCLOAKED",
+        EVENT_SYSTEM_FOREGROUND => "EVENT_SYSTEM_FOREGROUND",
+        EVENT_SYSTEM_MINIMIZESTART => "EVENT_SYSTEM_MINIMIZESTART",
+        _ => "UNKNOWN_WIN_EVENT",
     }
 }
 

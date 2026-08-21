@@ -326,6 +326,13 @@ impl Runtime {
         let Some(action) = action else {
             return false;
         };
+        let span = tracing::info_span!(
+            "key_binding",
+            key,
+            modifiers,
+            action = ?action,
+        );
+        let _entered = span.enter();
         if let Err(error) = self.execute(action) {
             crate::error_log::report_win32(format!("command {action:?} failed"), error);
         }
