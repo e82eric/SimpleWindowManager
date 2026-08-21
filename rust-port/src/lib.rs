@@ -11,6 +11,7 @@ pub mod layout;
 pub mod list_windows;
 pub mod model;
 pub mod platform;
+pub mod platform_error;
 pub mod process;
 pub mod restore;
 pub mod runtime;

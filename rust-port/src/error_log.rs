@@ -150,7 +150,24 @@ pub fn last_win32(context: impl Into<String>) -> u32 {
 
 #[track_caller]
 pub fn report_hresult(context: impl Into<String>, hresult: i32) {
-    report_win32(context, hresult as u32);
+    let caller = std::panic::Location::caller();
+    let operation = context.into();
+    let code = hresult as u32;
+    let error_message =
+        windows::core::Error::from_hresult(windows::core::HRESULT(hresult)).to_string();
+    let backtrace = Backtrace::force_capture();
+    eprintln!("{operation}: HRESULT {code:#010x}: {error_message}");
+    tracing::error!(
+        target: "swm::error",
+        operation = %operation,
+        error_kind = "hresult",
+        code,
+        error_message = %error_message,
+        backtrace = %backtrace,
+        timestamp_ms = timestamp_millis(),
+        caller_file = caller.file(),
+        caller_line = caller.line(),
+    );
 }
 
 #[track_caller]

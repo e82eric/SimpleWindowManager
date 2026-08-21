@@ -45,6 +45,6 @@ fn main() {
     let runtime = simple_window_manager_rs::runtime::Runtime::initialize(configuration, snapshot);
     startup.record("stage", "run");
     if let Err(error) = simple_window_manager_rs::platform::run(runtime, instance_mutex) {
-        simple_window_manager_rs::error_log::report_win32("GetMessageW failed", error);
+        error.report();
     }
 }

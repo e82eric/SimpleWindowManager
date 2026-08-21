@@ -3,6 +3,7 @@ use crate::config::Configuration;
 use crate::model::{
     Client, Monitor, MonitorId, Rect, WindowManagerState, WindowRoutingMode, WorkspaceId,
 };
+use crate::platform_error::{PlatformError, PlatformResult, check_bool, check_hresult};
 use crate::snapshot::{DesktopSnapshot, WindowSnapshot};
 
 const MAX_WORKSPACES: usize = 10;
@@ -97,7 +98,7 @@ impl Runtime {
         }
     }
 
-    pub fn apply_all_workspaces(&mut self) -> Result<(), u32> {
+    pub fn apply_all_workspaces(&mut self) -> PlatformResult<()> {
         for workspace in 0..self.configuration.state.workspaces.len() {
             self.configuration
                 .state
@@ -118,7 +119,7 @@ impl Runtime {
         self.rust_nfm = rust_nfm::runtime::PickerRuntime::start().ok();
     }
 
-    pub fn remove_client_by_hwnd(&mut self, hwnd: isize) -> Result<(), u32> {
+    pub fn remove_client_by_hwnd(&mut self, hwnd: isize) -> PlatformResult<()> {
         let Some(client_id) = self
             .configuration
             .state
@@ -150,7 +151,7 @@ impl Runtime {
     }
 
     #[tracing::instrument(skip(self), fields(hwnd = hwnd as usize))]
-    pub fn refresh_window(&mut self, hwnd: isize) -> Result<(), u32> {
+    pub fn refresh_window(&mut self, hwnd: isize) -> PlatformResult<()> {
         if let Some(client) = self
             .configuration
             .state
@@ -196,7 +197,7 @@ impl Runtime {
     }
 
     #[tracing::instrument(skip(self), fields(hwnd = hwnd as usize))]
-    pub fn location_changed(&mut self, hwnd: isize) -> Result<(), u32> {
+    pub fn location_changed(&mut self, hwnd: isize) -> PlatformResult<()> {
         let client_id = self
             .configuration
             .state
@@ -334,13 +335,13 @@ impl Runtime {
         );
         let _entered = span.enter();
         if let Err(error) = self.execute(action) {
-            crate::error_log::report_win32(format!("command {action:?} failed"), error);
+            error.report();
         }
         true
     }
 
     #[tracing::instrument(skip(self))]
-    pub fn execute(&mut self, action: Action) -> Result<(), u32> {
+    pub fn execute(&mut self, action: Action) -> PlatformResult<()> {
         use Action::*;
         if matches!(
             action,
@@ -359,11 +360,14 @@ impl Runtime {
         match action {
             Quit => platform_exit(),
             QuitAndRestore => {
-                crate::restore::restore_moved_windows_to_screen(false)?;
+                crate::restore::restore_moved_windows_to_screen(false).map_err(|code| {
+                    PlatformError::win32("restore_moved_windows_to_screen", code)
+                })?;
                 platform_exit();
             }
             CloseFocused => close_focused_window(),
-            KillFocused => kill_focused_window()?,
+            KillFocused => kill_focused_window()
+                .map_err(|code| PlatformError::win32("kill_focused_window", code))?,
             ToggleTaskbar => taskbar_toggle(),
             ToggleFilteredCurrent => {
                 self.toggle_routing(WindowRoutingMode::FilteredCurrentWorkspace)
@@ -383,7 +387,8 @@ impl Runtime {
             ShowClientLogs => self.run_client_logs_menu(),
             ShowErrorLogs => self.run_error_logs_menu(),
             RunLastMenu => self.run_last_menu()?,
-            Launch(command) => crate::process::start_app(command)?,
+            Launch(command) => crate::process::start_app(command)
+                .map_err(|code| PlatformError::win32("ShellExecuteW", code))?,
             MoveFloat(dx, dy) => self.move_float_or_resize_main(dx, dy)?,
             MoveFloatToMonitor(index) => self.move_float_to_monitor(index),
             MoveWorkspaceToMonitor(workspace, monitor) => {
@@ -458,7 +463,7 @@ impl Runtime {
     }
 
     #[tracing::instrument(skip(self), fields(workspace = workspace.0))]
-    fn apply_workspace(&mut self, workspace: WorkspaceId) -> Result<(), u32> {
+    fn apply_workspace(&mut self, workspace: WorkspaceId) -> PlatformResult<()> {
         self.configuration.state.arrange_workspace(workspace);
         apply_workspace_windows(
             &mut self.configuration.state,
@@ -499,7 +504,7 @@ impl Runtime {
             };
     }
 
-    fn move_selected_direction(&mut self, action: Action) -> Result<(), u32> {
+    fn move_selected_direction(&mut self, action: Action) -> PlatformResult<()> {
         use crate::model::MoveDirection;
         let Some(client) = self
             .configuration
@@ -527,7 +532,7 @@ impl Runtime {
         Ok(())
     }
 
-    fn move_selected_to_main(&mut self) -> Result<(), u32> {
+    fn move_selected_to_main(&mut self) -> PlatformResult<()> {
         let workspace = self.selected_workspace();
         let clients = self.configuration.state.workspaces[workspace.0]
             .clients
@@ -573,7 +578,7 @@ impl Runtime {
         self.redraw_bars();
     }
 
-    fn monitor_set_layout(&mut self, layout: crate::Layout) -> Result<(), u32> {
+    fn monitor_set_layout(&mut self, layout: crate::Layout) -> PlatformResult<()> {
         let workspace = self.selected_workspace();
         let previous = self.configuration.state.workspaces[workspace.0].layout;
         if previous == crate::Layout::Monocle && layout != crate::Layout::Monocle {
@@ -589,7 +594,7 @@ impl Runtime {
         Ok(())
     }
 
-    fn swap_selected_monitor_to(&mut self, workspace: WorkspaceId) -> Result<(), u32> {
+    fn swap_selected_monitor_to(&mut self, workspace: WorkspaceId) -> PlatformResult<()> {
         if workspace.0 >= self.configuration.state.workspaces.len() {
             return Ok(());
         }
@@ -617,7 +622,7 @@ impl Runtime {
         Ok(())
     }
 
-    fn move_focused_window_to_workspace(&mut self, workspace: WorkspaceId) -> Result<(), u32> {
+    fn move_focused_window_to_workspace(&mut self, workspace: WorkspaceId) -> PlatformResult<()> {
         if workspace.0 >= self.configuration.state.workspaces.len() {
             return Ok(());
         }
@@ -666,7 +671,7 @@ impl Runtime {
         Ok(())
     }
 
-    fn client_stop_managing(&mut self) -> Result<(), u32> {
+    fn client_stop_managing(&mut self) -> PlatformResult<()> {
         let workspace = self.selected_workspace();
         let Some(client) = self.configuration.state.workspaces[workspace.0].selected else {
             return Ok(());
@@ -819,7 +824,7 @@ impl Runtime {
         }
     }
 
-    fn run_last_menu(&mut self) -> Result<(), u32> {
+    fn run_last_menu(&mut self) -> PlatformResult<()> {
         if let Some(action) = self.last_menu_action {
             self.execute(action)?;
         }
@@ -840,7 +845,7 @@ impl Runtime {
         crate::platform::show_error_logs_menu(self);
     }
 
-    fn move_float_or_resize_main(&mut self, dx: i32, dy: i32) -> Result<(), u32> {
+    fn move_float_or_resize_main(&mut self, dx: i32, dy: i32) -> PlatformResult<()> {
         let hwnd = foreground_window();
         if self
             .configuration
@@ -894,7 +899,7 @@ impl Runtime {
         &mut self,
         workspace: WorkspaceId,
         monitor: MonitorId,
-    ) -> Result<(), u32> {
+    ) -> PlatformResult<()> {
         if workspace.0 >= self.configuration.state.workspaces.len()
             || monitor.0 >= self.configuration.state.monitors.len()
             || self.configuration.state.monitors[monitor.0].is_hidden
@@ -932,7 +937,7 @@ impl Runtime {
         Ok(())
     }
 
-    fn move_secondary_focused_to_main(&mut self) -> Result<(), u32> {
+    fn move_secondary_focused_to_main(&mut self) -> PlatformResult<()> {
         let Some(workspace) = self
             .configuration
             .state
@@ -994,7 +999,10 @@ impl Runtime {
                     .client_move_from_minimized_to_unminimized(client);
                 self.configuration.state.workspaces[workspace.0].selected = Some(client);
                 if self.selected_workspace() != workspace {
-                    let _ = self.swap_selected_monitor_to(workspace);
+                    if let Err(error) = self.swap_selected_monitor_to(workspace) {
+                        error.report();
+                        return;
+                    }
                 }
                 restore_window(hwnd);
             } else {
@@ -1013,9 +1021,15 @@ impl Runtime {
                     self.configuration.state.workspaces[workspace.0].selected = Some(client);
                 }
                 if self.selected_workspace() != workspace {
-                    let _ = self.swap_selected_monitor_to(workspace);
+                    if let Err(error) = self.swap_selected_monitor_to(workspace) {
+                        error.report();
+                        return;
+                    }
                 }
-                let _ = self.apply_workspace(workspace);
+                if let Err(error) = self.apply_workspace(workspace) {
+                    error.report();
+                    return;
+                }
                 self.focus_selected(workspace);
             }
         } else {
@@ -1042,11 +1056,12 @@ impl Runtime {
         self.focus_selected(workspace);
     }
 
-    pub fn create_bars(&mut self) -> Result<(), u32> {
+    pub fn create_bars(&mut self) -> PlatformResult<()> {
         self.bars = crate::bar::create_bars(
             &self.configuration.state.monitors,
             self.configuration.bar_height,
-        )?;
+        )
+        .map_err(|code| PlatformError::win32("create_bars", code))?;
         Ok(())
     }
 
@@ -1054,18 +1069,28 @@ impl Runtime {
         crate::bar::redraw(&self.bars);
     }
 
-    pub fn create_border_window(&mut self) -> Result<(), u32> {
-        let style = self.configuration.text_style.as_ref().ok_or(87u32)?;
-        self.border_window = Some(crate::border::create_border_window(
-            style.focus_color2,
-            style.lost_focus_color,
-        )?);
+    pub fn create_border_window(&mut self) -> PlatformResult<()> {
+        let style = self
+            .configuration
+            .text_style
+            .as_ref()
+            .ok_or(PlatformError::win32(
+                "create_border_window: text style is not configured",
+                87,
+            ))?;
+        self.border_window = Some(
+            crate::border::create_border_window(style.focus_color2, style.lost_focus_color)
+                .map_err(|code| PlatformError::win32("create_border_window", code))?,
+        );
         self.border_window_update();
         Ok(())
     }
 
-    pub fn create_drop_target_window(&mut self) -> Result<(), u32> {
-        self.drop_target_window = Some(crate::drop_target::create()?);
+    pub fn create_drop_target_window(&mut self) -> PlatformResult<()> {
+        self.drop_target_window = Some(
+            crate::drop_target::create()
+                .map_err(|code| PlatformError::win32("create_drop_target_window", code))?,
+        );
         Ok(())
     }
 
@@ -1181,7 +1206,9 @@ impl Runtime {
             return;
         }
         self.monitor_select(MonitorId(monitor));
-        let _ = self.swap_selected_monitor_to(WorkspaceId(workspace));
+        if let Err(error) = self.swap_selected_monitor_to(WorkspaceId(workspace)) {
+            error.report();
+        }
     }
 
     pub fn drag_drop_handle_location_change_with_mouse_down(&mut self, hwnd: isize) {
@@ -1295,7 +1322,7 @@ impl Runtime {
         }
     }
 
-    pub fn drag_drop_try_handle_left_mouse_up(&mut self) -> Result<bool, u32> {
+    pub fn drag_drop_try_handle_left_mouse_up(&mut self) -> PlatformResult<bool> {
         if !self.drag_drop_state.in_progress || self.drag_drop_state.drag_hwnd == 0 {
             if let Some(client) = self.regular_resize_client.take() {
                 if let Some(workspace) = self.configuration.state.clients[client.0]
@@ -1505,7 +1532,7 @@ impl Runtime {
         (Some(monitor), target)
     }
 
-    pub fn taskbar_changed(&mut self, taskbar: isize) -> Result<(), u32> {
+    pub fn taskbar_changed(&mut self, taskbar: isize) -> PlatformResult<()> {
         let screen_height = primary_screen_size().1;
         let height = taskbar_height(taskbar);
         for monitor in &mut self.configuration.state.monitors {
@@ -2090,10 +2117,12 @@ fn apply_workspace_windows(
     always_redraw: bool,
     hidden_x: i32,
     use_old_move_logic: bool,
-) -> Result<(), u32> {
+) -> PlatformResult<()> {
     use std::mem::{size_of, zeroed};
-    use windows_sys::Win32::Foundation::{GetLastError, HWND, RECT};
-    use windows_sys::Win32::Graphics::Dwm::{DWMWA_CLOAKED, DwmGetWindowAttribute};
+    use windows_sys::Win32::Foundation::{HWND, RECT};
+    use windows_sys::Win32::Graphics::Dwm::{
+        DWMWA_CLOAKED, DWMWA_EXTENDED_FRAME_BOUNDS, DwmGetWindowAttribute,
+    };
     use windows_sys::Win32::UI::WindowsAndMessaging::{
         BeginDeferWindowPos, DeferWindowPos, EndDeferWindowPos, GetWindowRect, HWND_BOTTOM,
         HWND_NOTOPMOST, HWND_TOPMOST, MoveWindow, SW_RESTORE, SWP_NOMOVE, SWP_NOREDRAW, SWP_NOSIZE,
@@ -2105,9 +2134,7 @@ fn apply_workspace_windows(
         .is_some_and(|monitor| state.monitors[monitor.0].is_hidden);
     let mut defer = unsafe { BeginDeferWindowPos(workspace.clients.len() as i32 + 1) };
     if defer.is_null() {
-        let error = unsafe { GetLastError() };
-        crate::error_log::report_win32("BeginDeferWindowPos failed", error);
-        return Err(error);
+        return Err(PlatformError::last_win32("BeginDeferWindowPos"));
     }
     for client_id in workspace.clients.iter().rev() {
         let client = state.clients[client_id.0].as_mut().unwrap();
@@ -2120,23 +2147,28 @@ fn apply_workspace_windows(
         }
         let hwnd = client.data.hwnd as HWND;
         let mut window_rect: RECT = unsafe { zeroed() };
-        let mut frame_rect: RECT = unsafe { zeroed() };
-        if unsafe { GetWindowRect(hwnd, &mut window_rect) } == 0 {
-            crate::error_log::last_win32("GetWindowRect(arrange workspace) failed");
+        if let Err(error) = check_bool(
+            unsafe { GetWindowRect(hwnd, &mut window_rect) },
+            "GetWindowRect(arrange workspace)",
+        ) {
+            error.report();
+            continue;
         }
+        let mut frame_rect = window_rect;
         let frame_result = unsafe {
             DwmGetWindowAttribute(
                 hwnd,
-                9,
+                DWMWA_EXTENDED_FRAME_BOUNDS as u32,
                 &mut frame_rect as *mut _ as _,
                 size_of::<RECT>() as u32,
             )
         };
-        if frame_result < 0 {
-            crate::error_log::report_hresult(
-                "DwmGetWindowAttribute(extended frame bounds) failed",
-                frame_result,
-            );
+        if let Err(error) = check_hresult(
+            frame_result,
+            "DwmGetWindowAttribute(DWMWA_EXTENDED_FRAME_BOUNDS)",
+        ) {
+            error.report();
+            frame_rect = window_rect;
         }
         let left_border = frame_rect.left - window_rect.left;
         let right_border = window_rect.right - frame_rect.right;
@@ -2160,11 +2192,9 @@ fn apply_workspace_windows(
                 size_of::<u32>() as u32,
             )
         };
-        if cloak_result < 0 {
-            crate::error_log::report_hresult(
-                "DwmGetWindowAttribute(cloaked state) failed",
-                cloak_result,
-            );
+        if let Err(error) = check_hresult(cloak_result, "DwmGetWindowAttribute(DWMWA_CLOAKED)") {
+            error.report();
+            cloaked = 0;
         }
         if window_matches_target(
             Rect {
@@ -2257,20 +2287,14 @@ fn apply_workspace_windows(
             )
         };
         if defer.is_null() {
-            let error = unsafe { GetLastError() };
-            crate::error_log::report_win32("DeferWindowPos failed", error);
-            return Err(error);
+            return Err(PlatformError::last_win32("DeferWindowPos"));
         }
         client.data.is_dirty = false;
         if client.data.use_minimize_to_hide && !workspace_hidden {
             crate::cloak::set_cloak_for_window(client.data.hwnd, 1, 0);
         }
     }
-    if unsafe { EndDeferWindowPos(defer) } == 0 {
-        let error = unsafe { GetLastError() };
-        crate::error_log::report_win32("EndDeferWindowPos failed", error);
-        return Err(error);
-    }
+    check_bool(unsafe { EndDeferWindowPos(defer) }, "EndDeferWindowPos")?;
     Ok(())
 }
 

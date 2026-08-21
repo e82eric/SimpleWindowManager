@@ -3,6 +3,7 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, OnceLock};
 
+use crate::platform_error::{PlatformError, PlatformResult};
 use crate::runtime::Runtime;
 
 pub(crate) fn consume_picker_task<T, F>(task: rust_nfm::runtime::PickerTask<T>, completed: F)
@@ -170,7 +171,7 @@ fn command_selected(name: &str) {
                 let span = tracing::info_span!("command_selected", name, action = ?action);
                 let _entered = span.enter();
                 if let Err(error) = runtime.execute(action) {
-                    crate::error_log::report_win32(format!("command {action:?} failed"), error);
+                    error.report();
                 }
             }
         }
@@ -883,7 +884,7 @@ unsafe extern "system" fn handle_mouse(code: i32, wparam: usize, lparam: isize) 
         if let Some(runtime) = RUNTIME.get() {
             if let Ok(mut runtime) = runtime.try_lock() {
                 if let Err(error) = runtime.drag_drop_try_handle_left_mouse_up() {
-                    crate::error_log::report_win32("drag/drop mouse-up handling failed", error);
+                    error.report();
                 }
             }
         }
@@ -933,14 +934,7 @@ unsafe extern "system" fn handle_windows_event(
     let result = match event {
         EVENT_OBJECT_DESTROY => {
             if let Err(error) = runtime.remove_client_by_hwnd(raw) {
-                report_win_event_error(
-                    event,
-                    raw,
-                    id_object,
-                    id_child,
-                    "client removal failed",
-                    error,
-                );
+                report_win_event_error(event, raw, id_object, id_child, error);
             }
             Ok(())
         }
@@ -948,14 +942,7 @@ unsafe extern "system" fn handle_windows_event(
             if is_taskbar(hwnd)
                 && let Err(error) = runtime.taskbar_changed(raw)
             {
-                report_win_event_error(
-                    event,
-                    raw,
-                    id_object,
-                    id_child,
-                    "taskbar resize failed",
-                    error,
-                );
+                report_win_event_error(event, raw, id_object, id_child, error);
             }
             use windows_sys::Win32::UI::WindowsAndMessaging::{GWL_STYLE, WS_VISIBLE};
             if platform_window_long(hwnd, GWL_STYLE) & WS_VISIBLE as i32 == 0 {
@@ -976,7 +963,7 @@ unsafe extern "system" fn handle_windows_event(
         _ => Ok(()),
     };
     if let Err(error) = result {
-        report_win_event_error(event, raw, id_object, id_child, "WinEvent failed", error);
+        report_win_event_error(event, raw, id_object, id_child, error);
     }
 }
 
@@ -997,14 +984,7 @@ fn win_event_name(event: u32) -> &'static str {
     }
 }
 
-fn report_win_event_error(
-    event: u32,
-    hwnd: isize,
-    object: i32,
-    child: i32,
-    operation: &str,
-    error: u32,
-) {
+fn report_win_event_error(event: u32, hwnd: isize, object: i32, child: i32, error: PlatformError) {
     let span = tracing::error_span!(
         "handle_windows_event",
         event,
@@ -1013,7 +993,7 @@ fn report_win_event_error(
         child
     );
     let _entered = span.enter();
-    crate::error_log::report_win32(operation, error);
+    error.report();
 }
 
 fn platform_window_long(hwnd: windows_sys::Win32::Foundation::HWND, index: i32) -> i32 {
@@ -1088,7 +1068,7 @@ fn install_win_event_hooks() -> Vec<windows_sys::Win32::UI::Accessibility::HWINE
 }
 
 #[tracing::instrument]
-pub fn run_message_loop() -> Result<(), u32> {
+pub fn run_message_loop() -> PlatformResult<()> {
     use std::mem::zeroed;
     use windows_sys::Win32::Foundation::HWND;
     use windows_sys::Win32::UI::WindowsAndMessaging::{
@@ -1100,8 +1080,7 @@ pub fn run_message_loop() -> Result<(), u32> {
             let result = GetMessageW(&mut message, 0 as HWND, 0, 0);
             if result == -1 {
                 let error = windows_sys::Win32::Foundation::GetLastError();
-                crate::error_log::report_win32("GetMessageW failed", error);
-                return Err(error);
+                return Err(PlatformError::win32("GetMessageW", error));
             }
             if result == 0 {
                 return Ok(());
@@ -1144,7 +1123,7 @@ pub fn acquire_single_instance() -> Result<Option<isize>, u32> {
 }
 
 #[tracing::instrument(skip(runtime), fields(instance_mutex = instance_mutex as usize))]
-pub fn run(runtime: Runtime, instance_mutex: isize) -> Result<(), u32> {
+pub fn run(runtime: Runtime, instance_mutex: isize) -> PlatformResult<()> {
     use windows_sys::Win32::Foundation::{CloseHandle, GetLastError};
     use windows_sys::Win32::System::Com::{
         COINIT_MULTITHREADED, CoInitializeEx, CoInitializeSecurity, CoUninitialize, EOAC_NONE,
@@ -1174,7 +1153,7 @@ pub fn run(runtime: Runtime, instance_mutex: isize) -> Result<(), u32> {
     crate::status::initialize();
     RUNTIME
         .set(Mutex::new(runtime))
-        .map_err(|_| unsafe { GetLastError() })?;
+        .map_err(|_| PlatformError::win32("initialize global runtime", 183))?;
     if let Some(runtime) = RUNTIME.get() {
         let mut runtime = runtime.lock().unwrap();
         runtime.create_bars()?;
@@ -1191,8 +1170,7 @@ pub fn run(runtime: Runtime, instance_mutex: isize) -> Result<(), u32> {
     };
     if keyboard_hook.is_null() {
         let error = unsafe { GetLastError() };
-        crate::error_log::report_win32("SetWindowsHookExW(keyboard) failed", error);
-        return Err(error);
+        return Err(PlatformError::win32("SetWindowsHookExW(keyboard)", error));
     }
     let mouse_hook = unsafe {
         let module = GetModuleHandleW(std::ptr::null());
@@ -1206,8 +1184,7 @@ pub fn run(runtime: Runtime, instance_mutex: isize) -> Result<(), u32> {
         if unsafe { UnhookWindowsHookEx(keyboard_hook) } == 0 {
             crate::error_log::last_win32("UnhookWindowsHookEx(keyboard cleanup) failed");
         }
-        crate::error_log::report_win32("SetWindowsHookExW(mouse) failed", error);
-        return Err(error);
+        return Err(PlatformError::win32("SetWindowsHookExW(mouse)", error));
     }
     let hooks = install_win_event_hooks();
     if let Some(runtime) = RUNTIME.get() {
