@@ -2209,21 +2209,23 @@ fn apply_workspace_windows(
             target_height,
             cloaked != 0,
         ) {
-            client.data.is_dirty = false;
             continue;
         }
         if use_old_move_logic {
             unsafe {
-                if MoveWindow(
-                    hwnd,
-                    target_left,
-                    target_top,
-                    target_width,
-                    target_height,
-                    0,
-                ) == 0
-                {
-                    crate::error_log::last_win32("MoveWindow(arrange workspace) failed");
+                if let Err(error) = check_bool(
+                    MoveWindow(
+                        hwnd,
+                        target_left,
+                        target_top,
+                        target_width,
+                        target_height,
+                        0,
+                    ),
+                    "MoveWindow(arrange workspace)",
+                ) {
+                    error.report();
+                    continue;
                 }
                 ShowWindow(hwnd, SW_RESTORE);
                 if client.is_visible {
@@ -2266,7 +2268,6 @@ fn apply_workspace_windows(
                     }
                 }
             }
-            client.data.is_dirty = false;
             continue;
         }
         let flags = if always_redraw {
@@ -2289,7 +2290,6 @@ fn apply_workspace_windows(
         if defer.is_null() {
             return Err(PlatformError::last_win32("DeferWindowPos"));
         }
-        client.data.is_dirty = false;
         if client.data.use_minimize_to_hide && !workspace_hidden {
             crate::cloak::set_cloak_for_window(client.data.hwnd, 1, 0);
         }

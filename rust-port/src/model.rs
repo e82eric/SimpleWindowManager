@@ -42,7 +42,6 @@ pub struct ClientData {
     pub is_elevated: bool,
     pub is_minimized: bool,
     pub use_minimize_to_hide: bool,
-    pub is_dirty: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -969,7 +968,6 @@ impl WindowManagerState {
             if let Some(client) = self.clients[id.0].as_mut() {
                 client.data.rect = rects[index].0;
                 client.is_visible = rects[index].1;
-                client.data.is_dirty = true;
             }
         }
     }
