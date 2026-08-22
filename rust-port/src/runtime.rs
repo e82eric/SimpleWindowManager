@@ -1268,17 +1268,21 @@ impl Runtime {
                     .unwrap()
                     .data
                     .rect;
-                if let Some(actual) = window_rect(hwnd) {
-                    let pad = 10;
-                    let left_changed = (actual.left - expected.left).abs() > pad;
-                    let top_changed = (actual.top - expected.top).abs() > pad;
-                    let right_changed = (actual.right - expected.right).abs() > pad;
-                    let bottom_changed = (actual.bottom - expected.bottom).abs() > pad;
-                    let moving = (left_changed && right_changed) || (top_changed && bottom_changed);
-                    if !moving {
-                        self.regular_resize_client = Some(client);
-                        return;
+                match window_rect(hwnd) {
+                    Ok(actual) => {
+                        let pad = 10;
+                        let left_changed = (actual.left - expected.left).abs() > pad;
+                        let top_changed = (actual.top - expected.top).abs() > pad;
+                        let right_changed = (actual.right - expected.right).abs() > pad;
+                        let bottom_changed = (actual.bottom - expected.bottom).abs() > pad;
+                        let moving =
+                            (left_changed && right_changed) || (top_changed && bottom_changed);
+                        if !moving {
+                            self.regular_resize_client = Some(client);
+                            return;
+                        }
                     }
+                    Err(error) => error.report(),
                 }
             }
         } else {
@@ -1591,7 +1595,13 @@ fn window_manager_try_add_window(
     if let Some(workspace) = workspace {
         let was_minimized = client.data.is_minimized;
         let data = client.data.clone();
-        let logged_rect = window_rect(data.hwnd).unwrap_or(window.normal_rect);
+        let logged_rect = match window_rect(data.hwnd) {
+            Ok(rect) => rect,
+            Err(error) => {
+                error.report();
+                window.normal_rect
+            }
+        };
         if restore_zoomed && is_zoomed(data.hwnd) {
             restore_window(data.hwnd);
         }
@@ -1786,29 +1796,39 @@ fn restore_window(hwnd: isize) {
 
 fn show_unmanaged_window_on_selected_monitor(hwnd: isize, monitor: &Monitor) {
     use windows_sys::Win32::UI::WindowsAndMessaging::{
-        BringWindowToTop, MoveWindow, SW_SHOWDEFAULT, SetForegroundWindow, ShowWindow,
+        BringWindowToTop, MoveWindow, SW_SHOWDEFAULT, ShowWindow,
     };
+    set_foreground_window(hwnd);
     unsafe {
-        let _ = SetForegroundWindow(hwnd as _);
         ShowWindow(hwnd as _, SW_SHOWDEFAULT);
-        if BringWindowToTop(hwnd as _) == 0 {
-            crate::error_log::last_win32("BringWindowToTop(unmanaged window) failed");
+        if let Err(error) = check_bool(
+            BringWindowToTop(hwnd as _),
+            "BringWindowToTop(unmanaged window)",
+        ) {
+            error.report();
         }
     }
-    if let Some(rect) = window_rect(hwnd) {
-        if rect.left > monitor.x_offset + monitor.width || rect.left < monitor.x_offset {
-            unsafe {
-                if MoveWindow(
+    let rect = match window_rect(hwnd) {
+        Ok(rect) => rect,
+        Err(error) => {
+            error.report();
+            return;
+        }
+    };
+    if rect.left > monitor.x_offset + monitor.width || rect.left < monitor.x_offset {
+        unsafe {
+            if let Err(error) = check_bool(
+                MoveWindow(
                     hwnd as _,
                     monitor.x_offset + monitor.gap_width * 2,
                     rect.top,
                     rect.right - rect.left,
                     rect.bottom - rect.top,
                     1,
-                ) == 0
-                {
-                    crate::error_log::last_win32("MoveWindow(unmanaged window) failed");
-                }
+                ),
+                "MoveWindow(unmanaged window)",
+            ) {
+                error.report();
             }
         }
     }
@@ -1994,27 +2014,30 @@ fn center_window_on_monitor(hwnd: isize, monitor: &Monitor) {
     }
 }
 
-fn window_rect(hwnd: isize) -> Option<Rect> {
+fn window_rect(hwnd: isize) -> PlatformResult<Rect> {
     use std::mem::zeroed;
     use windows_sys::Win32::Foundation::RECT;
     use windows_sys::Win32::UI::WindowsAndMessaging::GetWindowRect;
     let mut rect: RECT = unsafe { zeroed() };
-    if unsafe { GetWindowRect(hwnd as _, &mut rect) } == 0 {
-        crate::error_log::last_win32("GetWindowRect failed");
-        None
-    } else {
-        Some(Rect {
-            left: rect.left,
-            top: rect.top,
-            right: rect.right,
-            bottom: rect.bottom,
-        })
-    }
+    check_bool(
+        unsafe { GetWindowRect(hwnd as _, &mut rect) },
+        "GetWindowRect",
+    )?;
+    Ok(Rect {
+        left: rect.left,
+        top: rect.top,
+        right: rect.right,
+        bottom: rect.bottom,
+    })
 }
 
 fn hit_test_hwnd(hwnd: isize) -> bool {
-    let Some(rect) = window_rect(hwnd) else {
-        return false;
+    let rect = match window_rect(hwnd) {
+        Ok(rect) => rect,
+        Err(error) => {
+            error.report();
+            return false;
+        }
     };
     let Some((x, y)) = cursor_position() else {
         return false;
@@ -2085,8 +2108,12 @@ fn is_fullscreen(hwnd: isize) -> bool {
     use windows_sys::Win32::Graphics::Gdi::{
         GetMonitorInfoW, MONITOR_DEFAULTTOPRIMARY, MONITORINFO, MonitorFromWindow,
     };
-    let Some(rect) = window_rect(hwnd) else {
-        return false;
+    let rect = match window_rect(hwnd) {
+        Ok(rect) => rect,
+        Err(error) => {
+            error.report();
+            return false;
+        }
     };
     let mut info: MONITORINFO = unsafe { zeroed() };
     info.cbSize = size_of::<MONITORINFO>() as u32;
