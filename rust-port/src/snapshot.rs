@@ -519,8 +519,8 @@ pub fn is_list_window_handle(hwnd: isize) -> bool {
 }
 
 #[tracing::instrument]
-pub fn capture_list_windows() -> Result<Vec<WindowSnapshot>, u32> {
-    use windows_sys::Win32::Foundation::{GetLastError, HWND, LPARAM};
+pub fn capture_list_windows() -> PlatformResult<Vec<WindowSnapshot>> {
+    use windows_sys::Win32::Foundation::{HWND, LPARAM};
     use windows_sys::Win32::UI::WindowsAndMessaging::EnumWindows;
     unsafe extern "system" fn callback(hwnd: HWND, state: LPARAM) -> i32 {
         if is_list_window_handle(hwnd as isize) {
@@ -535,13 +535,11 @@ pub fn capture_list_windows() -> Result<Vec<WindowSnapshot>, u32> {
         1
     }
     let mut windows = Vec::new();
-    if unsafe { EnumWindows(Some(callback), &mut windows as *mut _ as LPARAM) } == 0 {
-        let error = unsafe { GetLastError() };
-        crate::error_log::report_win32("EnumWindows(list windows) failed", error);
-        Err(error)
-    } else {
-        Ok(windows)
-    }
+    check_bool(
+        unsafe { EnumWindows(Some(callback), &mut windows as *mut _ as LPARAM) },
+        "EnumWindows(list windows)",
+    )?;
+    Ok(windows)
 }
 
 #[tracing::instrument]

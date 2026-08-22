@@ -1,3 +1,4 @@
+use crate::platform_error::PlatformResult;
 use crate::snapshot::WindowSnapshot;
 
 fn process_name(window: &WindowSnapshot) -> &str {
@@ -9,7 +10,7 @@ fn process_name(window: &WindowSnapshot) -> &str {
         .unwrap_or("")
 }
 
-pub fn list_windows_run(max_items: usize) -> Result<Vec<String>, u32> {
+pub fn list_windows_run(max_items: usize) -> PlatformResult<Vec<String>> {
     let windows = crate::snapshot::capture_list_windows()?;
     Ok(format_windows(&windows, max_items))
 }

@@ -1,6 +1,8 @@
-pub fn restore_moved_windows_to_screen(no_restore: bool) -> Result<(), u32> {
+pub fn restore_moved_windows_to_screen(
+    no_restore: bool,
+) -> crate::platform_error::PlatformResult<()> {
     use std::mem::zeroed;
-    use windows_sys::Win32::Foundation::{GetLastError, HWND, RECT};
+    use windows_sys::Win32::Foundation::{HWND, RECT};
     use windows_sys::Win32::UI::WindowsAndMessaging::*;
     let wide = |value: &str| value.encode_utf16().chain([0]).collect::<Vec<_>>();
     unsafe {
@@ -31,8 +33,11 @@ pub fn restore_moved_windows_to_screen(no_restore: bool) -> Result<(), u32> {
         for window in crate::snapshot::capture_list_windows()? {
             let hwnd = window.data.hwnd as HWND;
             let mut rect: RECT = zeroed();
-            if GetWindowRect(hwnd, &mut rect) == 0 {
-                crate::error_log::last_win32("GetWindowRect(restore moved window) failed");
+            if let Err(error) = crate::platform_error::check_bool(
+                GetWindowRect(hwnd, &mut rect),
+                "GetWindowRect(restore moved window)",
+            ) {
+                error.report();
                 continue;
             }
             if rect.right > screen_right
@@ -43,23 +48,21 @@ pub fn restore_moved_windows_to_screen(no_restore: bool) -> Result<(), u32> {
                     "Restoring window, title: {} right: {}",
                     window.data.title, rect.right
                 );
-                if !no_restore
-                    && SetWindowPos(
-                        hwnd,
-                        std::ptr::null_mut(),
-                        25,
-                        25,
-                        0,
-                        0,
-                        SWP_NOSIZE | SWP_NOZORDER,
-                    ) == 0
-                {
-                    let error = GetLastError();
-                    crate::error_log::report_win32(
-                        "SetWindowPos(restore moved window) failed",
-                        error,
-                    );
-                    return Err(error);
+                if !no_restore {
+                    if let Err(error) = crate::platform_error::check_bool(
+                        SetWindowPos(
+                            hwnd,
+                            std::ptr::null_mut(),
+                            25,
+                            25,
+                            0,
+                            0,
+                            SWP_NOSIZE | SWP_NOZORDER,
+                        ),
+                        "SetWindowPos(restore moved window)",
+                    ) {
+                        error.report();
+                    }
                 }
             }
         }

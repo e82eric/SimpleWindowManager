@@ -360,9 +360,7 @@ impl Runtime {
         match action {
             Quit => platform_exit(),
             QuitAndRestore => {
-                crate::restore::restore_moved_windows_to_screen(false).map_err(|code| {
-                    PlatformError::win32("restore_moved_windows_to_screen", code)
-                })?;
+                crate::restore::restore_moved_windows_to_screen(false)?;
                 platform_exit();
             }
             CloseFocused => close_focused_window(),
