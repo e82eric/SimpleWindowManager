@@ -34,10 +34,7 @@ fn main() {
         match simple_window_manager_rs::snapshot::capture(configuration.float_uwp_windows) {
             Ok(snapshot) => snapshot,
             Err(error) => {
-                simple_window_manager_rs::error_log::report_win32(
-                    "desktop discovery failed",
-                    error,
-                );
+                error.report();
                 return;
             }
         };
