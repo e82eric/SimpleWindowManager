@@ -2132,11 +2132,14 @@ fn is_fullscreen(hwnd: isize) -> bool {
     info.cbSize = size_of::<MONITORINFO>() as u32;
     let monitor = unsafe { MonitorFromWindow(hwnd as _, MONITOR_DEFAULTTOPRIMARY) };
     if monitor.is_null() {
-        crate::error_log::report("MonitorFromWindow failed", "returned a null monitor");
+        PlatformError::null_output("MonitorFromWindow(MONITOR_DEFAULTTOPRIMARY)").report();
         return false;
     }
-    if unsafe { GetMonitorInfoW(monitor, &mut info) } == 0 {
-        crate::error_log::last_win32("GetMonitorInfoW(fullscreen check) failed");
+    if let Err(error) = check_bool(
+        unsafe { GetMonitorInfoW(monitor, &mut info) },
+        "GetMonitorInfoW(fullscreen check)",
+    ) {
+        error.report();
         return false;
     }
     rect.left == info.rcMonitor.left
