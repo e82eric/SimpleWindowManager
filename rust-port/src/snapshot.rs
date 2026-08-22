@@ -1,6 +1,10 @@
 #![allow(unsafe_op_in_unsafe_fn)]
 
-use crate::{ClientData, Monitor, Rect};
+use crate::{
+    ClientData, Monitor, Rect,
+    platform_error::{PlatformError, PlatformResult, check_bool},
+};
+use windows_sys::Win32::Foundation::{ERROR_INSUFFICIENT_BUFFER, ERROR_INVALID_WINDOW_HANDLE};
 
 #[derive(Debug, Default)]
 pub struct DesktopSnapshot {
@@ -16,7 +20,9 @@ pub struct WindowSnapshot {
     pub normal_rect: Rect,
 }
 
-unsafe fn process_is_elevated(process: windows_sys::Win32::Foundation::HANDLE) -> bool {
+unsafe fn process_is_elevated(
+    process: windows_sys::Win32::Foundation::HANDLE,
+) -> PlatformResult<bool> {
     use std::mem::{size_of, zeroed};
     use windows_sys::Win32::Foundation::CloseHandle;
     use windows_sys::Win32::Security::{
@@ -25,35 +31,62 @@ unsafe fn process_is_elevated(process: windows_sys::Win32::Foundation::HANDLE) -
     use windows_sys::Win32::System::Threading::OpenProcessToken;
     let mut token = std::ptr::null_mut();
     if process.is_null() {
-        return false;
+        return Ok(false);
     }
-    if OpenProcessToken(process, TOKEN_QUERY, &mut token) == 0 {
-        crate::error_log::last_win32("OpenProcessToken failed");
-        return false;
-    }
+    check_bool(
+        OpenProcessToken(process, TOKEN_QUERY, &mut token),
+        "OpenProcessToken",
+    )?;
     let mut elevation: TOKEN_ELEVATION = zeroed();
     let mut returned = 0;
-    let information_result = GetTokenInformation(
-        token,
-        TokenElevation,
-        &mut elevation as *mut _ as _,
-        size_of::<TOKEN_ELEVATION>() as u32,
-        &mut returned,
+    let information_result = check_bool(
+        GetTokenInformation(
+            token,
+            TokenElevation,
+            &mut elevation as *mut _ as _,
+            size_of::<TOKEN_ELEVATION>() as u32,
+            &mut returned,
+        ),
+        "GetTokenInformation(TokenElevation)",
     );
-    if information_result == 0 {
-        crate::error_log::last_win32("GetTokenInformation(TokenElevation) failed");
+    let close_result = check_bool(CloseHandle(token), "CloseHandle(process token)");
+    information_result?;
+    close_result?;
+    Ok(elevation.TokenIsElevated != 0)
+}
+
+unsafe fn query_process_image_name(
+    process: windows_sys::Win32::Foundation::HANDLE,
+) -> PlatformResult<String> {
+    use windows_sys::Win32::System::Threading::QueryFullProcessImageNameW;
+
+    let mut capacity = 1024usize;
+    loop {
+        let mut buffer = vec![0u16; capacity];
+        let mut length = capacity as u32;
+        if QueryFullProcessImageNameW(process, 0, buffer.as_mut_ptr(), &mut length) != 0 {
+            return Ok(String::from_utf16_lossy(&buffer[..length as usize]));
+        }
+
+        let error = PlatformError::last_win32("QueryFullProcessImageNameW");
+        if !error.is_win32(ERROR_INSUFFICIENT_BUFFER) || capacity >= 32_768 {
+            return Err(error);
+        }
+        capacity *= 2;
     }
-    if CloseHandle(token) == 0 {
-        crate::error_log::last_win32("CloseHandle(process token) failed");
-    }
-    information_result != 0 && elevation.TokenIsElevated != 0
 }
 
 unsafe fn window_long(hwnd: windows_sys::Win32::Foundation::HWND, index: i32) -> i32 {
-    match unsafe { window_long_checked(hwnd, index) } {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{GWL_EXSTYLE, GWL_STYLE};
+    let operation = match index {
+        GWL_STYLE => "GetWindowLongW(GWL_STYLE)",
+        GWL_EXSTYLE => "GetWindowLongW(GWL_EXSTYLE)",
+        _ => "GetWindowLongW",
+    };
+    match unsafe { window_long_checked(hwnd, index, operation) } {
         Ok(value) => value,
         Err(error) => {
-            crate::error_log::report_win32(format!("GetWindowLongW({index}) failed"), error);
+            error.report();
             0
         }
     }
@@ -62,41 +95,47 @@ unsafe fn window_long(hwnd: windows_sys::Win32::Foundation::HWND, index: i32) ->
 unsafe fn window_long_checked(
     hwnd: windows_sys::Win32::Foundation::HWND,
     index: i32,
-) -> Result<i32, u32> {
+    operation: &'static str,
+) -> PlatformResult<i32> {
     use windows_sys::Win32::Foundation::{GetLastError, SetLastError};
     use windows_sys::Win32::UI::WindowsAndMessaging::GetWindowLongW;
     SetLastError(0);
     let value = GetWindowLongW(hwnd, index);
     let error = GetLastError();
     if value == 0 && error != 0 {
-        Err(error)
+        Err(PlatformError::win32(operation, error))
     } else {
         Ok(value)
     }
 }
 
-unsafe fn window_text_length(hwnd: windows_sys::Win32::Foundation::HWND) -> usize {
+unsafe fn window_text_length(hwnd: windows_sys::Win32::Foundation::HWND) -> PlatformResult<usize> {
     use windows_sys::Win32::Foundation::{GetLastError, SetLastError};
     use windows_sys::Win32::UI::WindowsAndMessaging::GetWindowTextLengthW;
     SetLastError(0);
     let length = GetWindowTextLengthW(hwnd);
     let error = GetLastError();
-    if length == 0 && error != 0 && error != 1400 {
-        crate::error_log::report_win32("GetWindowTextLengthW failed", error);
+    if length == 0 && error != 0 {
+        Err(PlatformError::win32("GetWindowTextLengthW", error))
+    } else {
+        Ok(length as usize)
     }
-    length.max(0) as usize
 }
 
-unsafe fn window_text(hwnd: windows_sys::Win32::Foundation::HWND, buffer: &mut [u16]) -> i32 {
+unsafe fn window_text(
+    hwnd: windows_sys::Win32::Foundation::HWND,
+    buffer: &mut [u16],
+) -> PlatformResult<usize> {
     use windows_sys::Win32::Foundation::{GetLastError, SetLastError};
     use windows_sys::Win32::UI::WindowsAndMessaging::GetWindowTextW;
     SetLastError(0);
     let length = GetWindowTextW(hwnd, buffer.as_mut_ptr(), buffer.len() as i32);
     let error = GetLastError();
-    if length == 0 && error != 0 && error != 1400 {
-        crate::error_log::report_win32("GetWindowTextW failed", error);
+    if length == 0 && error != 0 {
+        Err(PlatformError::win32("GetWindowTextW", error))
+    } else {
+        Ok(length as usize)
     }
-    length
 }
 
 unsafe fn parent_window(
@@ -203,92 +242,127 @@ pub fn is_root_window_handle(hwnd: isize, float_uwp_windows: bool) -> bool {
 fn capture_window_data(hwnd: isize, require_visible: bool) -> Option<WindowSnapshot> {
     use std::mem::{size_of, zeroed};
     use windows_sys::Win32::Foundation::CloseHandle;
-    use windows_sys::Win32::System::Threading::{
-        OpenProcess, PROCESS_QUERY_INFORMATION, PROCESS_VM_READ, QueryFullProcessImageNameW,
-    };
+    use windows_sys::Win32::System::Threading::{OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION};
     use windows_sys::Win32::UI::WindowsAndMessaging::*;
     let hwnd_value = hwnd as windows_sys::Win32::Foundation::HWND;
+    // Windows can disappear between an event and snapshot capture. IsWindow
+    // reports validity rather than an actionable GetLastError failure.
     if hwnd_value.is_null() || unsafe { IsWindow(hwnd_value) } == 0 {
         return None;
     }
-    let styles = match unsafe { window_long_checked(hwnd_value, GWL_STYLE) } {
-        Ok(styles) => styles,
-        Err(1400) => return None,
-        Err(error) => {
-            crate::error_log::report_win32("GetWindowLongW(-16) failed", error);
-            return None;
-        }
-    };
+    let styles =
+        match unsafe { window_long_checked(hwnd_value, GWL_STYLE, "GetWindowLongW(GWL_STYLE)") } {
+            Ok(styles) => styles,
+            Err(error) if error.is_win32(ERROR_INVALID_WINDOW_HANDLE) => return None,
+            Err(error) => {
+                error.report();
+                // Window styles are required for visibility and classification;
+                // substituting zero could produce a misleading snapshot.
+                return None;
+            }
+        };
     if require_visible && styles & WS_VISIBLE as i32 == 0 {
         return None;
     }
-    let wide = |class_name: bool| unsafe {
-        let length = if class_name {
-            255
-        } else {
-            window_text_length(hwnd_value)
-        };
-        let mut buffer = vec![0u16; length + 1];
-        let written = if class_name {
-            GetClassNameW(hwnd_value, buffer.as_mut_ptr(), buffer.len() as i32)
-        } else {
-            window_text(hwnd_value, &mut buffer)
-        };
-        if class_name && written == 0 {
-            let error = windows_sys::Win32::Foundation::GetLastError();
-            if error != 1400 {
-                crate::error_log::report_win32("GetClassNameW failed", error);
-            }
-        }
-        String::from_utf16_lossy(&buffer[..written.max(0) as usize])
+    let mut class_buffer = [0u16; 257];
+    let class_length = unsafe {
+        GetClassNameW(
+            hwnd_value,
+            class_buffer.as_mut_ptr(),
+            class_buffer.len() as i32,
+        )
     };
-    let class_name = wide(true);
+    if class_length == 0 {
+        let error = PlatformError::last_win32("GetClassNameW");
+        if !error.is_win32(ERROR_INVALID_WINDOW_HANDLE) {
+            error.report();
+        }
+        // Class names are required for filtering and routing; treating a
+        // retrieval failure as an empty class could allow an excluded window through.
+        return None;
+    }
+    let class_name = String::from_utf16_lossy(&class_buffer[..class_length as usize]);
     if unsafe { IsWindow(hwnd_value) } == 0 {
         return None;
     }
-    let title = wide(false);
-    let mut process_id = 0;
-    if unsafe { GetWindowThreadProcessId(hwnd_value, &mut process_id) } == 0 {
-        let error = unsafe { windows_sys::Win32::Foundation::GetLastError() };
-        if error != 1400 {
-            crate::error_log::report_win32("GetWindowThreadProcessId failed", error);
+    let title_length = match unsafe { window_text_length(hwnd_value) } {
+        Ok(length) => Some(length),
+        Err(error) if error.is_win32(ERROR_INVALID_WINDOW_HANDLE) => return None,
+        Err(error) => {
+            error.report();
+            None
         }
+    };
+    let title = if let Some(length) = title_length {
+        let mut buffer = vec![0u16; length + 1];
+        match unsafe { window_text(hwnd_value, &mut buffer) } {
+            Ok(written) => String::from_utf16_lossy(&buffer[..written]),
+            Err(error) if error.is_win32(ERROR_INVALID_WINDOW_HANDLE) => return None,
+            Err(error) => {
+                error.report();
+                String::new()
+            }
+        }
+    } else {
+        String::new()
+    };
+    let mut process_id = 0;
+    let thread_id = unsafe { GetWindowThreadProcessId(hwnd_value, &mut process_id) };
+    if thread_id == 0 {
+        let error = PlatformError::last_win32("GetWindowThreadProcessId");
+        if !error.is_win32(ERROR_INVALID_WINDOW_HANDLE) {
+            error.report();
+        }
+        // Process identity is required for filtering and client ownership, so
+        // continuing with the default process ID could misclassify the window.
         return None;
     }
-    let process =
-        unsafe { OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, 0, process_id) };
+    let process = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, process_id) };
     let mut process_image_name = String::new();
     if process.is_null() {
-        crate::error_log::last_win32("OpenProcess(window) failed");
+        PlatformError::last_win32("OpenProcess(window)").report();
     }
-    let is_elevated = unsafe { process_is_elevated(process) };
-    if !process.is_null() {
-        let mut buffer = vec![0u16; 1024];
-        let mut length = buffer.len() as u32;
-        if unsafe { QueryFullProcessImageNameW(process, 0, buffer.as_mut_ptr(), &mut length) } != 0
-        {
-            process_image_name = String::from_utf16_lossy(&buffer[..length as usize]);
-        } else {
-            crate::error_log::last_win32("QueryFullProcessImageNameW failed");
+    let is_elevated = match unsafe { process_is_elevated(process) } {
+        Ok(is_elevated) => is_elevated,
+        Err(error) => {
+            error.report();
+            false
         }
-        if unsafe { CloseHandle(process) } == 0 {
-            crate::error_log::last_win32("CloseHandle(window process) failed");
+    };
+    if !process.is_null() {
+        match unsafe { query_process_image_name(process) } {
+            Ok(name) => process_image_name = name,
+            Err(error) => error.report(),
+        }
+        if let Err(error) = check_bool(
+            unsafe { CloseHandle(process) },
+            "CloseHandle(window process)",
+        ) {
+            error.report();
         }
     }
     let mut placement: WINDOWPLACEMENT = unsafe { zeroed() };
     placement.length = size_of::<WINDOWPLACEMENT>() as u32;
-    if unsafe { GetWindowPlacement(hwnd_value, &mut placement) } == 0 {
-        let error = unsafe { windows_sys::Win32::Foundation::GetLastError() };
-        if error != 1400 {
-            crate::error_log::report_win32("GetWindowPlacement failed", error);
+    if let Err(error) = check_bool(
+        unsafe { GetWindowPlacement(hwnd_value, &mut placement) },
+        "GetWindowPlacement",
+    ) {
+        if !error.is_win32(ERROR_INVALID_WINDOW_HANDLE) {
+            error.report();
         }
+        // The restored rectangle is required for layout state; continuing with
+        // a zeroed WINDOWPLACEMENT would give the window invalid geometry.
         return None;
     }
-    let ex_styles = match unsafe { window_long_checked(hwnd_value, GWL_EXSTYLE) } {
+    let ex_styles = match unsafe {
+        window_long_checked(hwnd_value, GWL_EXSTYLE, "GetWindowLongW(GWL_EXSTYLE)")
+    } {
         Ok(ex_styles) => ex_styles,
-        Err(1400) => return None,
+        Err(error) if error.is_win32(ERROR_INVALID_WINDOW_HANDLE) => return None,
         Err(error) => {
-            crate::error_log::report_win32("GetWindowLongW(-20) failed", error);
+            error.report();
+            // Extended styles identify special-purpose windows such as tool and
+            // no-activate windows, so a failed query cannot safely default to zero.
             return None;
         }
     };
@@ -425,7 +499,7 @@ pub fn capture(float_uwp_windows: bool) -> Result<DesktopSnapshot, u32> {
         EnumDisplayMonitors, GetMonitorInfoW, HDC, HMONITOR, MONITORINFO,
     };
     use windows_sys::Win32::System::Threading::{
-        OpenProcess, PROCESS_QUERY_INFORMATION, PROCESS_VM_READ, QueryFullProcessImageNameW,
+        OpenProcess, PROCESS_QUERY_INFORMATION, PROCESS_VM_READ,
     };
     use windows_sys::Win32::UI::WindowsAndMessaging::{
         EnumPropsExW, EnumWindows, GW_OWNER, GWL_EXSTYLE, GWL_STYLE, GetClassNameW,
@@ -457,21 +531,33 @@ pub fn capture(float_uwp_windows: bool) -> Result<DesktopSnapshot, u32> {
     }
 
     unsafe fn wide_text(hwnd: HWND, class_name: bool) -> String {
-        let length = if class_name {
-            255
-        } else {
-            window_text_length(hwnd)
+        if class_name {
+            let mut buffer = vec![0u16; 256];
+            let written = GetClassNameW(hwnd, buffer.as_mut_ptr(), buffer.len() as i32);
+            if written == 0 {
+                crate::error_log::last_win32("GetClassNameW failed");
+            }
+            return String::from_utf16_lossy(&buffer[..written.max(0) as usize]);
+        }
+        let length = match window_text_length(hwnd) {
+            Ok(length) => length,
+            Err(error) => {
+                if !error.is_win32(ERROR_INVALID_WINDOW_HANDLE) {
+                    error.report();
+                }
+                return String::new();
+            }
         };
         let mut buffer = vec![0u16; length + 1];
-        let written = if class_name {
-            GetClassNameW(hwnd, buffer.as_mut_ptr(), buffer.len() as i32)
-        } else {
-            window_text(hwnd, &mut buffer)
-        };
-        if class_name && written == 0 {
-            crate::error_log::last_win32("GetClassNameW failed");
+        match window_text(hwnd, &mut buffer) {
+            Ok(written) => String::from_utf16_lossy(&buffer[..written]),
+            Err(error) => {
+                if !error.is_win32(ERROR_INVALID_WINDOW_HANDLE) {
+                    error.report();
+                }
+                String::new()
+            }
         }
-        String::from_utf16_lossy(&buffer[..written.max(0) as usize])
     }
 
     unsafe fn is_alt_tab_window(hwnd: HWND) -> bool {
@@ -551,20 +637,23 @@ pub fn capture(float_uwp_windows: bool) -> Result<DesktopSnapshot, u32> {
         }
         let process = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, 0, process_id);
         let mut process_image_name = String::new();
-        let is_elevated = process_is_elevated(process);
+        let is_elevated = match process_is_elevated(process) {
+            Ok(is_elevated) => is_elevated,
+            Err(error) => {
+                error.report();
+                false
+            }
+        };
         if process.is_null() {
             crate::error_log::last_win32("OpenProcess(window) failed");
         }
         if !process.is_null() {
-            let mut buffer = vec![0u16; 1024];
-            let mut length = buffer.len() as u32;
-            if QueryFullProcessImageNameW(process, 0, buffer.as_mut_ptr(), &mut length) != 0 {
-                process_image_name = String::from_utf16_lossy(&buffer[..length as usize]);
-            } else {
-                crate::error_log::last_win32("QueryFullProcessImageNameW failed");
+            match query_process_image_name(process) {
+                Ok(name) => process_image_name = name,
+                Err(error) => error.report(),
             }
-            if CloseHandle(process) == 0 {
-                crate::error_log::last_win32("CloseHandle(window process) failed");
+            if let Err(error) = check_bool(CloseHandle(process), "CloseHandle(window process)") {
+                error.report();
             }
         }
         let mut placement: WINDOWPLACEMENT = zeroed();

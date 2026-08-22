@@ -46,6 +46,13 @@ impl PlatformError {
         }
     }
 
+    pub fn is_win32(&self, expected_code: u32) -> bool {
+        matches!(
+            self.kind,
+            PlatformErrorKind::Win32 { code, .. } if code == expected_code
+        )
+    }
+
     #[track_caller]
     pub fn report(self) {
         match self.kind {
