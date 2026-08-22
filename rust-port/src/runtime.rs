@@ -1213,8 +1213,12 @@ impl Runtime {
         if !hit_test_hwnd(hwnd) {
             return;
         }
-        let Some((x, y)) = cursor_position() else {
-            return;
+        let (x, y) = match cursor_position() {
+            Ok(position) => position,
+            Err(error) => {
+                error.report();
+                return;
+            }
         };
         let monitor = self
             .configuration
@@ -1487,8 +1491,12 @@ impl Runtime {
         &self,
         hwnd: isize,
     ) -> (Option<MonitorId>, Option<crate::ClientId>) {
-        let Some((x, y)) = cursor_position() else {
-            return (None, None);
+        let (x, y) = match cursor_position() {
+            Ok(position) => position,
+            Err(error) => {
+                error.report();
+                return (None, None);
+            }
         };
         let monitor = self
             .configuration
@@ -1757,16 +1765,15 @@ fn left_shift_down() -> bool {
             != 0
     }
 }
-fn cursor_position() -> Option<(i32, i32)> {
+fn cursor_position() -> PlatformResult<(i32, i32)> {
     use std::mem::zeroed;
     use windows_sys::Win32::Foundation::POINT;
     let mut point: POINT = unsafe { zeroed() };
-    if unsafe { windows_sys::Win32::UI::WindowsAndMessaging::GetCursorPos(&mut point) } == 0 {
-        crate::error_log::last_win32("GetCursorPos failed");
-        None
-    } else {
-        Some((point.x, point.y))
-    }
+    check_bool(
+        unsafe { windows_sys::Win32::UI::WindowsAndMessaging::GetCursorPos(&mut point) },
+        "GetCursorPos",
+    )?;
+    Ok((point.x, point.y))
 }
 fn set_foreground_window(hwnd: isize) {
     // Windows may deny foreground activation as normal focus-stealing policy.
@@ -2039,8 +2046,12 @@ fn hit_test_hwnd(hwnd: isize) -> bool {
             return false;
         }
     };
-    let Some((x, y)) = cursor_position() else {
-        return false;
+    let (x, y) = match cursor_position() {
+        Ok(position) => position,
+        Err(error) => {
+            error.report();
+            return false;
+        }
     };
     x > rect.left && x < rect.right && y > rect.top && y < rect.bottom
 }
