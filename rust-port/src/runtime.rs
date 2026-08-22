@@ -1969,26 +1969,28 @@ fn stop_managing_window(hwnd: isize, monitor: &Monitor) {
     }
 }
 fn move_window_by(hwnd: isize, dx: i32, dy: i32) {
-    use std::mem::zeroed;
-    use windows_sys::Win32::Foundation::RECT;
-    use windows_sys::Win32::UI::WindowsAndMessaging::{GetWindowRect, MoveWindow};
-    let mut rect: RECT = unsafe { zeroed() };
-    if unsafe { GetWindowRect(hwnd as _, &mut rect) } != 0 {
+    use windows_sys::Win32::UI::WindowsAndMessaging::MoveWindow;
+    let rect = match window_rect(hwnd) {
+        Ok(rect) => rect,
+        Err(error) => {
+            error.report();
+            return;
+        }
+    };
+    if let Err(error) = check_bool(
         unsafe {
-            if MoveWindow(
+            MoveWindow(
                 hwnd as _,
                 rect.left + dx,
                 rect.top + dy,
                 rect.right - rect.left,
                 rect.bottom - rect.top,
                 0,
-            ) == 0
-            {
-                crate::error_log::last_win32("MoveWindow(offset) failed");
-            }
-        }
-    } else {
-        crate::error_log::last_win32("GetWindowRect(move by offset) failed");
+            )
+        },
+        "MoveWindow(offset)",
+    ) {
+        error.report();
     }
 }
 
