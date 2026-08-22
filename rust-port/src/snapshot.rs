@@ -20,6 +20,13 @@ pub struct WindowSnapshot {
     pub normal_rect: Rect,
 }
 
+struct WindowSnapshotBase {
+    hwnd: isize,
+    styles: i32,
+    ex_styles: i32,
+    class_name: String,
+}
+
 unsafe fn process_is_elevated(
     process: windows_sys::Win32::Foundation::HANDLE,
 ) -> PlatformResult<bool> {
@@ -239,10 +246,7 @@ pub fn is_root_window_handle(hwnd: isize, float_uwp_windows: bool) -> bool {
     }
 }
 
-fn capture_window_data(hwnd: isize, require_visible: bool) -> Option<WindowSnapshot> {
-    use std::mem::{size_of, zeroed};
-    use windows_sys::Win32::Foundation::CloseHandle;
-    use windows_sys::Win32::System::Threading::{OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION};
+fn capture_base_window_snapshot(hwnd: isize, require_visible: bool) -> Option<WindowSnapshotBase> {
     use windows_sys::Win32::UI::WindowsAndMessaging::*;
     let hwnd_value = hwnd as windows_sys::Win32::Foundation::HWND;
     // Windows can disappear between an event and snapshot capture. IsWindow
@@ -282,6 +286,36 @@ fn capture_window_data(hwnd: isize, require_visible: bool) -> Option<WindowSnaps
         return None;
     }
     let class_name = String::from_utf16_lossy(&class_buffer[..class_length as usize]);
+    let ex_styles = match unsafe {
+        window_long_checked(hwnd_value, GWL_EXSTYLE, "GetWindowLongW(GWL_EXSTYLE)")
+    } {
+        Ok(ex_styles) => ex_styles,
+        Err(error) if error.is_win32(ERROR_INVALID_WINDOW_HANDLE) => return None,
+        Err(error) => {
+            error.report();
+            // Extended styles identify special-purpose windows such as tool and
+            // no-activate windows, so a failed query cannot safely default to zero.
+            return None;
+        }
+    };
+    Some(WindowSnapshotBase {
+        hwnd,
+        styles,
+        ex_styles,
+        class_name,
+    })
+}
+
+fn capture_full_window_snapshot(base: WindowSnapshotBase) -> Option<WindowSnapshot> {
+    use std::mem::{size_of, zeroed};
+    use windows_sys::Win32::Foundation::CloseHandle;
+    use windows_sys::Win32::System::Threading::{OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION};
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        GetWindowPlacement, GetWindowThreadProcessId, IsIconic, IsWindow, WINDOWPLACEMENT,
+    };
+
+    let hwnd = base.hwnd;
+    let hwnd_value = hwnd as windows_sys::Win32::Foundation::HWND;
     if unsafe { IsWindow(hwnd_value) } == 0 {
         return None;
     }
@@ -354,31 +388,19 @@ fn capture_window_data(hwnd: isize, require_visible: bool) -> Option<WindowSnaps
         // a zeroed WINDOWPLACEMENT would give the window invalid geometry.
         return None;
     }
-    let ex_styles = match unsafe {
-        window_long_checked(hwnd_value, GWL_EXSTYLE, "GetWindowLongW(GWL_EXSTYLE)")
-    } {
-        Ok(ex_styles) => ex_styles,
-        Err(error) if error.is_win32(ERROR_INVALID_WINDOW_HANDLE) => return None,
-        Err(error) => {
-            error.report();
-            // Extended styles identify special-purpose windows such as tool and
-            // no-activate windows, so a failed query cannot safely default to zero.
-            return None;
-        }
-    };
     Some(WindowSnapshot {
         data: ClientData {
             hwnd,
             process_id,
             process_image_name,
-            class_name,
+            class_name: base.class_name,
             title,
             is_elevated,
             is_minimized: unsafe { IsIconic(hwnd_value) } != 0,
             ..Default::default()
         },
-        styles,
-        ex_styles,
+        styles: base.styles,
+        ex_styles: base.ex_styles,
         normal_rect: Rect {
             left: placement.rcNormalPosition.left,
             top: placement.rcNormalPosition.top,
@@ -386,6 +408,10 @@ fn capture_window_data(hwnd: isize, require_visible: bool) -> Option<WindowSnaps
             bottom: placement.rcNormalPosition.bottom,
         },
     })
+}
+
+fn capture_window_data(hwnd: isize, require_visible: bool) -> Option<WindowSnapshot> {
+    capture_full_window_snapshot(capture_base_window_snapshot(hwnd, require_visible)?)
 }
 
 #[tracing::instrument(fields(hwnd = hwnd as usize))]
@@ -494,17 +520,13 @@ pub fn capture_list_windows() -> Result<Vec<WindowSnapshot>, u32> {
 #[tracing::instrument]
 pub fn capture(float_uwp_windows: bool) -> Result<DesktopSnapshot, u32> {
     use std::mem::{size_of, zeroed};
-    use windows_sys::Win32::Foundation::{CloseHandle, GetLastError, HWND, LPARAM, RECT};
+    use windows_sys::Win32::Foundation::{GetLastError, HWND, LPARAM, RECT};
     use windows_sys::Win32::Graphics::Gdi::{
         EnumDisplayMonitors, GetMonitorInfoW, HDC, HMONITOR, MONITORINFO,
     };
-    use windows_sys::Win32::System::Threading::{
-        OpenProcess, PROCESS_QUERY_INFORMATION, PROCESS_VM_READ,
-    };
     use windows_sys::Win32::UI::WindowsAndMessaging::{
-        EnumPropsExW, EnumWindows, GW_OWNER, GWL_EXSTYLE, GWL_STYLE, GetClassNameW,
-        GetDesktopWindow, GetWindow, GetWindowPlacement, GetWindowThreadProcessId, IsIconic,
-        IsWindowVisible, WINDOWPLACEMENT, WS_CHILD, WS_EX_NOACTIVATE, WS_VISIBLE,
+        EnumPropsExW, EnumWindows, GW_OWNER, GetDesktopWindow, GetWindow, IsWindowVisible,
+        WS_CHILD, WS_EX_NOACTIVATE,
     };
 
     unsafe extern "system" fn monitor_callback(
@@ -530,36 +552,6 @@ pub fn capture(float_uwp_windows: bool) -> Result<DesktopSnapshot, u32> {
         1
     }
 
-    unsafe fn wide_text(hwnd: HWND, class_name: bool) -> String {
-        if class_name {
-            let mut buffer = vec![0u16; 256];
-            let written = GetClassNameW(hwnd, buffer.as_mut_ptr(), buffer.len() as i32);
-            if written == 0 {
-                crate::error_log::last_win32("GetClassNameW failed");
-            }
-            return String::from_utf16_lossy(&buffer[..written.max(0) as usize]);
-        }
-        let length = match window_text_length(hwnd) {
-            Ok(length) => length,
-            Err(error) => {
-                if !error.is_win32(ERROR_INVALID_WINDOW_HANDLE) {
-                    error.report();
-                }
-                return String::new();
-            }
-        };
-        let mut buffer = vec![0u16; length + 1];
-        match window_text(hwnd, &mut buffer) {
-            Ok(written) => String::from_utf16_lossy(&buffer[..written]),
-            Err(error) => {
-                if !error.is_win32(ERROR_INVALID_WINDOW_HANDLE) {
-                    error.report();
-                }
-                String::new()
-            }
-        }
-    }
-
     unsafe fn is_alt_tab_window(hwnd: HWND) -> bool {
         let mut walk = root_owner(hwnd);
         loop {
@@ -579,12 +571,13 @@ pub fn capture(float_uwp_windows: bool) -> Result<DesktopSnapshot, u32> {
         hwnd: HWND,
         styles: i32,
         ex_styles: i32,
+        class_name: &str,
         float_uwp_windows: bool,
     ) -> bool {
         if hwnd == GetDesktopWindow() {
             return false;
         }
-        if wide_text(hwnd, true).contains("ApplicationFrameWindow") && !float_uwp_windows {
+        if class_name.contains("ApplicationFrameWindow") && !float_uwp_windows {
             unsafe extern "system" fn property(
                 _hwnd: HWND,
                 name: *const u16,
@@ -621,66 +614,21 @@ pub fn capture(float_uwp_windows: bool) -> Result<DesktopSnapshot, u32> {
 
     unsafe extern "system" fn window_callback(hwnd: HWND, data: LPARAM) -> i32 {
         let context = &mut *(data as *mut (Vec<WindowSnapshot>, bool));
-        let styles = window_long(hwnd, GWL_STYLE);
-        let ex_styles = window_long(hwnd, GWL_EXSTYLE);
-        if !is_root_window(hwnd, styles, ex_styles, context.1) {
+        let Some(base) = capture_base_window_snapshot(hwnd as isize, true) else {
             return 1;
-        }
-        if styles & WS_VISIBLE as i32 == 0 {
-            return 1;
-        }
-        let class_name = wide_text(hwnd, true);
-        let title = wide_text(hwnd, false);
-        let mut process_id = 0;
-        if GetWindowThreadProcessId(hwnd, &mut process_id) == 0 {
-            crate::error_log::last_win32("GetWindowThreadProcessId failed");
-        }
-        let process = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, 0, process_id);
-        let mut process_image_name = String::new();
-        let is_elevated = match process_is_elevated(process) {
-            Ok(is_elevated) => is_elevated,
-            Err(error) => {
-                error.report();
-                false
-            }
         };
-        if process.is_null() {
-            crate::error_log::last_win32("OpenProcess(window) failed");
+        if !is_root_window(
+            hwnd,
+            base.styles,
+            base.ex_styles,
+            &base.class_name,
+            context.1,
+        ) {
+            return 1;
         }
-        if !process.is_null() {
-            match query_process_image_name(process) {
-                Ok(name) => process_image_name = name,
-                Err(error) => error.report(),
-            }
-            if let Err(error) = check_bool(CloseHandle(process), "CloseHandle(window process)") {
-                error.report();
-            }
+        if let Some(window) = capture_full_window_snapshot(base) {
+            context.0.push(window);
         }
-        let mut placement: WINDOWPLACEMENT = zeroed();
-        placement.length = size_of::<WINDOWPLACEMENT>() as u32;
-        if GetWindowPlacement(hwnd, &mut placement) == 0 {
-            crate::error_log::last_win32("GetWindowPlacement failed");
-        }
-        context.0.push(WindowSnapshot {
-            data: ClientData {
-                hwnd: hwnd as isize,
-                process_id,
-                process_image_name,
-                class_name,
-                title,
-                is_elevated,
-                is_minimized: IsIconic(hwnd) != 0,
-                ..Default::default()
-            },
-            styles,
-            ex_styles,
-            normal_rect: Rect {
-                left: placement.rcNormalPosition.left,
-                top: placement.rcNormalPosition.top,
-                right: placement.rcNormalPosition.right,
-                bottom: placement.rcNormalPosition.bottom,
-            },
-        });
         1
     }
 
