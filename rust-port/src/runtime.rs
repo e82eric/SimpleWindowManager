@@ -1944,29 +1944,24 @@ fn taskbar_height(hwnd: isize) -> i32 {
     }
 }
 fn stop_managing_window(hwnd: isize, monitor: &Monitor) {
-    use windows_sys::Win32::UI::WindowsAndMessaging::{
-        SWP_SHOWWINDOW, SetForegroundWindow, SetWindowPos,
-    };
-    unsafe {
-        if SetWindowPos(
-            hwnd as _,
-            std::ptr::null_mut(),
-            monitor.x_offset,
-            0,
-            monitor.width,
-            monitor.height,
-            SWP_SHOWWINDOW,
-        ) == 0
-        {
-            crate::error_log::last_win32("SetWindowPos(stop managing) failed");
-        }
-        if SetForegroundWindow(hwnd as _) == 0 {
-            crate::error_log::report(
-                "SetForegroundWindow(stop managing) was denied",
-                "returned zero",
-            );
-        }
+    use windows_sys::Win32::UI::WindowsAndMessaging::{SWP_SHOWWINDOW, SetWindowPos};
+    if let Err(error) = check_bool(
+        unsafe {
+            SetWindowPos(
+                hwnd as _,
+                std::ptr::null_mut(),
+                monitor.x_offset,
+                0,
+                monitor.width,
+                monitor.height,
+                SWP_SHOWWINDOW,
+            )
+        },
+        "SetWindowPos(stop managing)",
+    ) {
+        error.report();
     }
+    set_foreground_window(hwnd);
 }
 fn move_window_by(hwnd: isize, dx: i32, dy: i32) {
     use windows_sys::Win32::UI::WindowsAndMessaging::MoveWindow;
