@@ -1995,17 +1995,19 @@ fn move_window_by(hwnd: isize, dx: i32, dy: i32) {
 }
 
 fn center_window_on_monitor(hwnd: isize, monitor: &Monitor) {
-    use std::mem::zeroed;
-    use windows_sys::Win32::Foundation::RECT;
-    use windows_sys::Win32::UI::WindowsAndMessaging::{
-        GetWindowRect, SWP_NOSIZE, SWP_NOZORDER, SetWindowPos,
+    use windows_sys::Win32::UI::WindowsAndMessaging::{SWP_NOSIZE, SWP_NOZORDER, SetWindowPos};
+    let rect = match window_rect(hwnd) {
+        Ok(rect) => rect,
+        Err(error) => {
+            error.report();
+            return;
+        }
     };
-    let mut rect: RECT = unsafe { zeroed() };
-    if unsafe { GetWindowRect(hwnd as _, &mut rect) } != 0 {
-        let x = monitor.x_offset + (monitor.width - (rect.right - rect.left)) / 2;
-        let y = (monitor.height - (rect.bottom - rect.top)) / 2;
+    let x = monitor.x_offset + (monitor.width - (rect.right - rect.left)) / 2;
+    let y = (monitor.height - (rect.bottom - rect.top)) / 2;
+    if let Err(error) = check_bool(
         unsafe {
-            if SetWindowPos(
+            SetWindowPos(
                 hwnd as _,
                 std::ptr::null_mut(),
                 x,
@@ -2013,13 +2015,11 @@ fn center_window_on_monitor(hwnd: isize, monitor: &Monitor) {
                 0,
                 0,
                 SWP_NOSIZE | SWP_NOZORDER,
-            ) == 0
-            {
-                crate::error_log::last_win32("SetWindowPos(center window) failed");
-            }
-        }
-    } else {
-        crate::error_log::last_win32("GetWindowRect(center window) failed");
+            )
+        },
+        "SetWindowPos(center window)",
+    ) {
+        error.report();
     }
 }
 
