@@ -106,10 +106,18 @@ fn timestamp_millis() -> u64 {
 
 #[track_caller]
 pub fn report(context: impl Into<String>, message: impl Into<String>) {
+    report_with_backtrace(context, message, &Backtrace::force_capture());
+}
+
+#[track_caller]
+pub(crate) fn report_with_backtrace(
+    context: impl Into<String>,
+    message: impl Into<String>,
+    backtrace: &Backtrace,
+) {
     let caller = std::panic::Location::caller();
     let operation = context.into();
     let error_message = message.into();
-    let backtrace = Backtrace::force_capture();
     eprintln!("{operation}: {error_message}");
     tracing::error!(
         target: "swm::error",
@@ -124,10 +132,18 @@ pub fn report(context: impl Into<String>, message: impl Into<String>) {
 
 #[track_caller]
 pub fn report_win32(context: impl Into<String>, code: u32) {
+    report_win32_with_backtrace(context, code, &Backtrace::force_capture());
+}
+
+#[track_caller]
+pub(crate) fn report_win32_with_backtrace(
+    context: impl Into<String>,
+    code: u32,
+    backtrace: &Backtrace,
+) {
     let caller = std::panic::Location::caller();
     let operation = context.into();
     let error_message = std::io::Error::from_raw_os_error(code as i32).to_string();
-    let backtrace = Backtrace::force_capture();
     eprintln!("{operation}: error {code}: {error_message}");
     tracing::error!(
         target: "swm::error",
@@ -150,12 +166,20 @@ pub fn last_win32(context: impl Into<String>) -> u32 {
 
 #[track_caller]
 pub fn report_hresult(context: impl Into<String>, hresult: i32) {
+    report_hresult_with_backtrace(context, hresult, &Backtrace::force_capture());
+}
+
+#[track_caller]
+pub(crate) fn report_hresult_with_backtrace(
+    context: impl Into<String>,
+    hresult: i32,
+    backtrace: &Backtrace,
+) {
     let caller = std::panic::Location::caller();
     let operation = context.into();
     let code = hresult as u32;
     let error_message =
         windows::core::Error::from_hresult(windows::core::HRESULT(hresult)).to_string();
-    let backtrace = Backtrace::force_capture();
     eprintln!("{operation}: HRESULT {code:#010x}: {error_message}");
     tracing::error!(
         target: "swm::error",

@@ -2142,7 +2142,9 @@ fn apply_workspace_windows(
             && client.data.use_minimize_to_hide
             && (workspace_hidden || !client.is_visible)
         {
-            crate::cloak::set_cloak_for_window(client.data.hwnd, 1, 2);
+            if let Err(error) = crate::cloak::set_cloak_for_window(client.data.hwnd, 1, 2) {
+                error.report();
+            }
             continue;
         }
         let hwnd = client.data.hwnd as HWND;
@@ -2227,44 +2229,52 @@ fn apply_workspace_windows(
                     error.report();
                     continue;
                 }
+                // ShowWindow reports the window's previous visibility, not
+                // success or failure, so a zero return is not an error.
                 ShowWindow(hwnd, SW_RESTORE);
                 if client.is_visible {
-                    if SetWindowPos(
-                        hwnd,
-                        HWND_TOPMOST,
-                        0,
-                        0,
-                        0,
-                        0,
-                        SWP_SHOWWINDOW | SWP_NOSIZE | SWP_NOMOVE,
-                    ) == 0
-                    {
-                        crate::error_log::last_win32("SetWindowPos(set topmost) failed");
+                    if let Err(error) = check_bool(
+                        SetWindowPos(
+                            hwnd,
+                            HWND_TOPMOST,
+                            0,
+                            0,
+                            0,
+                            0,
+                            SWP_SHOWWINDOW | SWP_NOSIZE | SWP_NOMOVE,
+                        ),
+                        "SetWindowPos(set topmost)",
+                    ) {
+                        error.report();
                     }
-                    if SetWindowPos(
-                        hwnd,
-                        HWND_NOTOPMOST,
-                        0,
-                        0,
-                        0,
-                        0,
-                        SWP_SHOWWINDOW | SWP_NOSIZE | SWP_NOMOVE,
-                    ) == 0
-                    {
-                        crate::error_log::last_win32("SetWindowPos(clear topmost) failed");
+                    if let Err(error) = check_bool(
+                        SetWindowPos(
+                            hwnd,
+                            HWND_NOTOPMOST,
+                            0,
+                            0,
+                            0,
+                            0,
+                            SWP_SHOWWINDOW | SWP_NOSIZE | SWP_NOMOVE,
+                        ),
+                        "SetWindowPos(clear topmost)",
+                    ) {
+                        error.report();
                     }
                 } else {
-                    if SetWindowPos(
-                        hwnd,
-                        HWND_BOTTOM,
-                        0,
-                        0,
-                        0,
-                        0,
-                        SWP_SHOWWINDOW | SWP_NOSIZE | SWP_NOMOVE,
-                    ) == 0
-                    {
-                        crate::error_log::last_win32("SetWindowPos(hidden window z-order) failed");
+                    if let Err(error) = check_bool(
+                        SetWindowPos(
+                            hwnd,
+                            HWND_BOTTOM,
+                            0,
+                            0,
+                            0,
+                            0,
+                            SWP_SHOWWINDOW | SWP_NOSIZE | SWP_NOMOVE,
+                        ),
+                        "SetWindowPos(hidden window z-order)",
+                    ) {
+                        error.report();
                     }
                 }
             }
@@ -2288,10 +2298,14 @@ fn apply_workspace_windows(
             )
         };
         if defer.is_null() {
+            // A failed DeferWindowPos invalidates the batch handle, so it is
+            // unsafe to queue additional moves or try to commit the batch.
             return Err(PlatformError::last_win32("DeferWindowPos"));
         }
         if client.data.use_minimize_to_hide && !workspace_hidden {
-            crate::cloak::set_cloak_for_window(client.data.hwnd, 1, 0);
+            if let Err(error) = crate::cloak::set_cloak_for_window(client.data.hwnd, 1, 0) {
+                error.report();
+            }
         }
     }
     check_bool(unsafe { EndDeferWindowPos(defer) }, "EndDeferWindowPos")?;

@@ -1,4 +1,6 @@
-pub fn set_cloak_for_window(hwnd: isize, cloak_type: i32, cloak_flag: i32) -> i32 {
+use crate::platform_error::{PlatformError, PlatformResult, check_hresult};
+
+pub fn set_cloak_for_window(hwnd: isize, cloak_type: i32, cloak_flag: i32) -> PlatformResult<()> {
     use std::ffi::c_void;
     use windows_sys::Win32::System::Com::{CLSCTX_ALL, CoCreateInstance};
     use windows_sys::core::GUID;
@@ -32,18 +34,18 @@ pub fn set_cloak_for_window(hwnd: isize, cloak_type: i32, cloak_flag: i32) -> i3
     }
     unsafe {
         let mut provider: *mut c_void = std::ptr::null_mut();
-        let mut result = CoCreateInstance(
+        let result = CoCreateInstance(
             &CLSID_IMMERSIVE_SHELL,
             std::ptr::null_mut(),
             CLSCTX_ALL,
             &IID_SERVICE_PROVIDER,
             &mut provider,
         );
-        if result < 0 || provider.is_null() {
-            if result < 0 {
-                crate::error_log::report_hresult("CoCreateInstance(ImmersiveShell) failed", result);
-            }
-            return result;
+        check_hresult(result, "CoCreateInstance(ImmersiveShell)")?;
+        if provider.is_null() {
+            return Err(PlatformError::null_output(
+                "CoCreateInstance(ImmersiveShell)",
+            ));
         }
         let query: unsafe extern "system" fn(
             *mut c_void,
@@ -52,44 +54,47 @@ pub fn set_cloak_for_window(hwnd: isize, cloak_type: i32, cloak_flag: i32) -> i3
             *mut *mut c_void,
         ) -> i32 = std::mem::transmute(method(provider, 3));
         let mut collection: *mut c_void = std::ptr::null_mut();
-        result = query(
+        let result = query(
             provider,
             &IID_APP_VIEW_COLLECTION,
             &IID_APP_VIEW_COLLECTION,
             &mut collection,
         );
-        if result < 0 {
-            crate::error_log::report_hresult(
-                "IServiceProvider::QueryService(ApplicationViewCollection) failed",
-                result,
-            );
+        if let Err(error) = check_hresult(
+            result,
+            "IServiceProvider::QueryService(ApplicationViewCollection)",
+        ) {
+            release(provider);
+            return Err(error);
         }
-        if result >= 0 && !collection.is_null() {
-            let get_view: unsafe extern "system" fn(
-                *mut c_void,
-                *mut c_void,
-                *mut *mut c_void,
-            ) -> i32 = std::mem::transmute(method(collection, 6));
-            let mut view: *mut c_void = std::ptr::null_mut();
-            result = get_view(collection, hwnd as *mut c_void, &mut view);
-            if result < 0 {
-                crate::error_log::report_hresult(
-                    "IApplicationViewCollection::GetViewForHwnd failed",
-                    result,
-                );
-            }
-            if result >= 0 && !view.is_null() {
-                let set_cloak: unsafe extern "system" fn(*mut c_void, i32, i32) -> i32 =
-                    std::mem::transmute(method(view, 12));
-                result = set_cloak(view, cloak_type, cloak_flag);
-                if result < 0 {
-                    crate::error_log::report_hresult("IApplicationView::SetCloak failed", result);
-                }
-                release(view);
-            }
+        if collection.is_null() {
+            release(provider);
+            return Err(PlatformError::null_output(
+                "IServiceProvider::QueryService(ApplicationViewCollection)",
+            ));
+        }
+        let get_view: unsafe extern "system" fn(*mut c_void, *mut c_void, *mut *mut c_void) -> i32 =
+            std::mem::transmute(method(collection, 6));
+        let mut view: *mut c_void = std::ptr::null_mut();
+        let result = get_view(collection, hwnd as *mut c_void, &mut view);
+        if let Err(error) = check_hresult(result, "IApplicationViewCollection::GetViewForHwnd") {
             release(collection);
+            release(provider);
+            return Err(error);
         }
+        if view.is_null() {
+            release(collection);
+            release(provider);
+            return Err(PlatformError::null_output(
+                "IApplicationViewCollection::GetViewForHwnd",
+            ));
+        }
+        let set_cloak: unsafe extern "system" fn(*mut c_void, i32, i32) -> i32 =
+            std::mem::transmute(method(view, 12));
+        let result = set_cloak(view, cloak_type, cloak_flag);
+        release(view);
+        release(collection);
         release(provider);
-        result
+        check_hresult(result, "IApplicationView::SetCloak")
     }
 }

@@ -1,9 +1,16 @@
-use std::fmt;
+use std::{backtrace::Backtrace, fmt};
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum PlatformError {
+#[derive(Debug)]
+enum PlatformErrorKind {
     Win32 { operation: &'static str, code: u32 },
     Hresult { operation: &'static str, hr: i32 },
+    NullOutput { operation: &'static str },
+}
+
+#[derive(Debug)]
+pub struct PlatformError {
+    kind: PlatformErrorKind,
+    backtrace: Backtrace,
 }
 
 pub type PlatformResult<T> = Result<T, PlatformError>;
@@ -11,35 +18,66 @@ pub type PlatformResult<T> = Result<T, PlatformError>;
 impl PlatformError {
     #[track_caller]
     pub fn last_win32(operation: &'static str) -> Self {
-        Self::Win32 {
-            operation,
-            code: unsafe { windows_sys::Win32::Foundation::GetLastError() },
+        let code = unsafe { windows_sys::Win32::Foundation::GetLastError() };
+        Self {
+            kind: PlatformErrorKind::Win32 { operation, code },
+            backtrace: Backtrace::force_capture(),
         }
     }
 
-    pub const fn win32(operation: &'static str, code: u32) -> Self {
-        Self::Win32 { operation, code }
+    pub fn win32(operation: &'static str, code: u32) -> Self {
+        Self {
+            kind: PlatformErrorKind::Win32 { operation, code },
+            backtrace: Backtrace::force_capture(),
+        }
     }
 
-    pub const fn hresult(operation: &'static str, hr: i32) -> Self {
-        Self::Hresult { operation, hr }
+    pub fn hresult(operation: &'static str, hr: i32) -> Self {
+        Self {
+            kind: PlatformErrorKind::Hresult { operation, hr },
+            backtrace: Backtrace::force_capture(),
+        }
+    }
+
+    pub fn null_output(operation: &'static str) -> Self {
+        Self {
+            kind: PlatformErrorKind::NullOutput { operation },
+            backtrace: Backtrace::force_capture(),
+        }
     }
 
     #[track_caller]
     pub fn report(self) {
-        match self {
-            Self::Win32 { operation, code } => crate::error_log::report_win32(operation, code),
-            Self::Hresult { operation, hr } => crate::error_log::report_hresult(operation, hr),
+        match self.kind {
+            PlatformErrorKind::Win32 { operation, code } => {
+                crate::error_log::report_win32_with_backtrace(operation, code, &self.backtrace)
+            }
+            PlatformErrorKind::Hresult { operation, hr } => {
+                crate::error_log::report_hresult_with_backtrace(operation, hr, &self.backtrace)
+            }
+            PlatformErrorKind::NullOutput { operation } => crate::error_log::report_with_backtrace(
+                operation,
+                "API returned a null output after reporting success",
+                &self.backtrace,
+            ),
         }
     }
 }
 
 impl fmt::Display for PlatformError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Win32 { operation, code } => write!(formatter, "{operation}: Win32 error {code}"),
-            Self::Hresult { operation, hr } => {
-                write!(formatter, "{operation}: HRESULT {:#010x}", *hr as u32)
+        match self.kind {
+            PlatformErrorKind::Win32 { operation, code } => {
+                write!(formatter, "{operation}: Win32 error {code}")
+            }
+            PlatformErrorKind::Hresult { operation, hr } => {
+                write!(formatter, "{operation}: HRESULT {:#010x}", hr as u32)
+            }
+            PlatformErrorKind::NullOutput { operation } => {
+                write!(
+                    formatter,
+                    "{operation}: API returned a null output after success"
+                )
             }
         }
     }
@@ -71,9 +109,6 @@ mod tests {
     fn hresult_success_includes_nonzero_success_codes() {
         assert!(check_hresult(0, "operation").is_ok());
         assert!(check_hresult(1, "operation").is_ok());
-        assert_eq!(
-            check_hresult(-1, "operation"),
-            Err(PlatformError::hresult("operation", -1))
-        );
+        assert!(check_hresult(-1, "operation").is_err());
     }
 }
