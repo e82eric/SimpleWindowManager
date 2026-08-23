@@ -369,7 +369,7 @@ impl Runtime {
             ToggleFilteredCurrent => {
                 self.toggle_routing(WindowRoutingMode::FilteredCurrentWorkspace)
             }
-            RedrawFocused => redraw_focused_window(),
+            RedrawFocused => redraw_focused_window()?,
             MinimizeFocused => {
                 minimize_focused_window();
                 self.focus_selected(self.selected_workspace());
@@ -1901,19 +1901,26 @@ fn minimize_focused_window() {
         );
     }
 }
-fn redraw_focused_window() {
-    if unsafe {
-        windows_sys::Win32::Graphics::Gdi::RedrawWindow(
-            windows_sys::Win32::UI::WindowsAndMessaging::GetForegroundWindow(),
-            std::ptr::null(),
-            std::ptr::null_mut(),
-            windows_sys::Win32::Graphics::Gdi::RDW_ERASE
-                | windows_sys::Win32::Graphics::Gdi::RDW_INVALIDATE,
-        )
-    } == 0
-    {
-        crate::error_log::last_win32("RedrawWindow(focused window) failed");
+fn redraw_focused_window() -> PlatformResult<()> {
+    use windows_sys::Win32::Graphics::Gdi::{RDW_ERASE, RDW_INVALIDATE, RedrawWindow};
+    use windows_sys::Win32::UI::WindowsAndMessaging::GetForegroundWindow;
+    let hwnd = unsafe { GetForegroundWindow() };
+    // Having no foreground window is a valid transient desktop state, so
+    // there is no window to redraw and no error to report.
+    if hwnd.is_null() {
+        return Ok(());
     }
+    check_bool(
+        unsafe {
+            RedrawWindow(
+                hwnd,
+                std::ptr::null(),
+                std::ptr::null_mut(),
+                RDW_ERASE | RDW_INVALIDATE,
+            )
+        },
+        "RedrawWindow(focused window)",
+    )
 }
 fn taskbar_toggle() {
     use windows_sys::Win32::UI::WindowsAndMessaging::*;
