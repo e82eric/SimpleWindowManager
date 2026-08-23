@@ -364,8 +364,7 @@ impl Runtime {
                 platform_exit();
             }
             CloseFocused => close_focused_window(),
-            KillFocused => kill_focused_window()
-                .map_err(|code| PlatformError::win32("kill_focused_window", code))?,
+            KillFocused => kill_focused_window()?,
             ToggleTaskbar => taskbar_toggle(),
             ToggleFilteredCurrent => {
                 self.toggle_routing(WindowRoutingMode::FilteredCurrentWorkspace)
@@ -1856,35 +1855,42 @@ fn close_focused_window() {
         );
     }
 }
-fn kill_focused_window() -> Result<(), u32> {
-    use windows_sys::Win32::Foundation::{CloseHandle, GetLastError};
+fn kill_focused_window() -> PlatformResult<()> {
+    use windows_sys::Win32::Foundation::CloseHandle;
     use windows_sys::Win32::System::Threading::{OpenProcess, PROCESS_TERMINATE, TerminateProcess};
     use windows_sys::Win32::UI::WindowsAndMessaging::{
         GetForegroundWindow, GetWindowThreadProcessId,
     };
+    let hwnd = unsafe { GetForegroundWindow() };
+    // Having no foreground window is a valid transient desktop state, so there
+    // is no focused process to terminate and no error to report.
+    if hwnd.is_null() {
+        return Ok(());
+    }
     let mut process_id = 0;
-    if unsafe { GetWindowThreadProcessId(GetForegroundWindow(), &mut process_id) } == 0 {
-        return Err(crate::error_log::last_win32(
-            "GetWindowThreadProcessId(focused window) failed",
+    if unsafe { GetWindowThreadProcessId(hwnd, &mut process_id) } == 0 {
+        return Err(PlatformError::last_win32(
+            "GetWindowThreadProcessId(focused window)",
         ));
     }
     let process = unsafe { OpenProcess(PROCESS_TERMINATE, 0, process_id) };
     if process.is_null() {
-        let error = unsafe { GetLastError() };
-        crate::error_log::report_win32("OpenProcess(PROCESS_TERMINATE) failed", error);
-        return Err(error);
+        return Err(PlatformError::last_win32("OpenProcess(PROCESS_TERMINATE)"));
     }
-    let result = unsafe { TerminateProcess(process, 1) };
-    let terminate_error = (result == 0).then(|| unsafe { GetLastError() });
-    if unsafe { CloseHandle(process) } == 0 {
-        crate::error_log::last_win32("CloseHandle(terminated process) failed");
-    }
-    if result == 0 {
-        let error = terminate_error.unwrap();
-        crate::error_log::report_win32("TerminateProcess failed", error);
-        Err(error)
-    } else {
-        Ok(())
+    let terminate_result = check_bool(unsafe { TerminateProcess(process, 1) }, "TerminateProcess");
+    let close_result = check_bool(
+        unsafe { CloseHandle(process) },
+        "CloseHandle(terminated process)",
+    );
+    match (terminate_result, close_result) {
+        (Err(terminate_error), Err(close_error)) => {
+            // Preserve the primary operation failure while still surfacing the
+            // independent failure to release the process handle.
+            close_error.report();
+            Err(terminate_error)
+        }
+        (Err(error), _) | (_, Err(error)) => Err(error),
+        (Ok(()), Ok(())) => Ok(()),
     }
 }
 fn minimize_focused_window() {
