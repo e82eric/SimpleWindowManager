@@ -1917,7 +1917,15 @@ fn taskbar_toggle() {
         if hwnd.is_null() {
             return;
         }
-        let visible = runtime_window_long(hwnd as isize, GWL_STYLE) & WS_VISIBLE as i32 != 0;
+        let styles =
+            match runtime_window_long(hwnd as isize, GWL_STYLE, "GetWindowLongW(taskbar style)") {
+                Ok(styles) => styles,
+                Err(error) => {
+                    error.report();
+                    return;
+                }
+            };
+        let visible = styles & WS_VISIBLE as i32 != 0;
         ShowWindow(hwnd, if visible { SW_HIDE } else { SW_SHOW });
         let secondary: Vec<u16> = "Shell_SecondaryTrayWnd\0".encode_utf16().collect();
         ShowWindow(
@@ -1931,7 +1939,14 @@ fn taskbar_height(hwnd: isize) -> i32 {
     use windows_sys::Win32::Foundation::RECT;
     use windows_sys::Win32::UI::WindowsAndMessaging::*;
     unsafe {
-        if runtime_window_long(hwnd, GWL_STYLE) & WS_VISIBLE as i32 == 0 {
+        let styles = match runtime_window_long(hwnd, GWL_STYLE, "GetWindowLongW(taskbar style)") {
+            Ok(styles) => styles,
+            Err(error) => {
+                error.report();
+                return 0;
+            }
+        };
+        if styles & WS_VISIBLE as i32 == 0 {
             return 0;
         }
         let mut rect: RECT = zeroed();
@@ -2056,6 +2071,7 @@ fn hit_test_hwnd(hwnd: isize) -> bool {
 fn current_modifiers() -> i32 {
     use crate::commands::{LALT, LCTL, LSHIFT, LWIN, RALT, RSHIFT, RWIN};
     use windows_sys::Win32::UI::Input::KeyboardAndMouse::*;
+    // GetAsyncKeyState returns key-state bits and has no distinct failure result to check.
     let down = |key| unsafe { GetAsyncKeyState(key) as u16 & 0x8000 != 0 };
     let mut value = 0;
     if down(VK_LSHIFT as i32) {
@@ -2084,8 +2100,21 @@ fn current_modifiers() -> i32 {
 
 fn has_float_styles(hwnd: isize) -> bool {
     use windows_sys::Win32::UI::WindowsAndMessaging::*;
-    let styles = runtime_window_long(hwnd, GWL_STYLE);
-    let ex_styles = runtime_window_long(hwnd, GWL_EXSTYLE);
+    let styles = match runtime_window_long(hwnd, GWL_STYLE, "GetWindowLongW(window style)") {
+        Ok(styles) => styles,
+        Err(error) => {
+            error.report();
+            return true;
+        }
+    };
+    let ex_styles = match runtime_window_long(hwnd, GWL_EXSTYLE, "GetWindowLongW(window ex-style)")
+    {
+        Ok(styles) => styles,
+        Err(error) => {
+            error.report();
+            return true;
+        }
+    };
     if ex_styles & WS_EX_APPWINDOW as i32 != 0 {
         false
     } else {
@@ -2093,7 +2122,7 @@ fn has_float_styles(hwnd: isize) -> bool {
     }
 }
 
-fn runtime_window_long(hwnd: isize, index: i32) -> i32 {
+fn runtime_window_long(hwnd: isize, index: i32, operation: &'static str) -> PlatformResult<i32> {
     use windows_sys::Win32::Foundation::{GetLastError, SetLastError};
     use windows_sys::Win32::UI::WindowsAndMessaging::GetWindowLongW;
     unsafe {
@@ -2101,9 +2130,10 @@ fn runtime_window_long(hwnd: isize, index: i32) -> i32 {
         let value = GetWindowLongW(hwnd as _, index);
         let error = GetLastError();
         if value == 0 && error != 0 {
-            crate::error_log::report_win32(format!("GetWindowLongW({index}) failed"), error);
+            Err(PlatformError::win32(operation, error))
+        } else {
+            Ok(value)
         }
-        value
     }
 }
 
