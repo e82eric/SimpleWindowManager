@@ -2,9 +2,21 @@ use std::{backtrace::Backtrace, fmt};
 
 #[derive(Debug)]
 enum PlatformErrorKind {
-    Win32 { operation: &'static str, code: u32 },
-    Hresult { operation: &'static str, hr: i32 },
-    NullOutput { operation: &'static str },
+    Win32 {
+        operation: &'static str,
+        code: u32,
+    },
+    Hresult {
+        operation: &'static str,
+        hr: i32,
+    },
+    NullOutput {
+        operation: &'static str,
+    },
+    ApiCode {
+        operation: &'static str,
+        code: isize,
+    },
 }
 
 #[derive(Debug)]
@@ -46,6 +58,13 @@ impl PlatformError {
         }
     }
 
+    pub fn api_code(operation: &'static str, code: isize) -> Self {
+        Self {
+            kind: PlatformErrorKind::ApiCode { operation, code },
+            backtrace: Backtrace::force_capture(),
+        }
+    }
+
     pub fn is_win32(&self, expected_code: u32) -> bool {
         matches!(
             self.kind,
@@ -67,6 +86,13 @@ impl PlatformError {
                 "API returned a null output after reporting success",
                 &self.backtrace,
             ),
+            PlatformErrorKind::ApiCode { operation, code } => {
+                crate::error_log::report_with_backtrace(
+                    operation,
+                    format!("API returned failure code {code}"),
+                    &self.backtrace,
+                )
+            }
         }
     }
 }
@@ -85,6 +111,9 @@ impl fmt::Display for PlatformError {
                     formatter,
                     "{operation}: API returned a null output after success"
                 )
+            }
+            PlatformErrorKind::ApiCode { operation, code } => {
+                write!(formatter, "{operation}: API failure code {code}")
             }
         }
     }

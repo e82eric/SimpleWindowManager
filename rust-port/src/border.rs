@@ -31,11 +31,9 @@ mod dcomp {
     fn logged<T>(
         context: &'static str,
         result: windows::core::Result<T>,
-    ) -> windows::core::Result<T> {
-        result.map_err(|error| {
-            crate::error_log::report_hresult(context, error.code().0);
-            error
-        })
+    ) -> crate::platform_error::PlatformResult<T> {
+        result
+            .map_err(|error| crate::platform_error::PlatformError::hresult(context, error.code().0))
     }
 
     struct State {
@@ -68,7 +66,11 @@ mod dcomp {
     }
 
     impl State {
-        unsafe fn new(hwnd: isize, normal: u32, lost: u32) -> windows::core::Result<Self> {
+        unsafe fn new(
+            hwnd: isize,
+            normal: u32,
+            lost: u32,
+        ) -> crate::platform_error::PlatformResult<Self> {
             let mut d3d = None;
             unsafe {
                 logged(
@@ -109,7 +111,9 @@ mod dcomp {
                 )
             } == 0
             {
-                crate::error_log::last_win32("GetClientRect(border initialization) failed");
+                return Err(crate::platform_error::PlatformError::last_win32(
+                    "GetClientRect(border initialization)",
+                ));
             }
             description.Width = (initial_rect.right - initial_rect.left).max(1) as u32;
             description.Height = (initial_rect.bottom - initial_rect.top).max(1) as u32;
@@ -171,7 +175,7 @@ mod dcomp {
             Ok(state)
         }
 
-        unsafe fn client_size(&self) -> (u32, u32) {
+        unsafe fn client_size(&self) -> crate::platform_error::PlatformResult<(u32, u32)> {
             let mut rect = windows_sys::Win32::Foundation::RECT::default();
             if unsafe {
                 windows_sys::Win32::UI::WindowsAndMessaging::GetClientRect(
@@ -180,19 +184,21 @@ mod dcomp {
                 )
             } == 0
             {
-                crate::error_log::last_win32("GetClientRect(border) failed");
+                return Err(crate::platform_error::PlatformError::last_win32(
+                    "GetClientRect(border)",
+                ));
             }
-            (
+            Ok((
                 (rect.right - rect.left).max(0) as u32,
                 (rect.bottom - rect.top).max(0) as u32,
-            )
+            ))
         }
 
-        unsafe fn resize_swap_chain(&mut self) -> windows::core::Result<()> {
+        unsafe fn resize_swap_chain(&mut self) -> crate::platform_error::PlatformResult<()> {
             unsafe { self.dc.SetTarget(None::<&ID2D1Image>) };
             self.bitmap = None;
             self.surface = None;
-            let (width, height) = unsafe { self.client_size() };
+            let (width, height) = unsafe { self.client_size()? };
             if width == 0 || height == 0 {
                 return Ok(());
             }
@@ -229,7 +235,7 @@ mod dcomp {
             width: u32,
             height: u32,
             lost_focus: bool,
-        ) -> windows::core::Result<()> {
+        ) -> crate::platform_error::PlatformResult<()> {
             if width == 0
                 || height == 0
                 || (self.old_width == width
@@ -304,7 +310,11 @@ mod dcomp {
         }
     }
 
-    pub unsafe fn initialize(hwnd: isize, normal: u32, lost: u32) -> windows::core::Result<()> {
+    pub unsafe fn initialize(
+        hwnd: isize,
+        normal: u32,
+        lost: u32,
+    ) -> crate::platform_error::PlatformResult<()> {
         let state = unsafe { State::new(hwnd, normal, lost)? };
         STATE.with(|slot| *slot.borrow_mut() = Some(state));
         Ok(())
@@ -313,7 +323,9 @@ mod dcomp {
     pub unsafe fn draw(width: u32, height: u32, lost_focus: bool) {
         STATE.with(|slot| {
             if let Some(state) = slot.borrow_mut().as_mut() {
-                let _ = unsafe { state.draw(width, height, lost_focus) };
+                if let Err(error) = unsafe { state.draw(width, height, lost_focus) } {
+                    error.report();
+                }
             }
         });
     }
@@ -362,12 +374,15 @@ unsafe extern "system" fn border_message_loop(
             let mut paint: PAINTSTRUCT = unsafe { std::mem::zeroed() };
             let dc = unsafe { BeginPaint(hwnd, &mut paint) };
             if dc.is_null() {
-                crate::error_log::last_win32("BeginPaint(border) failed");
+                crate::platform_error::PlatformError::null_output("BeginPaint(border)").report();
                 return 0;
             }
             let mut rect = windows_sys::Win32::Foundation::RECT::default();
             if unsafe { GetClientRect(hwnd, &mut rect) } == 0 {
-                crate::error_log::last_win32("GetClientRect(border paint) failed");
+                crate::platform_error::PlatformError::last_win32("GetClientRect(border paint)")
+                    .report();
+                unsafe { EndPaint(hwnd, &paint) };
+                return 0;
             }
             let lost = crate::platform::border_is_lost_focus();
             unsafe {
@@ -377,9 +392,8 @@ unsafe extern "system" fn border_message_loop(
                     lost,
                 )
             };
-            if unsafe { EndPaint(hwnd, &paint) } == 0 {
-                crate::error_log::last_win32("EndPaint(border) failed");
-            }
+            // EndPaint is documented to always return nonzero.
+            unsafe { EndPaint(hwnd, &paint) };
             0
         }
         WM_ERASEBKGND => 1,
@@ -387,17 +401,20 @@ unsafe extern "system" fn border_message_loop(
     }
 }
 
-pub fn create_border_window(normal: u32, lost: u32) -> Result<BorderWindow, u32> {
+pub fn create_border_window(
+    normal: u32,
+    lost: u32,
+) -> crate::platform_error::PlatformResult<BorderWindow> {
     use std::mem::{size_of, zeroed};
-    use windows_sys::Win32::Foundation::GetLastError;
+    use windows_sys::Win32::Foundation::{ERROR_CLASS_ALREADY_EXISTS, GetLastError};
     use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
     use windows_sys::Win32::UI::WindowsAndMessaging::*;
     let class_name: Vec<u16> = "nwm_dcomp_border_class\0".encode_utf16().collect();
     let title: Vec<u16> = "nwm_dcomp_border\0".encode_utf16().collect();
     let instance = unsafe { GetModuleHandleW(std::ptr::null()) };
     if instance.is_null() {
-        return Err(crate::error_log::last_win32(
-            "GetModuleHandleW(border) failed",
+        return Err(crate::platform_error::PlatformError::last_win32(
+            "GetModuleHandleW(border)",
         ));
     }
     let mut class: WNDCLASSEXW = unsafe { zeroed() };
@@ -411,7 +428,10 @@ pub fn create_border_window(normal: u32, lost: u32) -> Result<BorderWindow, u32>
     }
     class.lpszClassName = class_name.as_ptr();
     if unsafe { RegisterClassExW(&class) } == 0 {
-        crate::error_log::last_win32("RegisterClassExW(border) failed");
+        let error = crate::platform_error::PlatformError::last_win32("RegisterClassExW(border)");
+        if !error.is_win32(ERROR_CLASS_ALREADY_EXISTS) {
+            return Err(error);
+        }
     }
     let hwnd = unsafe {
         CreateWindowExW(
@@ -430,23 +450,31 @@ pub fn create_border_window(normal: u32, lost: u32) -> Result<BorderWindow, u32>
         )
     };
     if hwnd.is_null() {
-        let error = unsafe { GetLastError() };
-        crate::error_log::report_win32("CreateWindowExW(border) failed", error);
-        return Err(error);
+        return Err(crate::platform_error::PlatformError::last_win32(
+            "CreateWindowExW(border)",
+        ));
     }
     unsafe {
         windows_sys::Win32::Foundation::SetLastError(0);
         SetWindowLongW(hwnd, GWL_STYLE, 0);
         let error = GetLastError();
         if error != 0 {
-            crate::error_log::report_win32("SetWindowLongW(border style) failed", error);
+            let error =
+                crate::platform_error::PlatformError::win32("SetWindowLongW(border style)", error);
+            if DestroyWindow(hwnd) == 0 {
+                crate::platform_error::PlatformError::last_win32(
+                    "DestroyWindow(border style cleanup)",
+                )
+                .report();
+            }
+            return Err(error);
         }
     }
     if let Err(error) = unsafe { dcomp::initialize(hwnd as isize, normal, lost) } {
         if unsafe { DestroyWindow(hwnd) } == 0 {
             crate::error_log::last_win32("DestroyWindow(border initialization cleanup) failed");
         }
-        return Err(error.code().0 as u32);
+        return Err(error);
     }
     Ok(BorderWindow {
         hwnd: hwnd as isize,
@@ -477,7 +505,10 @@ pub fn update_border(window: &BorderWindow, target: Option<crate::Rect>) {
         let height = target.bottom - target.top;
         let mut current = windows_sys::Win32::Foundation::RECT::default();
         if GetWindowRect(window.hwnd as _, &mut current) == 0 {
-            crate::error_log::last_win32("GetWindowRect(border) failed");
+            crate::platform_error::PlatformError::last_win32("GetWindowRect(border)").report();
+            // Position and redraw decisions depend on the current bounds, so
+            // using the default rectangle after failure would move incorrectly.
+            return;
         }
         let visible = IsWindowVisible(window.hwnd as _) != 0;
         let flags = if current.right - current.left == width
@@ -488,11 +519,7 @@ pub fn update_border(window: &BorderWindow, target: Option<crate::Rect>) {
         } else {
             SWP_SHOWWINDOW
         };
-        if target.left != current.left
-            || target.top != current.top
-            || flags == SWP_SHOWWINDOW
-            || !visible
-        {
+        if target.left != current.left || target.top != current.top || flags == SWP_SHOWWINDOW {
             if SetWindowPos(
                 window.hwnd as _,
                 HWND_BOTTOM,
@@ -505,15 +532,12 @@ pub fn update_border(window: &BorderWindow, target: Option<crate::Rect>) {
             {
                 crate::error_log::last_win32("SetWindowPos(show border) failed");
             }
-            if flags == SWP_SHOWWINDOW || !visible {
-                if InvalidateRect(window.hwnd as _, std::ptr::null(), 0) == 0 {
-                    crate::error_log::last_win32("InvalidateRect(border) failed");
-                }
-            }
-        } else {
-            if InvalidateRect(window.hwnd as _, std::ptr::null(), 0) == 0 {
-                crate::error_log::last_win32("InvalidateRect(border) failed");
-            }
+        }
+        // Always request a paint so focus-state changes are observed. The
+        // DirectComposition renderer skips the GPU work when its size and
+        // lost-focus state are unchanged.
+        if InvalidateRect(window.hwnd as _, std::ptr::null(), 0) == 0 {
+            crate::error_log::last_win32("InvalidateRect(border) failed");
         }
     }
 }

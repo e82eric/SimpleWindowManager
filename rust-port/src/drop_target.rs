@@ -30,7 +30,7 @@ unsafe extern "system" fn window_proc(
         let mut paint: PAINTSTRUCT = unsafe { zeroed() };
         let dc = unsafe { BeginPaint(hwnd, &mut paint) };
         if dc.is_null() {
-            crate::error_log::last_win32("BeginPaint(drop target) failed");
+            crate::platform_error::PlatformError::null_output("BeginPaint(drop target)").report();
             return 0;
         }
         if SHOULD_PAINT.load(std::sync::atomic::Ordering::Relaxed) {
@@ -43,7 +43,10 @@ unsafe extern "system" fn window_proc(
             }
             let mut client = windows_sys::Win32::Foundation::RECT::default();
             if unsafe { GetClientRect(hwnd, &mut client) } == 0 {
-                crate::error_log::last_win32("GetClientRect(drop target) failed");
+                crate::platform_error::PlatformError::last_win32("GetClientRect(drop target)")
+                    .report();
+                unsafe { EndPaint(hwnd, &paint) };
+                return 0;
             }
             if !brush.is_null() {
                 if unsafe { FillRect(dc, &client, brush) } == 0 {
@@ -57,18 +60,17 @@ unsafe extern "system" fn window_proc(
                 }
             }
         }
-        if unsafe { EndPaint(hwnd, &paint) } == 0 {
-            crate::error_log::last_win32("EndPaint(drop target) failed");
-        }
+        // EndPaint is documented to always return nonzero.
+        unsafe { EndPaint(hwnd, &paint) };
         0
     } else {
         unsafe { DefWindowProcW(hwnd, message, wparam, lparam) }
     }
 }
 
-pub fn create() -> Result<DropTargetWindow, u32> {
+pub fn create() -> crate::platform_error::PlatformResult<DropTargetWindow> {
     use std::mem::{size_of, zeroed};
-    use windows_sys::Win32::Foundation::GetLastError;
+    use windows_sys::Win32::Foundation::ERROR_CLASS_ALREADY_EXISTS;
     use windows_sys::Win32::Graphics::Gdi::{BLACK_BRUSH, GetStockObject};
     use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
     use windows_sys::Win32::UI::WindowsAndMessaging::*;
@@ -78,8 +80,8 @@ pub fn create() -> Result<DropTargetWindow, u32> {
     let title: Vec<u16> = "SimpleWM Drop Target\0".encode_utf16().collect();
     let instance = unsafe { GetModuleHandleW(std::ptr::null()) };
     if instance.is_null() {
-        return Err(crate::error_log::last_win32(
-            "GetModuleHandleW(drop target) failed",
+        return Err(crate::platform_error::PlatformError::last_win32(
+            "GetModuleHandleW(drop target)",
         ));
     }
     let mut class: WNDCLASSEXW = unsafe { zeroed() };
@@ -105,7 +107,11 @@ pub fn create() -> Result<DropTargetWindow, u32> {
     }
     class.lpszClassName = name.as_ptr();
     if unsafe { RegisterClassExW(&class) } == 0 {
-        crate::error_log::last_win32("RegisterClassExW(drop target) failed");
+        let error =
+            crate::platform_error::PlatformError::last_win32("RegisterClassExW(drop target)");
+        if !error.is_win32(ERROR_CLASS_ALREADY_EXISTS) {
+            return Err(error);
+        }
     }
     let hwnd = unsafe {
         CreateWindowExW(
@@ -124,12 +130,21 @@ pub fn create() -> Result<DropTargetWindow, u32> {
         )
     };
     if hwnd.is_null() {
-        let error = unsafe { GetLastError() };
-        crate::error_log::report_win32("CreateWindowExW(drop target) failed", error);
-        return Err(error);
+        return Err(crate::platform_error::PlatformError::last_win32(
+            "CreateWindowExW(drop target)",
+        ));
     }
     if unsafe { SetLayeredWindowAttributes(hwnd, 0x00ff_ffff, 127, LWA_ALPHA) } == 0 {
-        crate::error_log::last_win32("SetLayeredWindowAttributes(drop target) failed");
+        let error = crate::platform_error::PlatformError::last_win32(
+            "SetLayeredWindowAttributes(drop target)",
+        );
+        if unsafe { DestroyWindow(hwnd) } == 0 {
+            crate::platform_error::PlatformError::last_win32(
+                "DestroyWindow(drop target initialization cleanup)",
+            )
+            .report();
+        }
+        return Err(error);
     }
     Ok(DropTargetWindow {
         hwnd: hwnd as isize,

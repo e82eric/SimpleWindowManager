@@ -89,17 +89,20 @@ unsafe extern "system" fn bar_message_loop(
             let mut paint: PAINTSTRUCT = unsafe { zeroed() };
             let dc = unsafe { BeginPaint(hwnd, &mut paint) };
             if dc.is_null() {
-                crate::error_log::last_win32("BeginPaint(bar) failed");
+                crate::platform_error::PlatformError::null_output("BeginPaint(bar)").report();
                 return 0;
             }
             let mut client: RECT = unsafe { zeroed() };
             if unsafe { GetClientRect(hwnd, &mut client) } == 0 {
-                crate::error_log::last_win32("GetClientRect(bar) failed");
+                crate::platform_error::PlatformError::last_win32("GetClientRect(bar)").report();
+                // A successful BeginPaint must be paired with EndPaint, even
+                // when later paint setup fails.
+                unsafe { EndPaint(hwnd, &paint) };
+                return 0;
             }
             paint_skia(dc, client.right, client.bottom, &snapshot);
-            if unsafe { EndPaint(hwnd, &paint) } == 0 {
-                crate::error_log::last_win32("EndPaint(bar) failed");
-            }
+            // EndPaint is documented to always return nonzero.
+            unsafe { EndPaint(hwnd, &paint) };
             0
         }
         WM_TIMER => {
@@ -464,16 +467,21 @@ fn draw_centered_text(
     canvas.draw_str(text, (x, y), font, &paint);
 }
 
-pub fn create_bars(monitors: &[crate::Monitor], bar_height: i32) -> Result<Vec<BarWindow>, u32> {
+pub fn create_bars(
+    monitors: &[crate::Monitor],
+    bar_height: i32,
+) -> crate::platform_error::PlatformResult<Vec<BarWindow>> {
     use std::mem::{size_of, zeroed};
-    use windows_sys::Win32::Foundation::GetLastError;
+    use windows_sys::Win32::Foundation::ERROR_CLASS_ALREADY_EXISTS;
     use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
     use windows_sys::Win32::UI::Controls::ShowScrollBar;
     use windows_sys::Win32::UI::WindowsAndMessaging::*;
     let class_name: Vec<u16> = "keys2BarWindowClass\0".encode_utf16().collect();
     let instance = unsafe { GetModuleHandleW(std::ptr::null()) };
     if instance.is_null() {
-        return Err(crate::error_log::last_win32("GetModuleHandleW(bar) failed"));
+        return Err(crate::platform_error::PlatformError::last_win32(
+            "GetModuleHandleW(bar)",
+        ));
     }
     let mut class: WNDCLASSEXW = unsafe { zeroed() };
     class.cbSize = size_of::<WNDCLASSEXW>() as u32;
@@ -492,11 +500,14 @@ pub fn create_bars(monitors: &[crate::Monitor], bar_height: i32) -> Result<Vec<B
     class.hbrBackground = std::ptr::null_mut();
     unsafe {
         if RegisterClassExW(&class) == 0 {
-            crate::error_log::last_win32("RegisterClassExW(bar) failed");
+            let error = crate::platform_error::PlatformError::last_win32("RegisterClassExW(bar)");
+            if !error.is_win32(ERROR_CLASS_ALREADY_EXISTS) {
+                return Err(error);
+            }
         }
     }
     let title: Vec<u16> = "SimpleWM Bar\0".encode_utf16().collect();
-    let mut result = Vec::new();
+    let mut result: Vec<BarWindow> = Vec::new();
     for (index, monitor) in monitors
         .iter()
         .enumerate()
@@ -527,8 +538,15 @@ pub fn create_bars(monitors: &[crate::Monitor], bar_height: i32) -> Result<Vec<B
             )
         };
         if hwnd.is_null() {
-            let error = unsafe { GetLastError() };
-            crate::error_log::report_win32("CreateWindowExW(bar) failed", error);
+            let error = crate::platform_error::PlatformError::last_win32("CreateWindowExW(bar)");
+            for bar in &result {
+                if unsafe { DestroyWindow(bar.hwnd as _) } == 0 {
+                    crate::platform_error::PlatformError::last_win32(
+                        "DestroyWindow(bar creation cleanup)",
+                    )
+                    .report();
+                }
+            }
             return Err(error);
         }
         unsafe {
@@ -536,7 +554,22 @@ pub fn create_bars(monitors: &[crate::Monitor], bar_height: i32) -> Result<Vec<B
                 crate::error_log::last_win32("ShowScrollBar(bar) failed");
             }
             if SetTimer(hwnd, 0, 1500, None) == 0 {
-                crate::error_log::last_win32("SetTimer(bar) failed");
+                let error = crate::platform_error::PlatformError::last_win32("SetTimer(bar)");
+                if DestroyWindow(hwnd) == 0 {
+                    crate::platform_error::PlatformError::last_win32(
+                        "DestroyWindow(bar timer cleanup)",
+                    )
+                    .report();
+                }
+                for bar in &result {
+                    if DestroyWindow(bar.hwnd as _) == 0 {
+                        crate::platform_error::PlatformError::last_win32(
+                            "DestroyWindow(bar creation cleanup)",
+                        )
+                        .report();
+                    }
+                }
+                return Err(error);
             }
             ShowWindow(hwnd, SW_SHOWDEFAULT);
             if windows_sys::Win32::Graphics::Gdi::UpdateWindow(hwnd) == 0 {
@@ -645,7 +678,8 @@ fn memory_percent() -> String {
     value.dwLength = size_of::<MEMORYSTATUSEX>() as u32;
     unsafe {
         if GlobalMemoryStatusEx(&mut value) == 0 {
-            crate::error_log::last_win32("GlobalMemoryStatusEx failed");
+            crate::platform_error::PlatformError::last_win32("GlobalMemoryStatusEx").report();
+            return "  ?%".into();
         }
     }
     format!("{:3}%", value.dwMemoryLoad)

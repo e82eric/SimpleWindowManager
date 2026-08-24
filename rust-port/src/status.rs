@@ -38,6 +38,16 @@ mod windows_impl {
         data4: [0x8d, 0x69, 0x19, 0x9f, 0xdb, 0xa5, 0x72, 0x3b],
     };
 
+    fn hresult_succeeded(operation: &'static str, hr: i32) -> bool {
+        match crate::platform_error::check_hresult(hr, operation) {
+            Ok(()) => true,
+            Err(error) => {
+                error.report();
+                false
+            }
+        }
+    }
+
     unsafe fn method(object: *mut c_void, index: usize) -> usize {
         unsafe { *(*(object as *mut *mut usize)).add(index) }
     }
@@ -59,10 +69,8 @@ mod windows_impl {
                 &IID_MM_DEVICE_ENUMERATOR,
                 &mut enumerator,
             );
-            if crate::error_log::check_hresult(
-                "CoCreateInstance(MMDeviceEnumerator) failed",
-                audio_result,
-            ) && !enumerator.is_null()
+            if hresult_succeeded("CoCreateInstance(MMDeviceEnumerator)", audio_result)
+                && !enumerator.is_null()
             {
                 let get_default: unsafe extern "system" fn(
                     *mut c_void,
@@ -72,8 +80,8 @@ mod windows_impl {
                 ) -> i32 = std::mem::transmute(method(enumerator, 4));
                 let mut device: *mut c_void = std::ptr::null_mut();
                 let default_result = get_default(enumerator, 0, 1, &mut device);
-                if crate::error_log::check_hresult(
-                    "IMMDeviceEnumerator::GetDefaultAudioEndpoint failed",
+                if hresult_succeeded(
+                    "IMMDeviceEnumerator::GetDefaultAudioEndpoint",
                     default_result,
                 ) && !device.is_null()
                 {
@@ -92,16 +100,31 @@ mod windows_impl {
                         std::ptr::null_mut(),
                         &mut endpoint,
                     );
-                    if crate::error_log::check_hresult(
-                        "IMMDevice::Activate(IAudioEndpointVolume) failed",
+                    if hresult_succeeded(
+                        "IMMDevice::Activate(IAudioEndpointVolume)",
                         activate_result,
                     ) && !endpoint.is_null()
                     {
                         *AUDIO.lock().unwrap() = Some(endpoint as usize);
+                    } else if activate_result >= 0 && endpoint.is_null() {
+                        crate::platform_error::PlatformError::null_output(
+                            "IMMDevice::Activate(IAudioEndpointVolume)",
+                        )
+                        .report();
                     }
                     release(device as usize);
+                } else if default_result >= 0 && device.is_null() {
+                    crate::platform_error::PlatformError::null_output(
+                        "IMMDeviceEnumerator::GetDefaultAudioEndpoint",
+                    )
+                    .report();
                 }
                 release(enumerator as usize);
+            } else if audio_result >= 0 && enumerator.is_null() {
+                crate::platform_error::PlatformError::null_output(
+                    "CoCreateInstance(MMDeviceEnumerator)",
+                )
+                .report();
             }
             let mut network: *mut c_void = std::ptr::null_mut();
             let network_result = CoCreateInstance(
@@ -111,12 +134,15 @@ mod windows_impl {
                 &IID_NETWORK_LIST_MANAGER,
                 &mut network,
             );
-            if crate::error_log::check_hresult(
-                "CoCreateInstance(NetworkListManager) failed",
-                network_result,
-            ) && !network.is_null()
+            if hresult_succeeded("CoCreateInstance(NetworkListManager)", network_result)
+                && !network.is_null()
             {
                 *NETWORK.lock().unwrap() = Some(network as usize);
+            } else if network_result >= 0 && network.is_null() {
+                crate::platform_error::PlatformError::null_output(
+                    "CoCreateInstance(NetworkListManager)",
+                )
+                .report();
             }
         }
     }
@@ -143,14 +169,14 @@ mod windows_impl {
                 std::mem::transmute(method(endpoint as _, 15));
             let mut scalar = 0.0;
             let mut muted = 0;
-            if !crate::error_log::check_hresult(
-                "IAudioEndpointVolume::GetMasterVolumeLevelScalar failed",
+            if !hresult_succeeded(
+                "IAudioEndpointVolume::GetMasterVolumeLevelScalar",
                 get_scalar(endpoint as _, &mut scalar),
             ) {
                 return "  ?%".into();
             }
-            if !crate::error_log::check_hresult(
-                "IAudioEndpointVolume::GetMute failed",
+            if !hresult_succeeded(
+                "IAudioEndpointVolume::GetMute",
                 get_mute(endpoint as _, &mut muted),
             ) {
                 return "  ?%".into();
@@ -171,10 +197,7 @@ mod windows_impl {
                 std::mem::transmute(method(network as _, 11));
             let mut connected = 0i16;
             let result = get_connected(network as _, &mut connected);
-            if !crate::error_log::check_hresult(
-                "INetworkListManager::get_IsConnectedToInternet failed",
-                result,
-            ) {
+            if !hresult_succeeded("INetworkListManager::get_IsConnectedToInternet", result) {
                 "\u{f128}".into()
             } else if connected != 0 {
                 "\u{ea7a}".into()

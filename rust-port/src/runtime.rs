@@ -363,7 +363,7 @@ impl Runtime {
                 crate::restore::restore_moved_windows_to_screen(false)?;
                 platform_exit();
             }
-            CloseFocused => close_focused_window(),
+            CloseFocused => close_focused_window()?,
             KillFocused => kill_focused_window()?,
             ToggleTaskbar => taskbar_toggle(),
             ToggleFilteredCurrent => {
@@ -384,8 +384,7 @@ impl Runtime {
             ShowClientLogs => self.run_client_logs_menu(),
             ShowErrorLogs => self.run_error_logs_menu(),
             RunLastMenu => self.run_last_menu()?,
-            Launch(command) => crate::process::start_app(command)
-                .map_err(|code| PlatformError::win32("ShellExecuteW", code))?,
+            Launch(command) => crate::process::start_app(command)?,
             MoveFloat(dx, dy) => self.move_float_or_resize_main(dx, dy)?,
             MoveFloatToMonitor(index) => self.move_float_to_monitor(index),
             MoveWorkspaceToMonitor(workspace, monitor) => {
@@ -969,7 +968,7 @@ impl Runtime {
             crate::process::start_as_explorer_user(value)
         };
         if let Err(error) = result {
-            crate::error_log::report_win32("program launch failed", error);
+            error.report();
         }
         self.menu_hide();
     }
@@ -1057,8 +1056,7 @@ impl Runtime {
         self.bars = crate::bar::create_bars(
             &self.configuration.state.monitors,
             self.configuration.bar_height,
-        )
-        .map_err(|code| PlatformError::win32("create_bars", code))?;
+        )?;
         Ok(())
     }
 
@@ -1075,19 +1073,16 @@ impl Runtime {
                 "create_border_window: text style is not configured",
                 87,
             ))?;
-        self.border_window = Some(
-            crate::border::create_border_window(style.focus_color2, style.lost_focus_color)
-                .map_err(|code| PlatformError::win32("create_border_window", code))?,
-        );
+        self.border_window = Some(crate::border::create_border_window(
+            style.focus_color2,
+            style.lost_focus_color,
+        )?);
         self.border_window_update();
         Ok(())
     }
 
     pub fn create_drop_target_window(&mut self) -> PlatformResult<()> {
-        self.drop_target_window = Some(
-            crate::drop_target::create()
-                .map_err(|code| PlatformError::win32("create_drop_target_window", code))?,
-        );
+        self.drop_target_window = Some(crate::drop_target::create()?);
         Ok(())
     }
 
@@ -1543,7 +1538,7 @@ impl Runtime {
 
     pub fn taskbar_changed(&mut self, taskbar: isize) -> PlatformResult<()> {
         let screen_height = primary_screen_size().1;
-        let height = taskbar_height(taskbar);
+        let height = taskbar_height(taskbar)?;
         for monitor in &mut self.configuration.state.monitors {
             monitor.height = screen_height - height;
             monitor.bottom = screen_height - height;
@@ -1738,7 +1733,13 @@ fn primary_taskbar_height() -> i32 {
     if hwnd.is_null() {
         0
     } else {
-        taskbar_height(hwnd as isize)
+        match taskbar_height(hwnd as isize) {
+            Ok(height) => height,
+            Err(error) => {
+                error.report();
+                0
+            }
+        }
     }
 }
 
@@ -1845,15 +1846,20 @@ fn platform_exit() {
         windows_sys::Win32::System::Threading::ExitProcess(0);
     }
 }
-fn close_focused_window() {
-    unsafe {
-        windows_sys::Win32::UI::WindowsAndMessaging::SendMessageW(
-            windows_sys::Win32::UI::WindowsAndMessaging::GetForegroundWindow(),
-            windows_sys::Win32::UI::WindowsAndMessaging::WM_CLOSE,
-            0,
-            0,
-        );
+fn close_focused_window() -> PlatformResult<()> {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        GetForegroundWindow, PostMessageW, WM_CLOSE,
+    };
+    let hwnd = unsafe { GetForegroundWindow() };
+    // Having no foreground window is a valid transient desktop state, so
+    // there is no window to ask to close and no error to report.
+    if hwnd.is_null() {
+        return Ok(());
     }
+    check_bool(
+        unsafe { PostMessageW(hwnd, WM_CLOSE, 0, 0) },
+        "PostMessageW(WM_CLOSE)",
+    )
 }
 fn kill_focused_window() -> PlatformResult<()> {
     use windows_sys::Win32::Foundation::CloseHandle;
@@ -1947,29 +1953,20 @@ fn taskbar_toggle() {
         );
     }
 }
-fn taskbar_height(hwnd: isize) -> i32 {
+fn taskbar_height(hwnd: isize) -> PlatformResult<i32> {
     use std::mem::zeroed;
     use windows_sys::Win32::Foundation::RECT;
     use windows_sys::Win32::UI::WindowsAndMessaging::*;
-    unsafe {
-        let styles = match runtime_window_long(hwnd, GWL_STYLE, "GetWindowLongW(taskbar style)") {
-            Ok(styles) => styles,
-            Err(error) => {
-                error.report();
-                return 0;
-            }
-        };
-        if styles & WS_VISIBLE as i32 == 0 {
-            return 0;
-        }
-        let mut rect: RECT = zeroed();
-        if GetWindowRect(hwnd as _, &mut rect) == 0 {
-            crate::error_log::last_win32("GetWindowRect(taskbar) failed");
-            0
-        } else {
-            rect.bottom - rect.top
-        }
+    let styles = runtime_window_long(hwnd, GWL_STYLE, "GetWindowLongW(taskbar style)")?;
+    if styles & WS_VISIBLE as i32 == 0 {
+        return Ok(0);
     }
+    let mut rect: RECT = unsafe { zeroed() };
+    check_bool(
+        unsafe { GetWindowRect(hwnd as _, &mut rect) },
+        "GetWindowRect(taskbar)",
+    )?;
+    Ok(rect.bottom - rect.top)
 }
 fn stop_managing_window(hwnd: isize, monitor: &Monitor) {
     use windows_sys::Win32::UI::WindowsAndMessaging::{SWP_SHOWWINDOW, SetWindowPos};

@@ -9,20 +9,18 @@ fn main() {
     // The C entry point becomes DPI-aware before reading any monitor or window
     // geometry. Doing this later mixes virtualized and physical coordinates.
     startup.record("stage", "dpi_setup");
-    unsafe {
-        if windows_sys::Win32::UI::WindowsAndMessaging::SetProcessDPIAware() == 0 {
-            simple_window_manager_rs::error_log::last_win32("SetProcessDPIAware failed");
-        }
+    if let Err(error) = simple_window_manager_rs::platform_error::check_bool(
+        unsafe { windows_sys::Win32::UI::WindowsAndMessaging::SetProcessDPIAware() },
+        "SetProcessDPIAware",
+    ) {
+        error.report();
     }
     startup.record("stage", "single_instance");
     let instance_mutex = match simple_window_manager_rs::platform::acquire_single_instance() {
         Ok(Some(handle)) => handle,
         Ok(None) => return,
         Err(error) => {
-            simple_window_manager_rs::error_log::report_win32(
-                "single-instance initialization failed",
-                error,
-            );
+            error.report();
             return;
         }
     };
