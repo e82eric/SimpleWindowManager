@@ -5,6 +5,7 @@ use crate::model::{
 };
 use crate::platform_error::{PlatformError, PlatformResult, check_bool, check_hresult};
 use crate::snapshot::{DesktopSnapshot, WindowSnapshot};
+use simple_window_manager_rs::debug_out;
 
 const MAX_WORKSPACES: usize = 10;
 
@@ -214,9 +215,9 @@ impl Runtime {
             .unwrap();
         let workspace = client.workspace;
         let stored_minimized = client.data.is_minimized;
-        let use_hide = client.data.use_minimize_to_hide;
+        let use_cloak_to_hide = client.data.use_cloak_to_hide;
         if stored_minimized {
-            if !minimized && !use_hide {
+            if !minimized && !use_cloak_to_hide {
                 self.configuration
                     .state
                     .client_move_from_minimized_to_unminimized(client_id);
@@ -228,7 +229,7 @@ impl Runtime {
             return Ok(());
         }
         if minimized {
-            if !use_hide {
+            if !use_cloak_to_hide {
                 self.configuration
                     .state
                     .client_move_from_unminimized_to_minimized(client_id);
@@ -354,6 +355,7 @@ impl Runtime {
                 | ShowFloatLogs
                 | ShowClientLogs
                 | ShowErrorLogs
+                | ShowConfigurationState
         ) {
             self.last_menu_action = Some(action);
         }
@@ -366,6 +368,9 @@ impl Runtime {
             CloseFocused => close_focused_window()?,
             KillFocused => kill_focused_window()?,
             ToggleTaskbar => taskbar_toggle(),
+            ToggleDebugOutput => {
+                crate::error_log::toggle_debug_output();
+            }
             ToggleFilteredCurrent => {
                 self.toggle_routing(WindowRoutingMode::FilteredCurrentWorkspace)
             }
@@ -383,6 +388,7 @@ impl Runtime {
             ShowFloatLogs => self.run_float_logs_menu(),
             ShowClientLogs => self.run_client_logs_menu(),
             ShowErrorLogs => self.run_error_logs_menu(),
+            ShowConfigurationState => self.run_configuration_state_menu(),
             RunLastMenu => self.run_last_menu()?,
             Launch(command) => crate::process::start_app(command)?,
             MoveFloat(dx, dy) => self.move_float_or_resize_main(dx, dy)?,
@@ -634,9 +640,9 @@ impl Runtime {
                     is_visible: true,
                     workspace,
                 };
-                client.data.use_minimize_to_hide =
-                    client_should_use_minimize_to_hide(&self.configuration, &client);
-                if client.data.use_minimize_to_hide {
+                client.data.use_cloak_to_hide =
+                    client_should_use_cloak_to_hide(&self.configuration, &client);
+                if client.data.use_cloak_to_hide {
                     client.data.is_minimized = false;
                 }
                 self.configuration.state.client_add(workspace, client);
@@ -841,6 +847,10 @@ impl Runtime {
         crate::platform::show_error_logs_menu(self);
     }
 
+    fn run_configuration_state_menu(&mut self) {
+        crate::platform::show_configuration_state_menu(self);
+    }
+
     fn move_float_or_resize_main(&mut self, dx: i32, dy: i32) -> PlatformResult<()> {
         let hwnd = foreground_window();
         if self
@@ -914,18 +924,38 @@ impl Runtime {
         if self.configuration.state.menu_visible {
             self.menu_hide();
         }
-        let foreground = foreground_window();
-        self.workspace_move_foreground = Some(foreground);
         if source != monitor {
             self.configuration.state.monitors[monitor.0].workspace = Some(workspace);
             self.configuration.state.workspaces[workspace.0].monitor = Some(monitor);
             self.configuration.state.monitors[source.0].workspace = Some(displaced);
             self.configuration.state.workspaces[displaced.0].monitor = Some(source);
+
+            debug_out!("trigger build");
+
             self.apply_workspace(workspace)?;
             self.apply_workspace(displaced)?;
-        }
-        if foreground != 0 && foreground_window() != foreground {
-            nudge_set_foreground_window(foreground);
+
+            let foreground = self
+                .configuration
+                .state
+                .selected_monitor
+                .and_then(|selected_monitor_id| {
+                    self.configuration.state.monitors.get(selected_monitor_id.0)
+                })
+                .and_then(|monitor| monitor.workspace)
+                .and_then(|workspace_id| self.configuration.state.workspaces.get(workspace_id.0))
+                .and_then(|workspace| workspace.selected)
+                .and_then(|client_id| self.configuration.state.clients.get(client_id.0))
+                .and_then(Option::as_ref)
+                .map(|client| client.data.hwnd);
+
+            if let Some(foreground) = foreground {
+                debug_out!("To foreground: {foreground:#x}");
+                self.workspace_move_foreground = Some(foreground);
+                if foreground != 0 && foreground_window() != foreground {
+                    nudge_set_foreground_window(foreground);
+                }
+            }
         }
         if !crate::platform::schedule_workspace_move_focus_finish() {
             self.workspace_move_foreground = None;
@@ -1234,27 +1264,7 @@ impl Runtime {
         let Some(workspace) = self.configuration.state.monitors[monitor.0].workspace else {
             return;
         };
-        let mut target = self.configuration.state.workspaces[workspace.0]
-            .clients
-            .iter()
-            .copied()
-            .find(|id| {
-                self.configuration.state.clients[id.0]
-                    .as_ref()
-                    .is_some_and(|client| {
-                        client.data.hwnd != hwnd && hit_test_hwnd(client.data.hwnd)
-                    })
-            });
-        if target.is_none()
-            && let Some(selected) = self.configuration.state.workspaces[workspace.0].selected
-            && let Some(client) = self.configuration.state.clients[selected.0].as_ref()
-            && x > client.data.rect.left
-            && x < client.data.rect.right
-            && y > client.data.rect.top
-            && y < client.data.rect.bottom
-        {
-            target = Some(selected);
-        }
+        let target = self.client_drop_target_at_point(workspace, x, y);
         if let Some(client) = self
             .configuration
             .state
@@ -1277,6 +1287,7 @@ impl Runtime {
                             (left_changed && right_changed) || (top_changed && bottom_changed);
                         if !moving {
                             self.regular_resize_client = Some(client);
+                            //dbg!("not moving exiting! {:#x}", target.unwrap().0);
                             return;
                         }
                     }
@@ -1287,6 +1298,7 @@ impl Runtime {
             if has_float_styles(hwnd)
                 || current_modifiers() != self.configuration.drag_drop_float_modifier
             {
+                //dbg!("float exiting! {:#x}", target.unwrap().0);
                 return;
             }
         }
@@ -1336,7 +1348,7 @@ impl Runtime {
             return Ok(false);
         }
         let hwnd = self.drag_drop_state.drag_hwnd;
-        let (monitor, target) = self.drag_drop_target_at_cursor(hwnd);
+        let (monitor, target) = self.drag_drop_target_at_cursor();
         self.drag_drop_state = DragDropState::default();
         if let Some(overlay) = &self.drop_target_window {
             crate::drop_target::hide(overlay);
@@ -1399,6 +1411,7 @@ impl Runtime {
             }
             self.apply_workspace(destination)?;
             self.focus_selected(destination);
+            self.border_window_update();
         } else if existing.is_none() {
             if let Some(target) = target {
                 let destination = self.configuration.state.clients[target.0]
@@ -1413,7 +1426,7 @@ impl Runtime {
                     let (floated, _) = is_float_window(&self.configuration, &window);
                     if !floated && window.data.process_id != 0 {
                         let mut data = window.data;
-                        data.use_minimize_to_hide = client_should_use_minimize_to_hide(
+                        data.use_cloak_to_hide = client_should_use_cloak_to_hide(
                             &self.configuration,
                             &Client {
                                 data: data.clone(),
@@ -1421,7 +1434,7 @@ impl Runtime {
                                 workspace: destination,
                             },
                         );
-                        if data.use_minimize_to_hide {
+                        if data.use_cloak_to_hide {
                             data.is_minimized = false;
                         }
                         let client = crate::ClientId(self.configuration.state.clients.len());
@@ -1446,6 +1459,7 @@ impl Runtime {
                         }
                         self.apply_workspace(destination)?;
                         self.focus_selected(destination);
+                        self.border_window_update();
                     }
                 }
             }
@@ -1474,17 +1488,16 @@ impl Runtime {
                 self.apply_workspace(old)?;
                 self.apply_workspace(destination)?;
                 self.monitor_select(monitor);
+                self.border_window_update();
             } else {
                 self.apply_workspace(old)?;
+                self.border_window_update();
             }
         }
         Ok(true)
     }
 
-    fn drag_drop_target_at_cursor(
-        &self,
-        hwnd: isize,
-    ) -> (Option<MonitorId>, Option<crate::ClientId>) {
+    fn drag_drop_target_at_cursor(&self) -> (Option<MonitorId>, Option<crate::ClientId>) {
         let (x, y) = match cursor_position() {
             Ok(position) => position,
             Err(error) => {
@@ -1512,7 +1525,20 @@ impl Runtime {
         let Some(workspace) = self.configuration.state.monitors[monitor.0].workspace else {
             return (Some(monitor), None);
         };
-        let mut target = self.configuration.state.workspaces[workspace.0]
+        let target = self.client_drop_target_at_point(workspace, x, y);
+        (Some(monitor), target)
+    }
+
+    fn client_drop_target_at_point(
+        &self,
+        workspace: WorkspaceId,
+        x: i32,
+        y: i32,
+    ) -> Option<crate::ClientId> {
+        // Use the arranged rectangles that define the visible drop slots and
+        // overlay geometry. Actual HWND rectangles can be stale or overlapping
+        // while a window is moving, which makes the first HWND hit inconsistent.
+        self.configuration.state.workspaces[workspace.0]
             .clients
             .iter()
             .copied()
@@ -1520,20 +1546,13 @@ impl Runtime {
                 self.configuration.state.clients[id.0]
                     .as_ref()
                     .is_some_and(|client| {
-                        client.data.hwnd != hwnd && hit_test_hwnd(client.data.hwnd)
+                        client.is_visible
+                            && x >= client.data.rect.left
+                            && x < client.data.rect.right
+                            && y >= client.data.rect.top
+                            && y < client.data.rect.bottom
                     })
-            });
-        if target.is_none()
-            && let Some(selected) = self.configuration.state.workspaces[workspace.0].selected
-            && let Some(client) = self.configuration.state.clients[selected.0].as_ref()
-            && x > client.data.rect.left
-            && x < client.data.rect.right
-            && y > client.data.rect.top
-            && y < client.data.rect.bottom
-        {
-            target = Some(selected);
-        }
-        (Some(monitor), target)
+            })
     }
 
     pub fn taskbar_changed(&mut self, taskbar: isize) -> PlatformResult<()> {
@@ -1544,6 +1563,7 @@ impl Runtime {
             monitor.bottom = screen_height - height;
         }
         self.apply_all_workspaces()?;
+        self.border_window_update();
         if let Some(monitor) = self.configuration.state.selected_monitor
             && let Some(workspace) = self.configuration.state.monitors[monitor.0].workspace
         {
@@ -1588,8 +1608,8 @@ fn window_manager_try_add_window(
         is_visible: true,
         workspace: placeholder_workspace,
     };
-    client.data.use_minimize_to_hide = client_should_use_minimize_to_hide(configuration, &client);
-    if client.data.use_minimize_to_hide {
+    client.data.use_cloak_to_hide = client_should_use_cloak_to_hide(configuration, &client);
+    if client.data.use_cloak_to_hide {
         client.data.is_minimized = false;
     }
     let workspace =
@@ -1658,8 +1678,8 @@ fn window_manager_find_client_workspace_using_filters(
     }
 }
 
-fn client_should_use_minimize_to_hide(configuration: &Configuration, _client: &Client) -> bool {
-    configuration.minimize_to_hide_all
+fn client_should_use_cloak_to_hide(configuration: &Configuration, _client: &Client) -> bool {
+    configuration.cloak_to_hide_all
 }
 
 fn is_float_window(configuration: &Configuration, window: &WindowSnapshot) -> (bool, String) {
@@ -2194,166 +2214,275 @@ fn apply_workspace_windows(
     hidden_x: i32,
     use_old_move_logic: bool,
 ) -> PlatformResult<()> {
+    if use_old_move_logic {
+        apply_workspace_windows_old(state, workspace_id, hidden_x)
+    } else {
+        apply_workspace_windows_deferred(state, workspace_id, always_redraw, hidden_x)
+    }
+}
+
+struct WindowPlacement {
+    hwnd: isize,
+    current: Rect,
+    left: i32,
+    top: i32,
+    width: i32,
+    height: i32,
+    cloaked: bool,
+}
+
+impl WindowPlacement {
+    fn matches_target(&self) -> bool {
+        window_matches_target(
+            self.current,
+            self.left,
+            self.top,
+            self.width,
+            self.height,
+            self.cloaked,
+        )
+    }
+}
+
+fn workspace_is_hidden(state: &WindowManagerState, workspace: WorkspaceId) -> bool {
+    state.workspaces[workspace.0]
+        .monitor
+        .is_some_and(|monitor| state.monitors[monitor.0].is_hidden)
+}
+
+fn workspace_cloak_manager(
+    state: &WindowManagerState,
+    workspace: WorkspaceId,
+) -> Option<crate::cloak::CloakManager> {
+    let uses_cloaking = state.workspaces[workspace.0].clients.iter().any(|id| {
+        state.clients[id.0]
+            .as_ref()
+            .is_some_and(|client| client.data.use_cloak_to_hide)
+    });
+    if !uses_cloaking {
+        return None;
+    }
+    match crate::cloak::CloakManager::new() {
+        Ok(manager) => Some(manager),
+        Err(error) => {
+            // Cloaking is an optional hiding strategy. Report one manager
+            // initialization failure for this batch and continue arranging.
+            error.report();
+            None
+        }
+    }
+}
+
+fn should_cloak(client: &Client, workspace_hidden: bool) -> bool {
+    client.data.use_cloak_to_hide && (workspace_hidden || !client.is_visible)
+}
+
+fn should_uncloak(client: &Client, workspace_hidden: bool) -> bool {
+    client.data.use_cloak_to_hide && !workspace_hidden
+}
+
+fn set_client_cloak(
+    manager: Option<&crate::cloak::CloakManager>,
+    client: &Client,
+    cloak_flag: i32,
+) {
+    if let Some(manager) = manager
+        && let Err(error) = manager.set_cloak(client.data.hwnd, 1, cloak_flag)
+    {
+        error.report();
+    }
+}
+
+fn capture_window_placement(client: &Client, hidden_x: i32) -> PlatformResult<WindowPlacement> {
     use std::mem::{size_of, zeroed};
-    use windows_sys::Win32::Foundation::{HWND, RECT};
+    use windows_sys::Win32::Foundation::RECT;
     use windows_sys::Win32::Graphics::Dwm::{
         DWMWA_CLOAKED, DWMWA_EXTENDED_FRAME_BOUNDS, DwmGetWindowAttribute,
     };
+    use windows_sys::Win32::UI::WindowsAndMessaging::GetWindowRect;
+
+    let hwnd = client.data.hwnd as windows_sys::Win32::Foundation::HWND;
+    let mut window_rect: RECT = unsafe { zeroed() };
+    check_bool(
+        unsafe { GetWindowRect(hwnd, &mut window_rect) },
+        "GetWindowRect(arrange workspace)",
+    )?;
+
+    let mut frame_rect = window_rect;
+    let frame_result = unsafe {
+        DwmGetWindowAttribute(
+            hwnd,
+            DWMWA_EXTENDED_FRAME_BOUNDS as u32,
+            &mut frame_rect as *mut _ as _,
+            size_of::<RECT>() as u32,
+        )
+    };
+    if let Err(error) = check_hresult(
+        frame_result,
+        "DwmGetWindowAttribute(DWMWA_EXTENDED_FRAME_BOUNDS)",
+    ) {
+        error.report();
+        frame_rect = window_rect;
+    }
+    let left_border = frame_rect.left - window_rect.left;
+    let right_border = window_rect.right - frame_rect.right;
+    let top_border = window_rect.top - frame_rect.top;
+    let bottom_border = window_rect.bottom - frame_rect.bottom;
+
+    let mut cloaked = 0u32;
+    let cloak_result = unsafe {
+        DwmGetWindowAttribute(
+            hwnd,
+            DWMWA_CLOAKED as u32,
+            &mut cloaked as *mut _ as _,
+            size_of::<u32>() as u32,
+        )
+    };
+    if let Err(error) = check_hresult(cloak_result, "DwmGetWindowAttribute(DWMWA_CLOAKED)") {
+        error.report();
+        cloaked = 0;
+    }
+
+    let target = client.data.rect;
+    Ok(WindowPlacement {
+        hwnd: client.data.hwnd,
+        current: Rect {
+            left: window_rect.left,
+            top: window_rect.top,
+            right: window_rect.right,
+            bottom: window_rect.bottom,
+        },
+        left: if client.is_visible {
+            target.left - left_border
+        } else {
+            hidden_x
+        },
+        top: target.top - top_border,
+        width: target.right - target.left + left_border + right_border,
+        height: target.bottom - target.top + top_border + bottom_border,
+        cloaked: cloaked != 0,
+    })
+}
+
+fn apply_workspace_windows_old(
+    state: &mut WindowManagerState,
+    workspace: WorkspaceId,
+    hidden_x: i32,
+) -> PlatformResult<()> {
+    let clients = state.workspaces[workspace.0].clients.clone();
+    for client_id in clients.into_iter().rev() {
+        let client = state.clients[client_id.0].as_mut().unwrap();
+        let placement = match capture_window_placement(client, hidden_x) {
+            Ok(placement) => placement,
+            Err(error) => {
+                error.report();
+                continue;
+            }
+        };
+        if placement.matches_target() {
+            continue;
+        }
+        if let Err(error) = move_window_old(client, &placement) {
+            error.report();
+        }
+    }
+    Ok(())
+}
+
+fn move_window_old(client: &Client, placement: &WindowPlacement) -> PlatformResult<()> {
     use windows_sys::Win32::UI::WindowsAndMessaging::{
-        BeginDeferWindowPos, DeferWindowPos, EndDeferWindowPos, GetWindowRect, HWND_BOTTOM,
-        HWND_NOTOPMOST, HWND_TOPMOST, MoveWindow, SW_RESTORE, SWP_NOMOVE, SWP_NOREDRAW, SWP_NOSIZE,
+        HWND_BOTTOM, HWND_NOTOPMOST, HWND_TOPMOST, MoveWindow, SW_RESTORE, SWP_NOMOVE, SWP_NOSIZE,
         SWP_SHOWWINDOW, SetWindowPos, ShowWindow,
     };
-    let workspace = &state.workspaces[workspace_id.0];
-    let workspace_hidden = workspace
-        .monitor
-        .is_some_and(|monitor| state.monitors[monitor.0].is_hidden);
-    let mut defer = unsafe { BeginDeferWindowPos(workspace.clients.len() as i32 + 1) };
+    let hwnd = placement.hwnd as windows_sys::Win32::Foundation::HWND;
+    check_bool(
+        unsafe {
+            MoveWindow(
+                hwnd,
+                placement.left,
+                placement.top,
+                placement.width,
+                placement.height,
+                0,
+            )
+        },
+        "MoveWindow(arrange workspace)",
+    )?;
+    // ShowWindow reports the window's previous visibility, not success or
+    // failure, so a zero return is not an error.
+    unsafe { ShowWindow(hwnd, SW_RESTORE) };
+    let (insert_after, operation) = if client.is_visible {
+        (HWND_TOPMOST, "SetWindowPos(set topmost)")
+    } else {
+        (HWND_BOTTOM, "SetWindowPos(hidden window z-order)")
+    };
+    if let Err(error) = check_bool(
+        unsafe {
+            SetWindowPos(
+                hwnd,
+                insert_after,
+                0,
+                0,
+                0,
+                0,
+                SWP_SHOWWINDOW | SWP_NOSIZE | SWP_NOMOVE,
+            )
+        },
+        operation,
+    ) {
+        error.report();
+    }
+    if client.is_visible
+        && let Err(error) = check_bool(
+            unsafe {
+                SetWindowPos(
+                    hwnd,
+                    HWND_NOTOPMOST,
+                    0,
+                    0,
+                    0,
+                    0,
+                    SWP_SHOWWINDOW | SWP_NOSIZE | SWP_NOMOVE,
+                )
+            },
+            "SetWindowPos(clear topmost)",
+        )
+    {
+        error.report();
+    }
+    Ok(())
+}
+
+fn apply_workspace_windows_deferred(
+    state: &mut WindowManagerState,
+    workspace: WorkspaceId,
+    always_redraw: bool,
+    hidden_x: i32,
+) -> PlatformResult<()> {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        BeginDeferWindowPos, DeferWindowPos, EndDeferWindowPos, SWP_NOREDRAW, SWP_SHOWWINDOW,
+    };
+    let clients = state.workspaces[workspace.0].clients.clone();
+    let workspace_hidden = workspace_is_hidden(state, workspace);
+    let cloak_manager = workspace_cloak_manager(state, workspace);
+    let mut defer = unsafe { BeginDeferWindowPos(clients.len() as i32 + 1) };
     if defer.is_null() {
         return Err(PlatformError::last_win32("BeginDeferWindowPos"));
     }
-    for client_id in workspace.clients.iter().rev() {
+    for client_id in clients.into_iter().rev() {
         let client = state.clients[client_id.0].as_mut().unwrap();
-        if !use_old_move_logic
-            && client.data.use_minimize_to_hide
-            && (workspace_hidden || !client.is_visible)
-        {
-            if let Err(error) = crate::cloak::set_cloak_for_window(client.data.hwnd, 1, 2) {
+        if should_cloak(client, workspace_hidden) {
+            set_client_cloak(cloak_manager.as_ref(), client, 2);
+            continue;
+        }
+        let placement = match capture_window_placement(client, hidden_x) {
+            Ok(placement) => placement,
+            Err(error) => {
                 error.report();
+                continue;
             }
-            continue;
-        }
-        let hwnd = client.data.hwnd as HWND;
-        let mut window_rect: RECT = unsafe { zeroed() };
-        if let Err(error) = check_bool(
-            unsafe { GetWindowRect(hwnd, &mut window_rect) },
-            "GetWindowRect(arrange workspace)",
-        ) {
-            error.report();
-            continue;
-        }
-        let mut frame_rect = window_rect;
-        let frame_result = unsafe {
-            DwmGetWindowAttribute(
-                hwnd,
-                DWMWA_EXTENDED_FRAME_BOUNDS as u32,
-                &mut frame_rect as *mut _ as _,
-                size_of::<RECT>() as u32,
-            )
         };
-        if let Err(error) = check_hresult(
-            frame_result,
-            "DwmGetWindowAttribute(DWMWA_EXTENDED_FRAME_BOUNDS)",
-        ) {
-            error.report();
-            frame_rect = window_rect;
-        }
-        let left_border = frame_rect.left - window_rect.left;
-        let right_border = window_rect.right - frame_rect.right;
-        let top_border = window_rect.top - frame_rect.top;
-        let bottom_border = window_rect.bottom - frame_rect.bottom;
-        let mut target_left = client.data.rect.left - left_border;
-        if !client.is_visible {
-            target_left = hidden_x;
-        }
-        let target_top = client.data.rect.top - top_border;
-        let target_width =
-            client.data.rect.right - client.data.rect.left + left_border + right_border;
-        let target_height =
-            client.data.rect.bottom - client.data.rect.top + top_border + bottom_border;
-        let mut cloaked = 0u32;
-        let cloak_result = unsafe {
-            DwmGetWindowAttribute(
-                hwnd,
-                DWMWA_CLOAKED as u32,
-                &mut cloaked as *mut _ as _,
-                size_of::<u32>() as u32,
-            )
-        };
-        if let Err(error) = check_hresult(cloak_result, "DwmGetWindowAttribute(DWMWA_CLOAKED)") {
-            error.report();
-            cloaked = 0;
-        }
-        if window_matches_target(
-            Rect {
-                left: window_rect.left,
-                top: window_rect.top,
-                right: window_rect.right,
-                bottom: window_rect.bottom,
-            },
-            target_left,
-            target_top,
-            target_width,
-            target_height,
-            cloaked != 0,
-        ) {
-            continue;
-        }
-        if use_old_move_logic {
-            unsafe {
-                if let Err(error) = check_bool(
-                    MoveWindow(
-                        hwnd,
-                        target_left,
-                        target_top,
-                        target_width,
-                        target_height,
-                        0,
-                    ),
-                    "MoveWindow(arrange workspace)",
-                ) {
-                    error.report();
-                    continue;
-                }
-                // ShowWindow reports the window's previous visibility, not
-                // success or failure, so a zero return is not an error.
-                ShowWindow(hwnd, SW_RESTORE);
-                if client.is_visible {
-                    if let Err(error) = check_bool(
-                        SetWindowPos(
-                            hwnd,
-                            HWND_TOPMOST,
-                            0,
-                            0,
-                            0,
-                            0,
-                            SWP_SHOWWINDOW | SWP_NOSIZE | SWP_NOMOVE,
-                        ),
-                        "SetWindowPos(set topmost)",
-                    ) {
-                        error.report();
-                    }
-                    if let Err(error) = check_bool(
-                        SetWindowPos(
-                            hwnd,
-                            HWND_NOTOPMOST,
-                            0,
-                            0,
-                            0,
-                            0,
-                            SWP_SHOWWINDOW | SWP_NOSIZE | SWP_NOMOVE,
-                        ),
-                        "SetWindowPos(clear topmost)",
-                    ) {
-                        error.report();
-                    }
-                } else {
-                    if let Err(error) = check_bool(
-                        SetWindowPos(
-                            hwnd,
-                            HWND_BOTTOM,
-                            0,
-                            0,
-                            0,
-                            0,
-                            SWP_SHOWWINDOW | SWP_NOSIZE | SWP_NOMOVE,
-                        ),
-                        "SetWindowPos(hidden window z-order)",
-                    ) {
-                        error.report();
-                    }
-                }
-            }
+        if placement.matches_target() {
             continue;
         }
         let flags = if always_redraw {
@@ -2364,12 +2493,12 @@ fn apply_workspace_windows(
         defer = unsafe {
             DeferWindowPos(
                 defer,
-                hwnd,
+                placement.hwnd as windows_sys::Win32::Foundation::HWND,
                 std::ptr::null_mut(),
-                target_left,
-                target_top,
-                target_width,
-                target_height,
+                placement.left,
+                placement.top,
+                placement.width,
+                placement.height,
                 flags,
             )
         };
@@ -2378,10 +2507,8 @@ fn apply_workspace_windows(
             // unsafe to queue additional moves or try to commit the batch.
             return Err(PlatformError::last_win32("DeferWindowPos"));
         }
-        if client.data.use_minimize_to_hide && !workspace_hidden {
-            if let Err(error) = crate::cloak::set_cloak_for_window(client.data.hwnd, 1, 0) {
-                error.report();
-            }
+        if should_uncloak(client, workspace_hidden) {
+            set_client_cloak(cloak_manager.as_ref(), client, 0);
         }
     }
     check_bool(unsafe { EndDeferWindowPos(defer) }, "EndDeferWindowPos")?;

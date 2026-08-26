@@ -1,5 +1,6 @@
 param(
     [switch]$Dev,
+    [switch]$Timings,
     [Parameter(ValueFromRemainingArguments = $true)]
     [string[]]$CargoArgs
 )
@@ -48,6 +49,9 @@ Write-Host '----- effective SWM configuration end -------'
 $arguments = @('build', '--manifest-path', (Join-Path $portDirectory 'Cargo.toml'))
 if (-not $Dev) {
     $arguments += '--release'
+}
+if ($Timings) {
+    $arguments += '--timings'
 }
 if ($CargoArgs) {
     $arguments += $CargoArgs

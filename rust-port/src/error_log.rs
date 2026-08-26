@@ -3,11 +3,14 @@ use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, SystemTime};
 
 use serde_json::Value;
-use tracing_subscriber::filter::filter_fn;
+use tracing_subscriber::filter::{dynamic_filter_fn, filter_fn};
+use tracing_subscriber::fmt::MakeWriter;
 use tracing_subscriber::layer::{Layer, SubscriberExt};
+use windows_sys::Win32::System::Diagnostics::Debug::OutputDebugStringW;
 
 const ERROR_LOG_CAPACITY: usize = 100;
 const LOG_FILE_PREFIX: &str = "errors.log";
@@ -30,11 +33,74 @@ pub struct ErrorLogEntry {
     pub frames: Vec<LoggingFrame>,
     pub file: String,
     pub line: Option<u32>,
+    pub backtrace: String,
 }
 
 static LOG_DIRECTORY: OnceLock<Option<PathBuf>> = OnceLock::new();
 static LOG_WRITER: OnceLock<tracing_appender::non_blocking::NonBlocking> = OnceLock::new();
 static LOG_GUARD: OnceLock<tracing_appender::non_blocking::WorkerGuard> = OnceLock::new();
+static DEBUG_OUTPUT_ENABLED: AtomicBool = AtomicBool::new(false);
+
+#[derive(Clone, Copy)]
+struct DebugOutputWriterFactory;
+
+struct DebugOutputWriter(Vec<u8>);
+
+impl<'a> MakeWriter<'a> for DebugOutputWriterFactory {
+    type Writer = DebugOutputWriter;
+
+    fn make_writer(&'a self) -> Self::Writer {
+        DebugOutputWriter(Vec::new())
+    }
+}
+
+impl Write for DebugOutputWriter {
+    fn write(&mut self, buffer: &[u8]) -> std::io::Result<usize> {
+        self.0.extend_from_slice(buffer);
+        Ok(buffer.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+impl Drop for DebugOutputWriter {
+    fn drop(&mut self) {
+        if self.0.is_empty() {
+            return;
+        }
+        let message = String::from_utf8_lossy(&self.0).replace('\0', "�");
+        let wide: Vec<u16> = message.encode_utf16().chain(std::iter::once(0)).collect();
+        unsafe { OutputDebugStringW(wide.as_ptr()) };
+    }
+}
+
+pub fn debug_output_enabled() -> bool {
+    DEBUG_OUTPUT_ENABLED.load(Ordering::Relaxed)
+}
+
+pub fn set_debug_output_enabled(enabled: bool) {
+    DEBUG_OUTPUT_ENABLED.store(enabled, Ordering::Relaxed);
+}
+
+pub fn toggle_debug_output() -> bool {
+    !DEBUG_OUTPUT_ENABLED.fetch_xor(true, Ordering::Relaxed)
+}
+
+fn debug_output_filter(metadata: &tracing::Metadata<'_>) -> bool {
+    metadata.is_span()
+        || (debug_output_enabled() && matches!(metadata.target(), "swm::error" | "swm::debug"))
+}
+
+/// Writes a printf-style diagnostic event to DebugView when debug output is enabled.
+/// These events use a separate target and are never written to the rolling error log.
+#[macro_export]
+macro_rules! debug_out {
+    ($($argument:tt)*) => {
+        tracing::debug!(target: "swm::debug", $($argument)*);
+    };
+}
 
 fn configured_log_directory() -> Option<PathBuf> {
     Some(
@@ -73,8 +139,20 @@ fn install_file_subscriber(directory: &Path) -> Result<(), String> {
         .with_filter(filter_fn(|metadata| {
             metadata.is_span() || metadata.target() == "swm::error"
         }));
-    tracing::subscriber::set_global_default(tracing_subscriber::registry().with(layer))
-        .map_err(|error| error.to_string())
+    let debug_layer = tracing_subscriber::fmt::layer()
+        .json()
+        .with_ansi(false)
+        .without_time()
+        .with_current_span(true)
+        .with_span_list(true)
+        .with_writer(DebugOutputWriterFactory)
+        .with_filter(dynamic_filter_fn(|metadata, _context| {
+            debug_output_filter(metadata)
+        }));
+    tracing::subscriber::set_global_default(
+        tracing_subscriber::registry().with(layer).with(debug_layer),
+    )
+    .map_err(|error| error.to_string())
 }
 
 pub fn initialize() {
@@ -85,8 +163,16 @@ pub fn initialize() {
             .with_filter(filter_fn(|metadata| {
                 metadata.is_span() || metadata.target() == "swm::error"
             }));
-        tracing::subscriber::set_global_default(tracing_subscriber::registry().with(layer))
-            .map_err(|error| error.to_string())
+        let debug_layer = tracing_subscriber::fmt::layer()
+            .json()
+            .with_writer(DebugOutputWriterFactory)
+            .with_filter(dynamic_filter_fn(|metadata, _context| {
+                debug_output_filter(metadata)
+            }));
+        tracing::subscriber::set_global_default(
+            tracing_subscriber::registry().with(layer).with(debug_layer),
+        )
+        .map_err(|error| error.to_string())
     } else if let Some(directory) = log_directory() {
         install_file_subscriber(&directory)
     } else {
@@ -265,6 +351,10 @@ fn parse_entry(line: &str) -> Option<ErrorLogEntry> {
             .get("caller_line")
             .and_then(Value::as_u64)
             .map(|line| line as u32),
+        backtrace: fields
+            .get("backtrace")
+            .map(display_json_value)
+            .unwrap_or_default(),
     })
 }
 
@@ -327,7 +417,7 @@ mod tests {
     #[test]
     fn parses_structured_error_and_span_context() {
         let entry = parse_entry(
-            r#"{"level":"ERROR","fields":{"operation":"GetParent failed","code":1400,"error_message":"Invalid window handle.","timestamp_ms":1000,"caller_file":"src/platform.rs","caller_line":42},"target":"swm::error","spans":[{"event":"test","name":"outer_failure"},{"hwnd":4660,"name":"instrumented_failure"}]}"#,
+            r#"{"level":"ERROR","fields":{"operation":"GetParent failed","code":1400,"error_message":"Invalid window handle.","timestamp_ms":1000,"caller_file":"src/platform.rs","caller_line":42,"backtrace":"frame one\nframe two"},"target":"swm::error","spans":[{"event":"test","name":"outer_failure"},{"hwnd":4660,"name":"instrumented_failure"}]}"#,
         )
         .unwrap();
         assert_eq!(
@@ -341,6 +431,7 @@ mod tests {
         assert_eq!(entry.frames[0].fields[0], ("event".into(), "test".into()));
         assert_eq!(entry.file, "src/platform.rs");
         assert_eq!(entry.line, Some(42));
+        assert_eq!(entry.backtrace, "frame one\nframe two");
     }
 
     #[test]

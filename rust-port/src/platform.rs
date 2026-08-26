@@ -261,6 +261,7 @@ pub(crate) fn binding_name(binding: &crate::commands::KeyBinding) -> String {
         CloseFocused => "close_focused_window".into(),
         KillFocused => "kill_focused_window".into(),
         ToggleTaskbar => "taskbar_toggle".into(),
+        ToggleDebugOutput => "ToggleDebugOutput".into(),
         ToggleFilteredCurrent => "toggle_create_window_in_current_workspace".into(),
         ToggleUnfilteredCurrent => "toggle_ignore_workspace_filters".into(),
         ToggleUnmatchedCurrent => {
@@ -281,6 +282,7 @@ pub(crate) fn binding_name(binding: &crate::commands::KeyBinding) -> String {
         ShowFloatLogs => "FloatLogsMenu".into(),
         ShowClientLogs => "ClientLogsMenu".into(),
         ShowErrorLogs => "ErrorLogsMenu".into(),
+        ShowConfigurationState => "ConfigurationStateMenu".into(),
         RunLastMenu => "LastMenu".into(),
         ShowPrograms(true) => "ProgramLauncherMenu_elevated".into(),
         ShowPrograms(false) => "ProgramLauncherMenu_not_elevated".into(),
@@ -327,6 +329,14 @@ fn command_description(runtime: &Runtime, action: crate::commands::Action) -> St
             if elevated { "elevated" } else { "not elevated" }
         ),
         Launch(command) => command.into(),
+        ToggleDebugOutput => format!(
+            "OutputDebugString logging is {}",
+            if crate::error_log::debug_output_enabled() {
+                "enabled"
+            } else {
+                "disabled"
+            }
+        ),
         _ => String::new(),
     }
 }
@@ -400,13 +410,13 @@ mod key_name_tests {
 }
 
 pub(crate) fn show_float_logs_menu(_runtime: &mut Runtime) {
-    let rows: Vec<Vec<String>> = _runtime
+    let rows: Vec<rust_nfm::runtime::StructuredPickerRow> = _runtime
         .configuration
         .state
         .float_log_buffer
         .iter()
-        .map(|entry| {
-            vec![
+        .map(|entry| rust_nfm::runtime::StructuredPickerRow {
+            cells: vec![
                 local_log_time(entry.timestamp),
                 if entry.is_floated { "FLOAT" } else { "TILE" }.into(),
                 entry.process_image_name.clone(),
@@ -419,24 +429,28 @@ pub(crate) fn show_float_logs_menu(_runtime: &mut Runtime) {
                 entry.process_id.to_string(),
                 entry.window_width.to_string(),
                 entry.window_height.to_string(),
-            ]
+            ],
+            preview: None,
         })
         .collect();
     let rows = if rows.is_empty() {
-        vec![vec![
-            "".into(),
-            "".into(),
-            "No float decisions logged yet".into(),
-            "".into(),
-            "".into(),
-            "".into(),
-            "".into(),
-            "".into(),
-            "".into(),
-            "".into(),
-            "".into(),
-            "".into(),
-        ]]
+        vec![rust_nfm::runtime::StructuredPickerRow {
+            cells: vec![
+                "".into(),
+                "".into(),
+                "No float decisions logged yet".into(),
+                "".into(),
+                "".into(),
+                "".into(),
+                "".into(),
+                "".into(),
+                "".into(),
+                "".into(),
+                "".into(),
+                "".into(),
+            ],
+            preview: None,
+        }]
     } else {
         rows
     };
@@ -462,13 +476,13 @@ pub(crate) fn show_float_logs_menu(_runtime: &mut Runtime) {
 }
 
 pub(crate) fn show_client_logs_menu(_runtime: &mut Runtime) {
-    let rows: Vec<Vec<String>> = _runtime
+    let rows: Vec<rust_nfm::runtime::StructuredPickerRow> = _runtime
         .configuration
         .state
         .client_log_buffer
         .iter()
-        .map(|entry| {
-            vec![
+        .map(|entry| rust_nfm::runtime::StructuredPickerRow {
+            cells: vec![
                 local_log_time(entry.timestamp),
                 if entry.was_minimized { "MIN" } else { "NORM" }.into(),
                 "TILE".into(),
@@ -484,13 +498,17 @@ pub(crate) fn show_client_logs_menu(_runtime: &mut Runtime) {
                 format_extended_styles(entry.ex_styles),
                 entry.window_width.to_string(),
                 entry.window_height.to_string(),
-            ]
+            ],
+            preview: None,
         })
         .collect();
     let rows = if rows.is_empty() {
-        let mut row = vec![String::new(); 15];
-        row[0] = "No clients logged yet".into();
-        vec![row]
+        let mut cells = vec![String::new(); 15];
+        cells[0] = "No clients logged yet".into();
+        vec![rust_nfm::runtime::StructuredPickerRow {
+            cells,
+            preview: None,
+        }]
     } else {
         rows
     };
@@ -519,10 +537,11 @@ pub(crate) fn show_client_logs_menu(_runtime: &mut Runtime) {
 }
 
 pub(crate) fn show_error_logs_menu(runtime: &mut Runtime) {
-    let rows: Vec<Vec<String>> = crate::error_log::entries()
+    let mut rows: Vec<rust_nfm::runtime::StructuredPickerRow> = crate::error_log::entries()
         .into_iter()
         .rev()
         .map(|entry| {
+            let preview = format_error_preview(&entry);
             let properties = entry
                 .frames
                 .iter()
@@ -537,35 +556,39 @@ pub(crate) fn show_error_logs_menu(runtime: &mut Runtime) {
             let source = entry
                 .line
                 .map_or(entry.file.clone(), |line| format!("{}:{line}", entry.file));
-            vec![
-                local_log_time(entry.timestamp),
-                entry.entry_method,
-                entry.current_method,
-                entry.context,
-                entry.code.map(|code| code.to_string()).unwrap_or_default(),
-                entry.message,
-                properties,
-                source,
-            ]
+            rust_nfm::runtime::StructuredPickerRow {
+                cells: vec![
+                    local_log_time(entry.timestamp),
+                    entry.entry_method,
+                    entry.current_method,
+                    entry.context,
+                    entry.code.map(|code| code.to_string()).unwrap_or_default(),
+                    entry.message,
+                    properties,
+                    source,
+                ],
+                preview: Some(preview),
+            }
         })
         .collect();
-    let rows = if rows.is_empty() {
+    if rows.is_empty() {
         let log_path = crate::error_log::log_file_path()
             .map(|path| path.display().to_string())
             .unwrap_or_else(|| "File logging unavailable: LOCALAPPDATA is not set".into());
-        vec![vec![
-            String::new(),
-            String::new(),
-            String::new(),
-            "No runtime errors logged".into(),
-            String::new(),
-            String::new(),
-            String::new(),
-            log_path,
-        ]]
-    } else {
-        rows
-    };
+        rows.push(rust_nfm::runtime::StructuredPickerRow {
+            cells: vec![
+                String::new(),
+                String::new(),
+                String::new(),
+                "No runtime errors logged".into(),
+                String::new(),
+                String::new(),
+                String::new(),
+                log_path.clone(),
+            ],
+            preview: Some(format!("No runtime errors logged\n\nLog file: {log_path}")),
+        });
+    }
     show_array_columns(
         runtime,
         rows,
@@ -583,9 +606,224 @@ pub(crate) fn show_error_logs_menu(runtime: &mut Runtime) {
     );
 }
 
+pub(crate) fn show_configuration_state_menu(runtime: &mut Runtime) {
+    let configuration = &runtime.configuration;
+    let state = &configuration.state;
+    let mut rows = Vec::new();
+    let mut add = |category: &str, property: &str, value: String, details: Option<String>| {
+        let preview = details.unwrap_or_else(|| {
+            format!("Category: {category}\nProperty: {property}\nValue: {value}")
+        });
+        rows.push(rust_nfm::runtime::StructuredPickerRow {
+            cells: vec![category.into(), property.into(), value],
+            preview: Some(preview),
+        });
+    };
+
+    macro_rules! scalar {
+        ($category:literal, $property:ident, $value:expr) => {
+            add(
+                $category,
+                stringify!($property),
+                format!("{}", $value),
+                None,
+            )
+        };
+    }
+
+    scalar!("Configuration", always_redraw, configuration.always_redraw);
+    scalar!(
+        "Configuration",
+        use_old_move_logic_configured,
+        configuration.use_old_move_logic_configured
+    );
+    scalar!(
+        "Configuration",
+        non_float_window_height_minimum,
+        configuration.non_float_window_height_minimum
+    );
+    scalar!(
+        "Configuration",
+        float_uwp_windows,
+        configuration.float_uwp_windows
+    );
+    scalar!("Configuration", bar_height, configuration.bar_height);
+    scalar!(
+        "Configuration",
+        float_window_movement,
+        configuration.float_window_movement
+    );
+    scalar!(
+        "Configuration",
+        drag_drop_float_modifier,
+        configuration.drag_drop_float_modifier
+    );
+    scalar!(
+        "Configuration",
+        bar_right_padding,
+        configuration.bar_right_padding
+    );
+    scalar!(
+        "Configuration",
+        cloak_to_hide_all,
+        configuration.cloak_to_hide_all
+    );
+    add(
+        "Configuration",
+        "text_style",
+        if configuration.text_style.is_some() {
+            "configured".into()
+        } else {
+            "none".into()
+        },
+        Some(format!("{:#?}", configuration.text_style)),
+    );
+
+    let mut collection = |property: &str, count: usize, details: String| {
+        add(
+            "Configuration collection",
+            property,
+            format!("{count} entries"),
+            Some(details),
+        );
+    };
+    collection(
+        "key_bindings",
+        configuration.key_bindings.len(),
+        format!("{:#?}", configuration.key_bindings),
+    );
+    collection(
+        "commands",
+        configuration.commands.len(),
+        format!("{:#?}", configuration.commands),
+    );
+    collection(
+        "bar_segments",
+        configuration.bar_segments.len(),
+        format!("{:#?}", configuration.bar_segments),
+    );
+    collection(
+        "program_launchers",
+        configuration.program_launchers.len(),
+        format!("{:#?}", configuration.program_launchers),
+    );
+    collection(
+        "prevent_float_processes",
+        configuration.prevent_float_processes.len(),
+        format!("{:#?}", configuration.prevent_float_processes),
+    );
+    drop(collection);
+
+    add(
+        "State",
+        "selected_monitor",
+        format!("{:?}", state.selected_monitor),
+        None,
+    );
+    add(
+        "State",
+        "last_workspace",
+        format!("{:?}", state.last_workspace),
+        None,
+    );
+    scalar!("State", menu_visible, state.menu_visible);
+    scalar!(
+        "Logging",
+        debug_output_enabled,
+        crate::error_log::debug_output_enabled()
+    );
+    add(
+        "State",
+        "current_window_routing_mode",
+        format!("{:?}", state.current_window_routing_mode),
+        None,
+    );
+
+    let active_clients = state.clients.iter().flatten().count();
+    add(
+        "State collection",
+        "clients",
+        format!("{active_clients} active / {} slots", state.clients.len()),
+        Some(format!("{:#?}", state.clients)),
+    );
+    add(
+        "State collection",
+        "workspaces",
+        format!("{} entries", state.workspaces.len()),
+        Some(format!("{:#?}", state.workspaces)),
+    );
+    add(
+        "State collection",
+        "monitors",
+        format!("{} entries", state.monitors.len()),
+        Some(format!("{:#?}", state.monitors)),
+    );
+    add(
+        "State collection",
+        "float_log_buffer",
+        format!("{} entries", state.float_log_buffer.len()),
+        Some(format!("{:#?}", state.float_log_buffer)),
+    );
+    add(
+        "State collection",
+        "client_log_buffer",
+        format!("{} entries", state.client_log_buffer.len()),
+        Some(format!("{:#?}", state.client_log_buffer)),
+    );
+
+    show_array_columns(
+        runtime,
+        rows,
+        &["Category", "Property", "Value"],
+        &[0, 1, 2],
+    );
+}
+
+fn format_error_preview(entry: &crate::error_log::ErrorLogEntry) -> String {
+    use std::fmt::Write;
+    let source = entry.line.map_or_else(
+        || entry.file.clone(),
+        |line| format!("{}:{line}", entry.file),
+    );
+    let code = entry
+        .code
+        .map_or_else(|| "N/A".into(), |code| code.to_string());
+    let mut preview = format!(
+        "Time: {}\nEntry: {}\nCurrent: {}\nOperation: {}\nCode: {}\nMessage: {}\nSource: {}\n",
+        local_log_time(entry.timestamp),
+        entry.entry_method,
+        entry.current_method,
+        entry.context,
+        code,
+        entry.message,
+        source,
+    );
+    preview.push_str("\nContext:\n");
+    if entry.frames.is_empty() {
+        preview.push_str("  None\n");
+    } else {
+        for frame in &entry.frames {
+            let _ = writeln!(preview, "  {}", frame.method);
+            for (name, value) in &frame.fields {
+                let _ = writeln!(preview, "    {name}: {value}");
+            }
+        }
+    }
+    preview.push_str("\nStack trace:\n");
+    if entry.backtrace.is_empty() {
+        preview.push_str("  Not captured\n");
+    } else {
+        preview.push_str(&entry.backtrace);
+        if !entry.backtrace.ends_with('\n') {
+            preview.push('\n');
+        }
+    }
+    preview
+}
+
 fn show_array_columns(
     runtime: &mut Runtime,
-    rows: Vec<Vec<String>>,
+    rows: Vec<rust_nfm::runtime::StructuredPickerRow>,
     columns: &[&str],
     display: &[i32],
 ) {
@@ -601,16 +839,27 @@ fn show_array_columns(
             .filter_map(|index| columns.get(*index))
             .map(|column| (*column).to_owned())
             .collect::<Vec<_>>();
+        let has_previews = rows.iter().any(|row| row.preview.is_some());
         let picker_rows = rows
-            .iter()
-            .map(|row| {
-                visible_columns
+            .into_iter()
+            .map(|row| rust_nfm::runtime::StructuredPickerRow {
+                cells: visible_columns
                     .iter()
-                    .map(|index| row.get(*index).cloned().unwrap_or_default())
-                    .collect::<Vec<_>>()
+                    .map(|index| row.cells.get(*index).cloned().unwrap_or_default())
+                    .collect(),
+                preview: row.preview,
             })
             .collect();
-        match menu.show_structured(picker_columns, picker_rows, None) {
+        let task = if has_previews {
+            menu.show_structured_with_previews(picker_columns, picker_rows, None)
+        } else {
+            menu.show_structured(
+                picker_columns,
+                picker_rows.into_iter().map(|row| row.cells).collect(),
+                None,
+            )
+        };
+        match task {
             Ok(task) => consume_picker_task(task, |_| unsafe { menu_on_closed() }),
             Err(error) => {
                 crate::error_log::report("failed to start structured picker", format!("{error:#}"));
@@ -627,7 +876,7 @@ fn show_array_columns(
                 .iter()
                 .filter_map(|index| {
                     let name = columns.get(*index)?;
-                    let value = row.get(*index)?;
+                    let value = row.cells.get(*index)?;
                     Some(format!("{name}: {}", value.replace(['\r', '\n'], " ")))
                 })
                 .collect::<Vec<_>>()
@@ -948,11 +1197,19 @@ unsafe extern "system" fn handle_windows_event(
                 {
                     report_win_event_error(event, raw, id_object, id_child, error);
                 }
+                use windows_sys::Win32::Foundation::ERROR_INVALID_WINDOW_HANDLE;
                 use windows_sys::Win32::UI::WindowsAndMessaging::{GWL_STYLE, WS_VISIBLE};
-                if platform_window_long(hwnd, GWL_STYLE)? & WS_VISIBLE as i32 == 0 {
-                    runtime.remove_client_by_hwnd(raw)
-                } else {
-                    Ok(())
+                match platform_window_long(hwnd, GWL_STYLE) {
+                    Ok(styles) if styles & WS_VISIBLE as i32 == 0 => {
+                        runtime.remove_client_by_hwnd(raw)
+                    }
+                    Ok(_) => Ok(()),
+                    Err(error) if error.is_win32(ERROR_INVALID_WINDOW_HANDLE) => {
+                        // A hide event can outlive its HWND. An invalid handle is
+                        // already effectively hidden, so remove any tracked client.
+                        runtime.remove_client_by_hwnd(raw)
+                    }
+                    Err(error) => Err(error),
                 }
             }
             EVENT_OBJECT_SHOW | EVENT_OBJECT_UNCLOAKED if is_taskbar(hwnd)? => {
@@ -1022,21 +1279,24 @@ fn platform_window_long(
 }
 
 fn is_taskbar(hwnd: windows_sys::Win32::Foundation::HWND) -> PlatformResult<bool> {
-    let mut buffer = [0u16; 257];
-    let length = unsafe {
-        windows_sys::Win32::UI::WindowsAndMessaging::GetClassNameW(
-            hwnd,
-            buffer.as_mut_ptr(),
-            buffer.len() as i32,
-        )
-    };
-    if length <= 0 {
-        return Err(PlatformError::last_win32("GetClassNameW(taskbar)"));
+    use windows_sys::Win32::Foundation::ERROR_INVALID_WINDOW_HANDLE;
+    match crate::snapshot::window_class_name(hwnd as isize, "GetClassNameW(taskbar)") {
+        Ok(Some(class_name)) => Ok(matches!(
+            class_name.as_str(),
+            "Shell_TrayWnd" | "Shell_SecondaryTrayWnd"
+        )),
+        Ok(None) => Ok(false),
+        Err(error) if error.is_win32(ERROR_INVALID_WINDOW_HANDLE) => {
+            // Out-of-context WinEvent delivery can race window destruction.
+            tracing::info!(
+                target: "swm::window",
+                hwnd = hwnd as usize,
+                "window disappeared before taskbar classification"
+            );
+            Ok(false)
+        }
+        Err(error) => Err(error),
     }
-    Ok(matches!(
-        String::from_utf16_lossy(&buffer[..length as usize]).as_str(),
-        "Shell_TrayWnd" | "Shell_SecondaryTrayWnd"
-    ))
 }
 
 fn install_win_event_hooks()

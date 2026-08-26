@@ -41,7 +41,7 @@ pub struct ClientData {
     pub command_line: Option<String>,
     pub is_elevated: bool,
     pub is_minimized: bool,
-    pub use_minimize_to_hide: bool,
+    pub use_cloak_to_hide: bool,
 }
 
 #[derive(Clone, Debug)]

@@ -74,7 +74,7 @@ pub struct Configuration {
     pub drag_drop_float_modifier: i32,
     pub bar_right_padding: i32,
     pub prevent_float_processes: Vec<String>,
-    pub minimize_to_hide_all: bool,
+    pub cloak_to_hide_all: bool,
 }
 
 impl Default for Configuration {
@@ -98,7 +98,7 @@ impl Default for Configuration {
             drag_drop_float_modifier: crate::commands::LALT,
             bar_right_padding: 10,
             prevent_float_processes: Vec::new(),
-            minimize_to_hide_all: false,
+            cloak_to_hide_all: false,
         }
     }
 }
@@ -170,6 +170,8 @@ impl Configuration {
             Action::SetTileReversed,
         );
         self.command_create("ErrorLogsMenu", Action::ShowErrorLogs);
+        self.command_create("ConfigurationStateMenu", Action::ShowConfigurationState);
+        self.command_create("ToggleDebugOutput", Action::ToggleDebugOutput);
     }
 
     pub fn keybinding_create(&mut self, binding: KeyBinding) {

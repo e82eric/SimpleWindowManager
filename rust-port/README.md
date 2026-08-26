@@ -37,7 +37,14 @@ configuration as normal output before building:
 ```
 
 The wrapper builds release by default; pass `-Dev` for a debug build. An
-explicit `SWM_CONFIG_RS` environment variable takes precedence over
+additional `-Timings` switch generates Cargo's build timing report at
+`rust-port/target/cargo-timings/cargo-timing.html`:
+
+```powershell
+.\rust-port\build.ps1 -Timings
+```
+
+An explicit `SWM_CONFIG_RS` environment variable takes precedence over
 `build.local.ps1`. If the
 selected file delegates to the repository defaults, the delegated
 `configure()` implementation is expanded in the output. Direct Cargo commands

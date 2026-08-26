@@ -27,6 +27,32 @@ struct WindowSnapshotBase {
     class_name: String,
 }
 
+pub(crate) fn window_class_name(
+    hwnd: isize,
+    operation: &'static str,
+) -> PlatformResult<Option<String>> {
+    use windows_sys::Win32::Foundation::{GetLastError, SetLastError};
+    use windows_sys::Win32::UI::WindowsAndMessaging::GetClassNameW;
+    let mut buffer = [0u16; 257];
+    unsafe { SetLastError(0) };
+    let length = unsafe {
+        GetClassNameW(
+            hwnd as windows_sys::Win32::Foundation::HWND,
+            buffer.as_mut_ptr(),
+            buffer.len() as i32,
+        )
+    };
+    if length > 0 {
+        return Ok(Some(String::from_utf16_lossy(&buffer[..length as usize])));
+    }
+    let error = unsafe { GetLastError() };
+    if error == 0 {
+        Ok(None)
+    } else {
+        Err(PlatformError::win32(operation, error))
+    }
+}
+
 unsafe fn process_is_elevated(
     process: windows_sys::Win32::Foundation::HANDLE,
 ) -> PlatformResult<bool> {
@@ -291,24 +317,21 @@ fn capture_base_window_snapshot(hwnd: isize, require_visible: bool) -> Option<Wi
     if require_visible && styles & WS_VISIBLE as i32 == 0 {
         return None;
     }
-    let mut class_buffer = [0u16; 257];
-    let class_length = unsafe {
-        GetClassNameW(
-            hwnd_value,
-            class_buffer.as_mut_ptr(),
-            class_buffer.len() as i32,
-        )
-    };
-    if class_length == 0 {
-        let error = PlatformError::last_win32("GetClassNameW");
-        if !error.is_win32(ERROR_INVALID_WINDOW_HANDLE) {
-            error.report();
+    let class_name = match window_class_name(hwnd, "GetClassNameW") {
+        Ok(Some(class_name)) => class_name,
+        Ok(None) => {
+            // Class names are required for filtering and routing; treating a
+            // missing class as empty could allow an excluded window through.
+            return None;
         }
-        // Class names are required for filtering and routing; treating a
-        // retrieval failure as an empty class could allow an excluded window through.
-        return None;
-    }
-    let class_name = String::from_utf16_lossy(&class_buffer[..class_length as usize]);
+        Err(error) if error.is_win32(ERROR_INVALID_WINDOW_HANDLE) => return None,
+        Err(error) => {
+            error.report();
+            // Class names are required for filtering and routing; treating a
+            // retrieval failure as an empty class could allow an excluded window through.
+            return None;
+        }
+    };
     let ex_styles = match unsafe {
         window_long_checked(hwnd_value, GWL_EXSTYLE, "GetWindowLongW(GWL_EXSTYLE)")
     } {
