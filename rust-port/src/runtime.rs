@@ -162,8 +162,15 @@ impl Runtime {
                 .as_ref()
                 .unwrap()
                 .workspace;
+            let foreground_is_managed = self
+                .configuration
+                .state
+                .window_manager_find_client_in_workspaces_by_hwnd(foreground_window())
+                .is_some();
             self.apply_workspace(workspace)?;
-            self.focus_selected(workspace);
+            if foreground_is_managed {
+                self.focus_selected(workspace);
+            }
             self.redraw_bars();
             self.border_window_update();
             return Ok(());
@@ -1094,6 +1101,23 @@ impl Runtime {
         crate::bar::redraw(&self.bars);
     }
 
+    pub fn refresh_ui_state(&mut self) {
+        let foreground = foreground_window();
+        self.is_foreground_window_same_as_selected = self
+            .configuration
+            .state
+            .selected_monitor
+            .and_then(|monitor| self.configuration.state.monitors[monitor.0].workspace)
+            .and_then(|workspace| self.configuration.state.workspaces[workspace.0].selected)
+            .and_then(|client| self.configuration.state.clients[client.0].as_ref())
+            .is_some_and(|client| {
+                client.data.hwnd == foreground || self.configuration.state.menu_visible
+            });
+        self.event_foreground_hwnd = foreground;
+        self.redraw_bars();
+        self.border_window_update();
+    }
+
     pub fn create_border_window(&mut self) -> PlatformResult<()> {
         let style = self
             .configuration
@@ -1989,17 +2013,17 @@ fn taskbar_height(hwnd: isize) -> PlatformResult<i32> {
     Ok(rect.bottom - rect.top)
 }
 fn stop_managing_window(hwnd: isize, monitor: &Monitor) {
-    use windows_sys::Win32::UI::WindowsAndMessaging::{SWP_SHOWWINDOW, SetWindowPos};
+    use windows_sys::Win32::UI::WindowsAndMessaging::{SWP_NOSIZE, SWP_SHOWWINDOW, SetWindowPos};
     if let Err(error) = check_bool(
         unsafe {
             SetWindowPos(
                 hwnd as _,
                 std::ptr::null_mut(),
-                monitor.x_offset,
+                monitor.x_offset + 200,
+                200,
                 0,
-                monitor.width,
-                monitor.height,
-                SWP_SHOWWINDOW,
+                0,
+                SWP_SHOWWINDOW | SWP_NOSIZE,
             )
         },
         "SetWindowPos(stop managing)",

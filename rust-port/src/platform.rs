@@ -59,6 +59,19 @@ static SUPPRESSED_KEY_UPS: Mutex<[bool; 256]> = Mutex::new([false; 256]);
 
 static WORKSPACE_MOVE_TIMER: Mutex<usize> = Mutex::new(0);
 
+unsafe extern "system" fn refresh_ui_state(
+    _hwnd: windows_sys::Win32::Foundation::HWND,
+    _message: u32,
+    _timer_id: usize,
+    _time: u32,
+) {
+    if let Some(runtime) = RUNTIME.get()
+        && let Ok(mut runtime) = runtime.try_lock()
+    {
+        runtime.refresh_ui_state();
+    }
+}
+
 unsafe extern "system" fn finish_workspace_move_focus_preservation(
     _hwnd: windows_sys::Win32::Foundation::HWND,
     _message: u32,
@@ -1472,6 +1485,17 @@ pub fn run(runtime: Runtime, instance_mutex: isize) -> PlatformResult<()> {
     if let Some(runtime) = RUNTIME.get() {
         runtime.lock().unwrap().finish_startup();
     }
+    let ui_refresh_timer = unsafe {
+        windows_sys::Win32::UI::WindowsAndMessaging::SetTimer(
+            std::ptr::null_mut(),
+            0,
+            1500,
+            Some(refresh_ui_state),
+        )
+    };
+    if ui_refresh_timer == 0 {
+        crate::error_log::last_win32("SetTimer(UI refresh) failed");
+    }
     let result = run_message_loop();
     let mut cleanup_error = None;
     let mut record_cleanup_error = |error: PlatformError| {
@@ -1487,6 +1511,14 @@ pub fn run(runtime: Runtime, instance_mutex: isize) -> PlatformResult<()> {
         }
     }
     unsafe {
+        if ui_refresh_timer != 0
+            && windows_sys::Win32::UI::WindowsAndMessaging::KillTimer(
+                std::ptr::null_mut(),
+                ui_refresh_timer,
+            ) == 0
+        {
+            record_cleanup_error(PlatformError::last_win32("KillTimer(UI refresh)"));
+        }
         let timer = *WORKSPACE_MOVE_TIMER.lock().unwrap();
         if timer != 0 {
             if windows_sys::Win32::UI::WindowsAndMessaging::KillTimer(std::ptr::null_mut(), timer)
