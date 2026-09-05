@@ -228,11 +228,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "frizbee"
-version = "0.12.0"
-source = "git+https://github.com/e82eric/frizbee?branch=nfm-fzf-scoring-clean#12bf796d5c5e469bbc10196c485387296af231a2"
-
-[[package]]
 name = "glob"
 version = "0.3.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -373,7 +368,7 @@ name = "nfm_search_core"
 version = "0.1.0"
 dependencies = [
  "crossbeam-channel",
- "frizbee",
+ "memchr",
  "rayon",
 ]
 

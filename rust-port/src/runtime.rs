@@ -573,6 +573,10 @@ impl Runtime {
     }
 
     fn monitor_select(&mut self, monitor: MonitorId) {
+        self.monitor_select_with_focus(monitor, true);
+    }
+
+    fn monitor_select_with_focus(&mut self, monitor: MonitorId, focus: bool) {
         if self.configuration.state.monitors[monitor.0].is_hidden {
             return;
         }
@@ -581,7 +585,9 @@ impl Runtime {
         }
         self.configuration.state.monitors[monitor.0].selected = true;
         self.configuration.state.selected_monitor = Some(monitor);
-        if let Some(workspace) = self.configuration.state.monitors[monitor.0].workspace {
+        if focus
+            && let Some(workspace) = self.configuration.state.monitors[monitor.0].workspace
+        {
             self.focus_selected(workspace);
         }
         self.redraw_bars();
@@ -1251,7 +1257,12 @@ impl Runtime {
         if self.configuration.state.monitors[monitor].is_hidden {
             return;
         }
-        self.monitor_select(MonitorId(monitor));
+        // Select the monitor without activating its outgoing workspace. That
+        // activation can complete after the swap and focus a now-cloaked window.
+        self.monitor_select_with_focus(MonitorId(monitor), false);
+        if self.configuration.state.monitors[monitor].workspace == Some(WorkspaceId(workspace)) {
+            self.focus_selected(WorkspaceId(workspace));
+        }
         if let Err(error) = self.swap_selected_monitor_to(WorkspaceId(workspace)) {
             error.report();
         }
