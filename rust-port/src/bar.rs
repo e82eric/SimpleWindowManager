@@ -155,18 +155,6 @@ const BAR_MARGIN: f32 = 2.0;
 const REGION_GAP: f32 = 12.0;
 const REGION_PADDING: f32 = 14.0;
 const TAG_WIDTH: f32 = 42.0;
-const SELECTED_MONITOR_DOT_RADIUS: f32 = 5.0;
-const SELECTED_MONITOR_DOT_GAP: f32 = 11.0;
-const SELECTED_MONITOR_DOT_COUNT: usize = 4;
-
-fn color_ref(value: u32) -> skia_safe::Color {
-    skia_safe::Color::from_argb(
-        255,
-        (value & 0xff) as u8,
-        ((value >> 8) & 0xff) as u8,
-        ((value >> 16) & 0xff) as u8,
-    )
-}
 
 fn tag_groups(snapshot: &BarSnapshot) -> Vec<(usize, usize, f32, f32)> {
     if snapshot.tags.is_empty() {
@@ -230,7 +218,7 @@ fn paint_skia(
     let groups = tag_groups(snapshot);
     for (start, end, left, right) in &groups {
         let region = Rect::new(*left, top, *right, bottom);
-        draw_region(canvas, region, snapshot.selected_monitor);
+        draw_region(canvas, region, snapshot.selected_monitor, false);
         for index in *start..*end {
             let (_, tag, selected, has_clients, is_icon) = &snapshot.tags[index];
             let item_left = *left + REGION_PADDING + (index - *start) as f32 * TAG_WIDTH;
@@ -238,24 +226,48 @@ fn paint_skia(
             if *selected {
                 let mut selected_paint = Paint::default();
                 selected_paint.set_anti_alias(true);
-                selected_paint.set_color(color_ref(snapshot.focus_background_color));
+                selected_paint.set_color(if snapshot.selected_monitor {
+                    skia_safe::Color::from_rgb(0x28, 0x28, 0x28)
+                } else {
+                    skia_safe::Color::from_rgb(0x66, 0x5c, 0x54)
+                });
                 canvas.draw_round_rect(item, 7.0, 7.0, &selected_paint);
             }
-            let color = if *selected {
-                snapshot.focus_text_color
-            } else if *has_clients {
-                snapshot.text_color
+            let color = if snapshot.selected_monitor {
+                if *selected {
+                    skia_safe::Color::from_rgb(0xeb, 0xdb, 0xb2)
+                } else {
+                    skia_safe::Color::from_rgb(0x28, 0x28, 0x28)
+                }
+            } else if *selected {
+                skia_safe::Color::from_rgb(0xeb, 0xdb, 0xb2)
             } else {
-                snapshot.disabled_color
+                skia_safe::Color::from_rgb(0x92, 0x83, 0x74)
             };
             let display_tag = icon_tag(index, tag, *is_icon);
             draw_centered_text(
                 canvas,
                 &display_tag,
-                item,
+                // Reserve the same marker space for empty and occupied tags so
+                // their labels stay aligned as workspace occupancy changes.
+                Rect::new(item.left, item.top, item.right, item.bottom - 6.0),
                 if *is_icon { &icon_font } else { &normal_font },
-                color_ref(color),
+                color,
             );
+            if *has_clients {
+                let mut marker = Paint::default();
+                marker.set_anti_alias(true);
+                // Match the label contrast, including light markers in the
+                // selected workspace's dark pill.
+                marker.set_color(color);
+                let underline = Rect::new(
+                    item.center_x() - 6.0,
+                    item.bottom - 4.0,
+                    item.center_x() + 6.0,
+                    item.bottom - 1.0,
+                );
+                canvas.draw_round_rect(underline, 1.5, 1.5, &marker);
+            }
         }
     }
 
@@ -290,35 +302,20 @@ fn paint_skia(
     let info_width =
         (text_width(&normal_font, &snapshot.workspace_info) + REGION_PADDING * 2.0).max(180.0);
     let info = Rect::new(left, top, left + info_width, bottom);
-    draw_region(canvas, info, snapshot.selected_monitor);
+    let region_text = if snapshot.selected_monitor {
+        skia_safe::Color::from_rgb(0xeb, 0xdb, 0xb2)
+    } else {
+        skia_safe::Color::from_rgb(0xa8, 0x99, 0x84)
+    };
+    draw_region(canvas, info, false, false);
     draw_centered_text(
         canvas,
         &snapshot.workspace_info,
         info,
         &normal_font,
-        color_ref(snapshot.text_color),
+        region_text,
     );
     left = info.right + REGION_GAP;
-
-    if snapshot.selected_monitor {
-        let diameter = SELECTED_MONITOR_DOT_RADIUS * 2.0;
-        let indicator_width = SELECTED_MONITOR_DOT_COUNT as f32 * diameter
-            + (SELECTED_MONITOR_DOT_COUNT - 1) as f32 * SELECTED_MONITOR_DOT_GAP;
-        let mut dot_paint = Paint::default();
-        dot_paint.set_anti_alias(true);
-        dot_paint.set_color(skia_safe::Color::from_rgb(0xfa, 0xbd, 0x2f));
-        for index in 0..SELECTED_MONITOR_DOT_COUNT {
-            let center_x = left
-                + SELECTED_MONITOR_DOT_RADIUS
-                + index as f32 * (diameter + SELECTED_MONITOR_DOT_GAP);
-            canvas.draw_circle(
-                (center_x, (top + bottom) / 2.0),
-                SELECTED_MONITOR_DOT_RADIUS,
-                &dot_paint,
-            );
-        }
-        left += indicator_width + REGION_GAP;
-    }
 
     let desired_focus =
         (text_width(&normal_font, &snapshot.focused_window) + REGION_PADDING * 2.0).max(240.0);
@@ -331,26 +328,25 @@ fn paint_skia(
     let focus_right = focus_left + focus_width;
     if focus_width > 0.0 {
         let focus = Rect::new(focus_left, top, focus_right, bottom);
-        draw_region(canvas, focus, snapshot.selected_monitor);
+        draw_region(
+            canvas,
+            focus,
+            false,
+            snapshot.selected_monitor && !snapshot.focused_window.is_empty(),
+        );
         draw_centered_text(
             canvas,
             &snapshot.focused_window,
             focus,
             &normal_font,
-            color_ref(snapshot.text_color),
+            region_text,
         );
     }
 
     if status_left < width as f32 - BAR_MARGIN {
         let region = Rect::new(status_left, top, width as f32 - BAR_MARGIN, bottom);
-        draw_region(canvas, region, snapshot.selected_monitor);
-        draw_centered_text(
-            canvas,
-            &status,
-            region,
-            &normal_font,
-            color_ref(snapshot.text_color),
-        );
+        draw_region(canvas, region, false, false);
+        draw_centered_text(canvas, &status, region, &normal_font, region_text);
     }
     let Some(pixmap) = surface.peek_pixels() else {
         return;
@@ -432,7 +428,12 @@ fn text_width(font: &skia_safe::Font, text: &str) -> f32 {
     font.measure_str(text, None).0
 }
 
-fn draw_region(canvas: &skia_safe::Canvas, rect: skia_safe::Rect, _selected_monitor: bool) {
+fn draw_region(
+    canvas: &skia_safe::Canvas,
+    rect: skia_safe::Rect,
+    blue_background: bool,
+    yellow_outline: bool,
+) {
     use skia_safe::{Color, Paint};
     let mut shadow = Paint::default();
     shadow.set_anti_alias(true);
@@ -446,9 +447,20 @@ fn draw_region(canvas: &skia_safe::Canvas, rect: skia_safe::Rect, _selected_moni
 
     let mut panel = Paint::default();
     panel.set_anti_alias(true);
-    // panel.set_color(Color::from_rgb(0x3c, 0x38, 0x36));
-    panel.set_color(Color::from_rgb(0x28, 0x28, 0x28));
+    panel.set_color(if blue_background {
+        Color::from_rgb(0x83, 0xa5, 0x98)
+    } else {
+        Color::from_rgb(0x28, 0x28, 0x28)
+    });
     canvas.draw_round_rect(rect, 8.0, 8.0, &panel);
+    if yellow_outline {
+        let mut outline = Paint::default();
+        outline.set_anti_alias(true);
+        outline.set_style(skia_safe::paint::Style::Stroke);
+        outline.set_stroke_width(1.5);
+        outline.set_color(Color::from_rgb(0xfa, 0xbd, 0x2f));
+        canvas.draw_round_rect(rect.with_inset((0.75, 0.75)), 7.25, 7.25, &outline);
+    }
 }
 
 fn draw_centered_text(

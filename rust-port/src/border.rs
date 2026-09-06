@@ -14,7 +14,8 @@ pub fn border_rect(target: crate::Rect) -> crate::Rect {
 
 mod dcomp {
     use std::cell::RefCell;
-    use windows::Win32::Foundation::{HMODULE, HWND};
+    use std::time::Instant;
+    use windows::Win32::Foundation::{HMODULE, HWND, POINT};
     use windows::Win32::Graphics::Direct2D::Common::*;
     use windows::Win32::Graphics::Direct2D::*;
     use windows::Win32::Graphics::Direct3D::*;
@@ -36,24 +37,54 @@ mod dcomp {
             .map_err(|error| crate::platform_error::PlatformError::hresult(context, error.code().0))
     }
 
-    struct State {
-        hwnd: isize,
-        _d3d: ID3D11Device,
-        _dxgi: IDXGIDevice,
-        swap_chain: IDXGISwapChain1,
-        d2_factory: ID2D1Factory2,
-        _d2_device: ID2D1Device1,
-        dc: ID2D1DeviceContext,
-        dcomp_device: IDCompositionDevice,
-        target: IDCompositionTarget,
+    // Slice a 33px reference border into 16px corners and 1px edge strips.
+    // The curve ends at 14px, so all stretching happens on straight sections.
+    const SLICES: [(u32, u32, u32, u32); 8] = [
+        (0, 0, 16, 16),
+        (17, 0, 16, 16),
+        (0, 17, 16, 16),
+        (17, 17, 16, 16),
+        (16, 0, 1, 16),
+        (16, 17, 1, 16),
+        (0, 16, 16, 1),
+        (17, 16, 16, 1),
+    ];
+
+    // x, y, horizontal scale, vertical scale; tiny windows shrink corners
+    // rather than overlapping them or producing negative edge lengths.
+    fn placements(width: u32, height: u32) -> [(f32, f32, f32, f32); 8] {
+        let w = width as f32;
+        let h = height as f32;
+        let cw = 16.0_f32.min(w / 2.0);
+        let ch = 16.0_f32.min(h / 2.0);
+        let sx = cw / 16.0;
+        let sy = ch / 16.0;
+        [
+            (0.0, 0.0, sx, sy),
+            (w - cw, 0.0, sx, sy),
+            (0.0, h - ch, sx, sy),
+            (w - cw, h - ch, sx, sy),
+            (cw, 0.0, w - 2.0 * cw, sy),
+            (cw, h - ch, w - 2.0 * cw, sy),
+            (0.0, ch, sx, h - 2.0 * ch),
+            (w - cw, ch, sx, h - 2.0 * ch),
+        ]
+    }
+
+    struct Piece {
         visual: IDCompositionVisual,
-        surface: Option<IDXGISurface2>,
-        bitmap: Option<ID2D1Bitmap1>,
-        normal_brush: ID2D1SolidColorBrush,
-        lost_focus_brush: ID2D1SolidColorBrush,
-        old_width: u32,
-        old_height: u32,
-        old_lost_focus: bool,
+        scale: IDCompositionScaleTransform,
+        surfaces: [IDCompositionSurface; 2],
+    }
+
+    struct State {
+        _d3d: ID3D11Device,
+        _d2_device: ID2D1Device,
+        device: IDCompositionDesktopDevice,
+        _target: IDCompositionTarget,
+        _root: IDCompositionVisual,
+        pieces: Vec<Piece>,
+        previous: Option<(u32, u32, bool)>,
     }
 
     fn color_ref(value: u32) -> D2D1_COLOR_F {
@@ -65,6 +96,64 @@ mod dcomp {
         }
     }
 
+    unsafe fn create_piece_surface(
+        device: &IDCompositionDesktopDevice,
+        slice: (u32, u32, u32, u32),
+        color: u32,
+    ) -> crate::platform_error::PlatformResult<IDCompositionSurface> {
+        let (x, y, width, height) = slice;
+        let surface = logged("CreateSurface(border piece)", unsafe {
+            device.CreateSurface(
+                width,
+                height,
+                DXGI_FORMAT_B8G8R8A8_UNORM,
+                DXGI_ALPHA_MODE_PREMULTIPLIED,
+            )
+        })?;
+        let mut offset = POINT::default();
+        let dc: ID2D1DeviceContext = logged("BeginDraw(border piece)", unsafe {
+            surface.BeginDraw(None, &mut offset)
+        })?;
+        // DirectComposition supplies an already-active D2D context. Always
+        // pair its BeginDraw with surface.EndDraw, including brush failures.
+        let drawn = (|| {
+            let brush = logged("CreateSolidColorBrush(border piece)", unsafe {
+                dc.CreateSolidColorBrush(&color_ref(color), None)
+            })?;
+            let ox = offset.x as f32;
+            let oy = offset.y as f32;
+            let clip = D2D_RECT_F {
+                left: ox,
+                top: oy,
+                right: ox + width as f32,
+                bottom: oy + height as f32,
+            };
+            let rounded = D2D1_ROUNDED_RECT {
+                rect: D2D_RECT_F {
+                    left: ox + 7.0 - x as f32,
+                    top: oy + 7.0 - y as f32,
+                    right: ox + 26.0 - x as f32,
+                    bottom: oy + 26.0 - y as f32,
+                },
+                radiusX: 7.0,
+                radiusY: 7.0,
+            };
+            unsafe {
+                dc.SetDpi(96.0, 96.0);
+                dc.PushAxisAlignedClip(&clip, D2D1_ANTIALIAS_MODE_ALIASED);
+                dc.Clear(Some(&D2D1_COLOR_F::default()));
+                dc.DrawRoundedRectangle(&rounded, &brush, 5.0, None::<&ID2D1StrokeStyle>);
+                dc.PopAxisAlignedClip();
+            }
+            Ok(())
+        })();
+        drop(dc);
+        let ended = logged("EndDraw(border piece)", unsafe { surface.EndDraw() });
+        drawn?;
+        ended?;
+        Ok(surface)
+    }
+
     impl State {
         unsafe fn new(
             hwnd: isize,
@@ -72,162 +161,76 @@ mod dcomp {
             lost: u32,
         ) -> crate::platform_error::PlatformResult<Self> {
             let mut d3d = None;
-            unsafe {
-                logged(
-                    "D3D11CreateDevice failed",
-                    D3D11CreateDevice(
-                        None::<&IDXGIAdapter>,
-                        D3D_DRIVER_TYPE_HARDWARE,
-                        HMODULE::default(),
-                        D3D11_CREATE_DEVICE_BGRA_SUPPORT,
-                        None,
-                        D3D11_SDK_VERSION,
-                        Some(&mut d3d),
-                        None,
-                        None,
-                    ),
-                )?;
-            }
-            let d3d = d3d.unwrap();
-            let dxgi: IDXGIDevice = logged(
-                "ID3D11Device::QueryInterface(IDXGIDevice) failed",
-                d3d.cast(),
-            )?;
-            let factory: IDXGIFactory2 = logged("CreateDXGIFactory2 failed", unsafe {
-                CreateDXGIFactory2(DXGI_CREATE_FACTORY_FLAGS(0))
-            })?;
-            let mut description: DXGI_SWAP_CHAIN_DESC1 = unsafe { std::mem::zeroed() };
-            description.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
-            description.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
-            description.SwapEffect = DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL;
-            description.BufferCount = 2;
-            description.SampleDesc.Count = 1;
-            description.AlphaMode = DXGI_ALPHA_MODE_PREMULTIPLIED;
-            let mut initial_rect = windows_sys::Win32::Foundation::RECT::default();
-            if unsafe {
-                windows_sys::Win32::UI::WindowsAndMessaging::GetClientRect(
-                    hwnd as _,
-                    &mut initial_rect,
+            logged("D3D11CreateDevice(border)", unsafe {
+                D3D11CreateDevice(
+                    None::<&IDXGIAdapter>,
+                    D3D_DRIVER_TYPE_HARDWARE,
+                    HMODULE::default(),
+                    D3D11_CREATE_DEVICE_BGRA_SUPPORT,
+                    None,
+                    D3D11_SDK_VERSION,
+                    Some(&mut d3d),
+                    None,
+                    None,
                 )
-            } == 0
-            {
-                return Err(crate::platform_error::PlatformError::last_win32(
-                    "GetClientRect(border initialization)",
-                ));
-            }
-            description.Width = (initial_rect.right - initial_rect.left).max(1) as u32;
-            description.Height = (initial_rect.bottom - initial_rect.top).max(1) as u32;
-            let swap_chain = logged(
-                "IDXGIFactory2::CreateSwapChainForComposition failed",
-                unsafe {
-                    factory.CreateSwapChainForComposition(&dxgi, &description, None::<&IDXGIOutput>)
-                },
-            )?;
-            let d2_factory: ID2D1Factory2 = logged("D2D1CreateFactory failed", unsafe {
+            })?;
+            let d3d = d3d.unwrap();
+            let dxgi: IDXGIDevice = logged("QueryInterface(border DXGI device)", d3d.cast())?;
+            let factory: ID2D1Factory1 = logged("D2D1CreateFactory(border)", unsafe {
                 D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, None)
             })?;
-            let d2_device = logged("ID2D1Factory2::CreateDevice failed", unsafe {
-                d2_factory.CreateDevice(&dxgi)
+            let d2_device = logged("CreateDevice(border D2D)", unsafe {
+                factory.CreateDevice(&dxgi)
             })?;
-            let dc = logged("ID2D1Device1::CreateDeviceContext failed", unsafe {
-                d2_device.CreateDeviceContext(D2D1_DEVICE_CONTEXT_OPTIONS_NONE)
-            })?;
-            let normal_color = color_ref(normal);
-            let lost_color = color_ref(lost);
-            let normal_brush = logged(
-                "ID2D1DeviceContext::CreateSolidColorBrush(normal) failed",
-                unsafe { dc.CreateSolidColorBrush(&normal_color, None) },
-            )?;
-            let lost_focus_brush = logged(
-                "ID2D1DeviceContext::CreateSolidColorBrush(lost focus) failed",
-                unsafe { dc.CreateSolidColorBrush(&lost_color, None) },
-            )?;
-            let dcomp_device: IDCompositionDevice =
-                logged("DCompositionCreateDevice failed", unsafe {
-                    DCompositionCreateDevice(&dxgi)
+            let device: IDCompositionDesktopDevice =
+                logged("DCompositionCreateDevice2(border)", unsafe {
+                    DCompositionCreateDevice2(&d2_device)
                 })?;
-            let target = logged("IDCompositionDevice::CreateTargetForHwnd failed", unsafe {
-                dcomp_device.CreateTargetForHwnd(HWND(hwnd as _), true)
+            let target = logged("CreateTargetForHwnd(border)", unsafe {
+                device.CreateTargetForHwnd(HWND(hwnd as _), true)
             })?;
-            let visual = logged("IDCompositionDevice::CreateVisual failed", unsafe {
-                dcomp_device.CreateVisual()
+            let root = logged("CreateVisual(border root)", unsafe {
+                device.CreateVisual()
             })?;
-            let mut state = Self {
-                hwnd,
-                _d3d: d3d,
-                _dxgi: dxgi,
-                swap_chain,
-                d2_factory,
-                _d2_device: d2_device,
-                dc: dc.into(),
-                dcomp_device,
-                target,
-                visual,
-                surface: None,
-                bitmap: None,
-                normal_brush,
-                lost_focus_brush,
-                old_width: 0,
-                old_height: 0,
-                old_lost_focus: false,
-            };
-            unsafe { state.resize_swap_chain()? };
-            Ok(state)
-        }
-
-        unsafe fn client_size(&self) -> crate::platform_error::PlatformResult<(u32, u32)> {
-            let mut rect = windows_sys::Win32::Foundation::RECT::default();
-            if unsafe {
-                windows_sys::Win32::UI::WindowsAndMessaging::GetClientRect(
-                    self.hwnd as _,
-                    &mut rect,
-                )
-            } == 0
-            {
-                return Err(crate::platform_error::PlatformError::last_win32(
-                    "GetClientRect(border)",
-                ));
-            }
-            Ok((
-                (rect.right - rect.left).max(0) as u32,
-                (rect.bottom - rect.top).max(0) as u32,
-            ))
-        }
-
-        unsafe fn resize_swap_chain(&mut self) -> crate::platform_error::PlatformResult<()> {
-            unsafe { self.dc.SetTarget(None::<&ID2D1Image>) };
-            self.bitmap = None;
-            self.surface = None;
-            let (width, height) = unsafe { self.client_size()? };
-            if width == 0 || height == 0 {
-                return Ok(());
-            }
-            logged("IDXGISwapChain1::ResizeBuffers failed", unsafe {
-                self.swap_chain.ResizeBuffers(
-                    2,
-                    width,
-                    height,
-                    DXGI_FORMAT_B8G8R8A8_UNORM,
-                    DXGI_SWAP_CHAIN_FLAG(0),
-                )
-            })?;
-            let surface: IDXGISurface2 = logged("IDXGISwapChain1::GetBuffer failed", unsafe {
-                self.swap_chain.GetBuffer(0)
-            })?;
-            let mut properties: D2D1_BITMAP_PROPERTIES1 = unsafe { std::mem::zeroed() };
-            properties.pixelFormat.alphaMode = D2D1_ALPHA_MODE_PREMULTIPLIED;
-            properties.pixelFormat.format = DXGI_FORMAT_B8G8R8A8_UNORM;
-            properties.bitmapOptions = D2D1_BITMAP_OPTIONS_TARGET | D2D1_BITMAP_OPTIONS_CANNOT_DRAW;
-            let bitmap = logged(
-                "ID2D1DeviceContext::CreateBitmapFromDxgiSurface failed",
+            let mut pieces = Vec::with_capacity(8);
+            for slice in SLICES {
+                let surfaces = unsafe {
+                    [
+                        create_piece_surface(&device, slice, normal)?,
+                        create_piece_surface(&device, slice, lost)?,
+                    ]
+                };
+                let visual = logged("CreateVisual(border piece)", unsafe {
+                    device.CreateVisual()
+                })?;
+                let scale = logged("CreateScaleTransform(border piece)", unsafe {
+                    device.CreateScaleTransform()
+                })?;
                 unsafe {
-                    self.dc
-                        .CreateBitmapFromDxgiSurface(&surface, Some(&properties))
-                },
-            )?;
-            self.surface = Some(surface);
-            self.bitmap = Some(bitmap);
-            Ok(())
+                    logged("SetTransform(border piece)", visual.SetTransform(&scale))?;
+                    logged("SetContent(border piece)", visual.SetContent(&surfaces[0]))?;
+                    logged(
+                        "AddVisual(border piece)",
+                        root.AddVisual(&visual, true, None::<&IDCompositionVisual>),
+                    )?;
+                }
+                pieces.push(Piece {
+                    visual: visual.into(),
+                    scale,
+                    surfaces,
+                });
+            }
+            logged("SetRoot(border)", unsafe { target.SetRoot(&root) })?;
+            // The first draw positions all pieces and commits their initial content.
+            Ok(Self {
+                _d3d: d3d,
+                _d2_device: d2_device,
+                device,
+                _target: target,
+                _root: root.into(),
+                pieces,
+                previous: None,
+            })
         }
 
         unsafe fn draw(
@@ -236,76 +239,51 @@ mod dcomp {
             height: u32,
             lost_focus: bool,
         ) -> crate::platform_error::PlatformResult<()> {
-            if width == 0
-                || height == 0
-                || (self.old_width == width
-                    && self.old_height == height
-                    && self.old_lost_focus == lost_focus)
-            {
+            let current = (width, height, lost_focus);
+            if width == 0 || height == 0 || self.previous == Some(current) {
                 return Ok(());
             }
-            unsafe { self.resize_swap_chain()? };
-            let Some(bitmap) = &self.bitmap else {
-                return Ok(());
-            };
-            unsafe {
-                self.dc.SetTarget(bitmap);
-                self.dc.BeginDraw();
+            let started = crate::error_log::debug_output_enabled().then(Instant::now);
+            let resized = self
+                .previous
+                .is_none_or(|old| old.0 != width || old.1 != height);
+            let recolored = self.previous.is_none_or(|old| old.2 != lost_focus);
+            for (piece, (x, y, sx, sy)) in self.pieces.iter().zip(placements(width, height)) {
+                unsafe {
+                    if resized {
+                        logged("SetOffsetX(border piece)", piece.visual.SetOffsetX2(x))?;
+                        logged("SetOffsetY(border piece)", piece.visual.SetOffsetY2(y))?;
+                        logged("SetScaleX(border piece)", piece.scale.SetScaleX2(sx))?;
+                        logged("SetScaleY(border piece)", piece.scale.SetScaleY2(sy))?;
+                    }
+                    if recolored {
+                        logged(
+                            "SetContent(border color)",
+                            piece
+                                .visual
+                                .SetContent(&piece.surfaces[usize::from(lost_focus)]),
+                        )?;
+                    }
+                }
             }
-            let rounded = D2D1_ROUNDED_RECT {
-                rect: D2D_RECT_F {
-                    left: 7.0,
-                    top: 7.0,
-                    right: width as f32 - 7.0,
-                    bottom: height as f32 - 7.0,
-                },
-                radiusX: 7.0,
-                radiusY: 7.0,
-            };
-            let stroke_properties = D2D1_STROKE_STYLE_PROPERTIES1 {
-                startCap: D2D1_CAP_STYLE_FLAT,
-                endCap: D2D1_CAP_STYLE_FLAT,
-                dashCap: D2D1_CAP_STYLE_FLAT,
-                lineJoin: D2D1_LINE_JOIN_ROUND,
-                miterLimit: 20.0,
-                dashStyle: D2D1_DASH_STYLE_SOLID,
-                dashOffset: 0.0,
-                transformType: D2D1_STROKE_TRANSFORM_TYPE_NORMAL,
-            };
-            let stroke = logged("ID2D1Factory2::CreateStrokeStyle failed", unsafe {
-                self.d2_factory.CreateStrokeStyle(&stroke_properties, None)
-            })?;
-            let brush = if lost_focus {
-                &self.lost_focus_brush
-            } else {
-                &self.normal_brush
-            };
-            unsafe {
-                self.dc.DrawRoundedRectangle(&rounded, brush, 5.0, &stroke);
-                logged(
-                    "ID2D1DeviceContext::EndDraw failed",
-                    self.dc.EndDraw(None, None),
-                )?;
-                logged(
-                    "IDXGISwapChain1::Present failed",
-                    self.swap_chain.Present(1, DXGI_PRESENT(0)).ok(),
-                )?;
-                logged(
-                    "IDCompositionVisual::SetContent failed",
-                    self.visual.SetContent(&self.swap_chain),
-                )?;
-                logged(
-                    "IDCompositionTarget::SetRoot failed",
-                    self.target.SetRoot(&self.visual),
-                )?;
-                logged(
-                    "IDCompositionDevice::Commit failed",
-                    self.dcomp_device.Commit(),
-                )?;
+            let commit_started = crate::error_log::debug_output_enabled().then(Instant::now);
+            let result = unsafe { self.device.Commit() };
+            let commit_us = commit_started.map(|start| start.elapsed().as_micros() as u64);
+            if let Some(started) = started {
+                let elapsed_us = started.elapsed().as_micros() as u64;
+                crate::debug_out!(
+                    operation = "border_composition_update",
+                    elapsed_us,
+                    commit_us,
+                    width,
+                    height,
+                    lost_focus,
+                    resized,
+                    recolored
+                );
             }
-            self.old_width = width;
-            self.old_height = height;
-            self.old_lost_focus = lost_focus;
+            logged("Commit(border pieces)", result)?;
+            self.previous = Some(current);
             Ok(())
         }
     }
@@ -333,8 +311,36 @@ mod dcomp {
     pub fn clean() {
         STATE.with(|slot| *slot.borrow_mut() = None);
     }
-}
 
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn pieces_tile_the_perimeter_without_scaling_normal_corners() {
+            for (w, h) in [(1919, 706), (1919, 2110), (32, 32), (18, 21)] {
+                let p = placements(w, h);
+                let bounds: Vec<_> = p
+                    .iter()
+                    .zip(SLICES)
+                    .map(|(&(x, y, sx, sy), (_, _, sw, sh))| {
+                        assert!(sx >= 0.0 && sy >= 0.0);
+                        (x, y, x + sx * sw as f32, y + sy * sh as f32)
+                    })
+                    .collect();
+                assert_eq!(bounds[0].2, bounds[4].0);
+                assert_eq!(bounds[4].2, bounds[1].0);
+                assert_eq!(bounds[0].3, bounds[6].1);
+                assert_eq!(bounds[6].3, bounds[2].1);
+                assert_eq!(bounds[3].2, w as f32);
+                assert_eq!(bounds[3].3, h as f32);
+                if w >= 32 && h >= 32 {
+                    assert_eq!((p[0].2, p[0].3), (1.0, 1.0));
+                }
+            }
+        }
+    }
+}
 unsafe extern "system" fn border_message_loop(
     hwnd: windows_sys::Win32::Foundation::HWND,
     message: u32,
@@ -356,19 +362,13 @@ unsafe extern "system" fn border_message_loop(
     });
     let _entered = span.as_ref().map(tracing::Span::enter);
     match message {
+        WM_MOUSEACTIVATE => MA_NOACTIVATE as isize,
         WM_SIZE => {
             let width = lparam as u32 & 0xffff;
             let height = (lparam as u32 >> 16) & 0xffff;
             let lost = crate::platform::border_is_lost_focus();
             unsafe { dcomp::draw(width, height, lost) };
             0
-        }
-        WM_WINDOWPOSCHANGING => {
-            let position = lparam as *mut WINDOWPOS;
-            if !position.is_null() {
-                unsafe { (*position).hwndInsertAfter = HWND_BOTTOM };
-            }
-            1
         }
         WM_PAINT => {
             let mut paint: PAINTSTRUCT = unsafe { std::mem::zeroed() };
@@ -435,7 +435,9 @@ pub fn create_border_window(
     }
     let hwnd = unsafe {
         CreateWindowExW(
-            WS_EX_NOREDIRECTIONBITMAP | WS_EX_NOACTIVATE,
+            // DirectComposition supplies the transparent content. A layered
+            // host with constant alpha adds an opaque redirected background.
+            WS_EX_NOREDIRECTIONBITMAP | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW,
             class_name.as_ptr(),
             title.as_ptr(),
             WS_CLIPSIBLINGS | WS_CLIPCHILDREN,
@@ -481,11 +483,11 @@ pub fn create_border_window(
     })
 }
 
-pub fn update_border(window: &BorderWindow, target: Option<crate::Rect>) {
+pub fn update_border(window: &BorderWindow, target: Option<(isize, crate::Rect)>) {
     use windows_sys::Win32::Graphics::Gdi::InvalidateRect;
     use windows_sys::Win32::UI::WindowsAndMessaging::*;
     unsafe {
-        let Some(target) = target else {
+        let Some((target_hwnd, target)) = target else {
             if SetWindowPos(
                 window.hwnd as _,
                 HWND_BOTTOM,
@@ -493,7 +495,7 @@ pub fn update_border(window: &BorderWindow, target: Option<crate::Rect>) {
                 0,
                 0,
                 0,
-                SWP_HIDEWINDOW | SWP_NOSIZE,
+                SWP_HIDEWINDOW | SWP_NOSIZE | SWP_NOMOVE | SWP_NOACTIVATE | SWP_NOZORDER,
             ) == 0
             {
                 crate::error_log::last_win32("SetWindowPos(hide border) failed");
@@ -519,22 +521,52 @@ pub fn update_border(window: &BorderWindow, target: Option<crate::Rect>) {
         } else {
             SWP_SHOWWINDOW
         };
-        if target.left != current.left || target.top != current.top || flags == SWP_SHOWWINDOW {
+        // Keep the transparent composition host behind the application: its
+        // transparent pixels do not provide cross-process hit-test transparency.
+        let target_topmost =
+            GetWindowLongW(target_hwnd as _, GWL_EXSTYLE) as u32 & WS_EX_TOPMOST != 0;
+        let border_topmost =
+            GetWindowLongW(window.hwnd as _, GWL_EXSTYLE) as u32 & WS_EX_TOPMOST != 0;
+        if border_topmost != target_topmost {
             if SetWindowPos(
                 window.hwnd as _,
-                HWND_BOTTOM,
+                if target_topmost {
+                    HWND_TOPMOST
+                } else {
+                    HWND_NOTOPMOST
+                },
+                0,
+                0,
+                0,
+                0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+            ) == 0
+            {
+                crate::error_log::last_win32("SetWindowPos(border topmost band) failed");
+                return;
+            }
+        }
+        let z_order_changed = GetWindow(target_hwnd as _, GW_HWNDNEXT) != window.hwnd as _;
+        if target.left != current.left
+            || target.top != current.top
+            || flags == SWP_SHOWWINDOW
+            || z_order_changed
+        {
+            if SetWindowPos(
+                window.hwnd as _,
+                target_hwnd as _,
                 target.left,
                 target.top,
                 width,
                 height,
-                flags,
+                flags | SWP_NOACTIVATE | if z_order_changed { 0 } else { SWP_NOZORDER },
             ) == 0
             {
                 crate::error_log::last_win32("SetWindowPos(show border) failed");
             }
         }
         // Always request a paint so focus-state changes are observed. The
-        // DirectComposition renderer skips the GPU work when its size and
+        // DirectComposition renderer skips the composition update when its size and
         // lost-focus state are unchanged.
         if InvalidateRect(window.hwnd as _, std::ptr::null(), 0) == 0 {
             crate::error_log::last_win32("InvalidateRect(border) failed");

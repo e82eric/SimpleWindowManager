@@ -115,7 +115,7 @@ pub fn create() -> crate::platform_error::PlatformResult<DropTargetWindow> {
     }
     let hwnd = unsafe {
         CreateWindowExW(
-            WS_EX_PALETTEWINDOW | WS_EX_NOACTIVATE | WS_EX_LAYERED,
+            WS_EX_TOOLWINDOW | WS_EX_WINDOWEDGE | WS_EX_NOACTIVATE | WS_EX_LAYERED,
             name.as_ptr(),
             title.as_ptr(),
             WS_POPUP,
@@ -151,18 +151,20 @@ pub fn create() -> crate::platform_error::PlatformResult<DropTargetWindow> {
     })
 }
 
-pub fn show(window: &DropTargetWindow, rect: crate::Rect, topmost: bool, should_paint: bool) {
+pub fn show(window: &DropTargetWindow, rect: crate::Rect, insert_after: isize, should_paint: bool) {
     use windows_sys::Win32::UI::WindowsAndMessaging::*;
     SHOULD_PAINT.store(should_paint, std::sync::atomic::Ordering::Relaxed);
     unsafe {
         if SetWindowPos(
             window.hwnd as _,
-            if topmost { HWND_TOPMOST } else { HWND_TOP },
+            // Follow the dragged window's border when present; otherwise follow
+            // the dragged window. Both callers use the same stacking policy.
+            insert_after as _,
             rect.left,
             rect.top,
             rect.right - rect.left,
             rect.bottom - rect.top,
-            SWP_SHOWWINDOW,
+            SWP_SHOWWINDOW | SWP_NOACTIVATE,
         ) == 0
         {
             crate::error_log::last_win32("SetWindowPos(show drop target) failed");

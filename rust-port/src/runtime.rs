@@ -20,6 +20,7 @@ pub struct Runtime {
     pub regular_resize_client: Option<crate::ClientId>,
     pub border_window: Option<crate::border::BorderWindow>,
     pub drop_target_window: Option<crate::drop_target::DropTargetWindow>,
+    border_frame: std::cell::Cell<Option<(isize, Rect, Rect)>>,
     pub workspace_move_foreground: Option<isize>,
     pub event_foreground_hwnd: isize,
     pub is_foreground_window_same_as_selected: bool,
@@ -93,6 +94,7 @@ impl Runtime {
             regular_resize_client: None,
             border_window: None,
             drop_target_window: None,
+            border_frame: std::cell::Cell::new(None),
             workspace_move_foreground: None,
             event_foreground_hwnd: 0,
             is_foreground_window_same_as_selected: false,
@@ -206,6 +208,13 @@ impl Runtime {
 
     #[tracing::instrument(skip(self), fields(hwnd = hwnd as usize))]
     pub fn location_changed(&mut self, hwnd: isize) -> PlatformResult<()> {
+        let result = self.location_changed_inner(hwnd);
+        self.reconcile_border_frame(hwnd);
+        self.border_window_update();
+        result
+    }
+
+    fn location_changed_inner(&mut self, hwnd: isize) -> PlatformResult<()> {
         let client_id = self
             .configuration
             .state
@@ -473,6 +482,7 @@ impl Runtime {
 
     #[tracing::instrument(skip(self), fields(workspace = workspace.0))]
     fn apply_workspace(&mut self, workspace: WorkspaceId) -> PlatformResult<()> {
+        self.border_frame.set(None);
         self.configuration.state.arrange_workspace(workspace);
         apply_workspace_windows(
             &mut self.configuration.state,
@@ -585,9 +595,10 @@ impl Runtime {
         }
         self.configuration.state.monitors[monitor.0].selected = true;
         self.configuration.state.selected_monitor = Some(monitor);
-        if focus
-            && let Some(workspace) = self.configuration.state.monitors[monitor.0].workspace
-        {
+        // The selected monitor determines which client owns the border. Update
+        // it synchronously instead of waiting for a foreground or timer event.
+        self.border_window_update();
+        if focus && let Some(workspace) = self.configuration.state.monitors[monitor.0].workspace {
             self.focus_selected(workspace);
         }
         self.redraw_bars();
@@ -633,6 +644,9 @@ impl Runtime {
         self.configuration.state.workspaces[displaced.0].monitor = Some(current_monitor);
         self.apply_workspace(workspace)?;
         self.apply_workspace(displaced)?;
+        // In particular, this hides the old border immediately when the
+        // destination workspace has no selected client.
+        self.border_window_update();
         self.focus_selected(workspace);
         Ok(())
     }
@@ -1146,6 +1160,20 @@ impl Runtime {
         Ok(())
     }
 
+    fn reconcile_border_frame(&self, hwnd: isize) {
+        let selected = self
+            .configuration
+            .state
+            .selected_monitor
+            .and_then(|m| self.configuration.state.monitors[m.0].workspace)
+            .and_then(|w| self.configuration.state.workspaces[w.0].selected)
+            .and_then(|c| self.configuration.state.clients[c.0].as_ref());
+        if let Some(client) = selected.filter(|c| c.data.hwnd == hwnd) {
+            self.border_frame
+                .set(visible_frame_rect(hwnd).map(|actual| (hwnd, client.data.rect, actual)));
+        }
+    }
+
     pub fn border_window_update(&self) {
         let Some(border) = &self.border_window else {
             return;
@@ -1160,8 +1188,25 @@ impl Runtime {
             .and_then(|monitor| self.configuration.state.monitors[monitor.0].workspace)
             .and_then(|workspace| self.configuration.state.workspaces[workspace.0].selected)
             .and_then(|client| self.configuration.state.clients[client.0].as_ref())
-            .filter(|client| client.is_visible)
-            .map(|client| client.data.rect);
+            .filter(|client| client.is_visible && !is_iconic(client.data.hwnd))
+            .map(|client| {
+                let expected = client.data.rect;
+                let rect = match self.border_frame.get() {
+                    Some((hwnd, layout, actual))
+                        if hwnd == client.data.hwnd && layout == expected =>
+                    {
+                        actual
+                    }
+                    _ => {
+                        self.border_frame.set(None);
+                        expected
+                    }
+                };
+                (client.data.hwnd, rect)
+            });
+        if target.is_none() {
+            self.border_frame.set(None);
+        }
         crate::border::update_border(border, target);
     }
 
@@ -1346,9 +1391,10 @@ impl Runtime {
         self.drag_drop_state.drop_target_monitor = Some(monitor);
         if self.drag_drop_state.in_progress {
             if let Some(overlay) = &self.drop_target_window {
+                let anchor = self.drop_preview_insert_after(hwnd);
                 if let Some(target) = target {
                     if let Some(client) = self.configuration.state.clients[target.0].as_ref() {
-                        crate::drop_target::show(overlay, client.data.rect, true, true);
+                        crate::drop_target::show(overlay, client.data.rect, anchor, true);
                     }
                 } else {
                     let item = &self.configuration.state.monitors[monitor.0];
@@ -1361,12 +1407,29 @@ impl Runtime {
                             item.width - gap * 2,
                             item.bottom - item.top - gap * 2,
                         ),
-                        false,
+                        anchor,
                         self.configuration.state.menu_visible,
                     );
                 }
             }
+        } else if let Some(overlay) = &self.drop_target_window {
+            crate::drop_target::hide(overlay);
         }
+    }
+
+    fn drop_preview_insert_after(&self, hwnd: isize) -> isize {
+        use windows_sys::Win32::UI::WindowsAndMessaging::{
+            GW_HWNDNEXT, GetWindow, IsWindowVisible,
+        };
+        if let Some(border) = &self.border_window {
+            if unsafe {
+                IsWindowVisible(border.hwnd as _) != 0
+                    && GetWindow(hwnd as _, GW_HWNDNEXT) == border.hwnd as _
+            } {
+                return border.hwnd;
+            }
+        }
+        hwnd
     }
 
     pub fn drag_drop_try_handle_left_mouse_up(&mut self) -> PlatformResult<bool> {
@@ -2096,6 +2159,43 @@ fn center_window_on_monitor(hwnd: isize, monitor: &Monitor) {
     ) {
         error.report();
     }
+}
+
+pub(crate) fn visible_frame_rect(hwnd: isize) -> Option<Rect> {
+    use windows_sys::Win32::Foundation::RECT;
+    use windows_sys::Win32::Graphics::Dwm::{
+        DWMWA_CLOAKED, DWMWA_EXTENDED_FRAME_BOUNDS, DwmGetWindowAttribute,
+    };
+    let mut cloaked = 0u32;
+    let mut frame = RECT::default();
+    unsafe {
+        if DwmGetWindowAttribute(
+            hwnd as _,
+            DWMWA_CLOAKED as u32,
+            &mut cloaked as *mut _ as _,
+            std::mem::size_of::<u32>() as u32,
+        ) < 0
+            || cloaked != 0
+        {
+            return None;
+        }
+        if DwmGetWindowAttribute(
+            hwnd as _,
+            DWMWA_EXTENDED_FRAME_BOUNDS as u32,
+            &mut frame as *mut _ as _,
+            std::mem::size_of::<RECT>() as u32,
+        ) < 0
+        {
+            // Keep the layout-based placement when the frame is unavailable.
+            return None;
+        }
+    }
+    (frame.right > frame.left && frame.bottom > frame.top).then_some(Rect {
+        left: frame.left,
+        top: frame.top,
+        right: frame.right,
+        bottom: frame.bottom,
+    })
 }
 
 fn window_rect(hwnd: isize) -> PlatformResult<Rect> {
