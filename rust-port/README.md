@@ -9,6 +9,44 @@ cargo build --release --manifest-path rust-port/Cargo.toml
 & .\rust-port\target\release\simple-window-manager-rs.exe
 ```
 
+## UI and window-manager threads
+
+The main thread owns the input hooks, bar windows, and menu orchestration.
+`swm-window-manager` owns the runtime, window-event hooks, window positioning,
+and the border and drop-preview windows. The picker library retains its own
+existing presentation thread.
+
+Keyboard hooks recognize compiled bindings and make the swallow/pass-through
+decision immediately. Window-manager actions use a bounded, nonblocking queue;
+menu requests use a separate UI queue. A full worker queue therefore does not
+prevent opening the commands menu. New shortcut presses that cannot be queued
+pass through; already swallowed key presses retain matching suppression of
+repeats and key-up events.
+
+The worker publishes immutable snapshots for bar painting and menu data. The UI
+keeps the last snapshot if publication is in progress, and never reads the
+runtime lock. Workspace/client information can remain stale while the worker is
+blocked, but the bar can still repaint and menus can open. Window-manager actions
+still wait for the worker; this split does not make Win32 positioning calls
+asynchronous or give them a timeout.
+
+Mouse releases carry their original screen coordinates and gesture identity.
+An old release cannot complete a newer drag. If a release cannot be queued,
+the worker cancels drag state when it resumes. Menu-close messages carry an
+explicit session identity so late cleanup cannot close a newer menu. Confirmed
+window, program, and command selections execute even if another menu has opened.
+Selection cleanup does not request focus restoration; cancellation does.
+
+For manual validation, temporarily block a test application's UI thread and
+trigger a workspace operation involving it. While the worker is stalled, verify
+that the bar repaints, right-click opens the commands menu, and typing in another
+responsive application works. After recovery, check workspace changes, dragging,
+empty workspaces, and closing/reopening menus. Also test quitting during the
+stall: shutdown waits at most 500 ms for the worker before allowing process exit.
+
+Worker command traces include `sequence`, `command`, and `queue_delay_us` to
+distinguish queued work from time spent executing it.
+
 ## User configuration
 
 The default build uses `rust-port/default_user_config.rs`, which contains the

@@ -41,7 +41,6 @@ pub enum Action {
     ShowClientLogs,
     ShowErrorLogs,
     ShowConfigurationState,
-    RunLastMenu,
     Launch(&'static str),
     MoveFloat(i32, i32),
     MoveFloatToMonitor(usize),

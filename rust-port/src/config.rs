@@ -55,6 +55,7 @@ pub struct CommandEntry {
     pub key: Option<u32>,
 }
 
+#[derive(Clone)]
 pub struct Configuration {
     pub state: WindowManagerState,
     pub always_redraw: bool,

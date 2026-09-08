@@ -197,14 +197,13 @@ pub enum MoveDirection {
     Down,
 }
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct WindowManagerState {
     pub clients: Vec<Option<Client>>,
     pub workspaces: Vec<Workspace>,
     pub monitors: Vec<Monitor>,
     pub selected_monitor: Option<MonitorId>,
     pub last_workspace: Option<WorkspaceId>,
-    pub menu_visible: bool,
     pub current_window_routing_mode: WindowRoutingMode,
     pub float_log_buffer: VecDeque<FloatLogEntry>,
     pub client_log_buffer: VecDeque<ClientLogEntry>,

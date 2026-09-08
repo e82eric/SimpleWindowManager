@@ -17,6 +17,8 @@ pub mod restore;
 pub mod runtime;
 pub mod snapshot;
 pub mod status;
+pub mod ui;
+pub mod worker;
 
 pub mod user_config {
     include!(env!("SWM_CONFIG_RS_RESOLVED"));

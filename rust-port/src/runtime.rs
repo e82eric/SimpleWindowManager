@@ -13,11 +13,10 @@ pub struct Runtime {
     pub configuration: Configuration,
     pub hidden_window_monitor: Monitor,
     pub key_bindings: Vec<KeyBinding>,
-    pub rust_nfm: Option<rust_nfm::runtime::PickerRuntime>,
-    last_menu_action: Option<Action>,
-    pub bars: Vec<crate::bar::BarWindow>,
+
     pub drag_drop_state: DragDropState,
     pub regular_resize_client: Option<crate::ClientId>,
+    input_gesture: u64,
     pub border_window: Option<crate::border::BorderWindow>,
     pub drop_target_window: Option<crate::drop_target::DropTargetWindow>,
     border_frame: std::cell::Cell<Option<(isize, Rect, Rect)>>,
@@ -87,11 +86,10 @@ impl Runtime {
             configuration,
             hidden_window_monitor,
             key_bindings,
-            rust_nfm: None,
-            last_menu_action: None,
-            bars: Vec::new(),
+
             drag_drop_state: DragDropState::default(),
             regular_resize_client: None,
+            input_gesture: 0,
             border_window: None,
             drop_target_window: None,
             border_frame: std::cell::Cell::new(None),
@@ -119,7 +117,6 @@ impl Runtime {
 
     pub fn finish_startup(&mut self) {
         self.focus_selected(self.selected_workspace());
-        self.rust_nfm = rust_nfm::runtime::PickerRuntime::start().ok();
     }
 
     pub fn remove_client_by_hwnd(&mut self, hwnd: isize) -> PlatformResult<()> {
@@ -231,9 +228,8 @@ impl Runtime {
             .unwrap();
         let workspace = client.workspace;
         let stored_minimized = client.data.is_minimized;
-        let use_cloak_to_hide = client.data.use_cloak_to_hide;
         if stored_minimized {
-            if !minimized && !use_cloak_to_hide {
+            if !minimized {
                 self.configuration
                     .state
                     .client_move_from_minimized_to_unminimized(client_id);
@@ -245,15 +241,13 @@ impl Runtime {
             return Ok(());
         }
         if minimized {
-            if !use_cloak_to_hide {
-                self.configuration
-                    .state
-                    .client_move_from_unminimized_to_minimized(client_id);
-                self.apply_workspace(workspace)?;
-                self.focus_selected(workspace);
-                self.redraw_bars();
-                self.border_window_update();
-            }
+            self.configuration
+                .state
+                .client_move_from_unminimized_to_minimized(client_id);
+            self.apply_workspace(workspace)?;
+            self.focus_selected(workspace);
+            self.redraw_bars();
+            self.border_window_update();
             return Ok(());
         }
         if is_zoomed(hwnd) || is_fullscreen(hwnd) {
@@ -317,9 +311,7 @@ impl Runtime {
             .and_then(|monitor| self.configuration.state.monitors[monitor.0].workspace)
             .and_then(|workspace| self.configuration.state.workspaces[workspace.0].selected)
             .and_then(|client| self.configuration.state.clients[client.0].as_ref())
-            .is_some_and(|client| {
-                client.data.hwnd == hwnd || self.configuration.state.menu_visible
-            });
+            .is_some_and(|client| client.data.hwnd == hwnd);
         self.event_foreground_hwnd = hwnd;
         self.border_window_update();
         self.redraw_bars();
@@ -335,47 +327,24 @@ impl Runtime {
         }
     }
 
-    pub fn key_bindings_try_handle(&mut self, key: u32, modifiers: i32) -> bool {
-        let action = self
-            .key_bindings
-            .iter()
-            .find(|binding| binding.key == key && binding.modifiers == modifiers)
-            .map(|binding| binding.action);
-        let Some(action) = action else {
-            return false;
-        };
-        let span = tracing::info_span!(
-            "key_binding",
-            key,
-            modifiers,
-            action = ?action,
-        );
-        let _entered = span.enter();
-        if let Err(error) = self.execute(action) {
-            error.report();
-        }
-        true
-    }
-
     #[tracing::instrument(skip(self))]
     pub fn execute(&mut self, action: Action) -> PlatformResult<()> {
         use Action::*;
-        if matches!(
-            action,
-            ShowWindows
-                | ShowPrograms(_)
-                | ShowProcesses
-                | ShowServices
-                | ShowFileSystem
-                | ShowCommands
-                | ShowFloatLogs
-                | ShowClientLogs
-                | ShowErrorLogs
-                | ShowConfigurationState
-        ) {
-            self.last_menu_action = Some(action);
+        if crate::ui::is_menu(action) {
+            crate::ui::post(crate::ui::Command::Action(action));
+            return Ok(());
         }
         match action {
+            ShowWindows
+            | ShowPrograms(_)
+            | ShowProcesses
+            | ShowServices
+            | ShowFileSystem
+            | ShowCommands
+            | ShowFloatLogs
+            | ShowClientLogs
+            | ShowErrorLogs
+            | ShowConfigurationState => unreachable!(),
             Quit => platform_exit(),
             QuitAndRestore => {
                 crate::restore::restore_moved_windows_to_screen(false)?;
@@ -395,17 +364,7 @@ impl Runtime {
                 minimize_focused_window();
                 self.focus_selected(self.selected_workspace());
             }
-            ShowWindows => self.run_new_windows_menu(),
-            ShowPrograms(elevated) => self.run_program_launcher_menu(elevated),
-            ShowProcesses => self.run_process_menu(),
-            ShowServices => self.run_services_menu(),
-            ShowFileSystem => self.run_file_system_menu(),
-            ShowCommands => self.run_commands_menu(),
-            ShowFloatLogs => self.run_float_logs_menu(),
-            ShowClientLogs => self.run_client_logs_menu(),
-            ShowErrorLogs => self.run_error_logs_menu(),
-            ShowConfigurationState => self.run_configuration_state_menu(),
-            RunLastMenu => self.run_last_menu()?,
+
             Launch(command) => crate::process::start_app(command)?,
             MoveFloat(dx, dy) => self.move_float_or_resize_main(dx, dy)?,
             MoveFloatToMonitor(index) => self.move_float_to_monitor(index),
@@ -436,10 +395,8 @@ impl Runtime {
                 let workspace = self.selected_workspace();
                 self.configuration.state.workspaces[workspace.0].main_offset = 0;
                 self.apply_workspace(workspace)?;
-                if self.configuration.state.menu_visible {
-                    if let Some(menu) = &self.rust_nfm {
-                        menu.focus();
-                    }
+                if crate::ui::menu_visible() {
+                    crate::ui::post(crate::ui::Command::Focus);
                 } else {
                     self.focus_selected(workspace);
                 }
@@ -495,7 +452,7 @@ impl Runtime {
     }
 
     fn focus_selected(&mut self, workspace: WorkspaceId) {
-        if self.configuration.state.menu_visible {
+        if crate::ui::menu_visible() {
             return;
         }
         if let Some(client) = self.configuration.state.workspaces[workspace.0].selected {
@@ -508,9 +465,9 @@ impl Runtime {
             }
         }
         if let Some(monitor) = self.configuration.state.workspaces[workspace.0].monitor
-            && let Some(bar) = self.bars.iter().find(|bar| bar.monitor_index == monitor.0)
+            && let Some(bar) = crate::ui::bar_handle(monitor.0)
         {
-            set_foreground_window(bar.hwnd);
+            set_foreground_window(bar);
         }
     }
 
@@ -632,7 +589,7 @@ impl Runtime {
             .workspace
             .unwrap();
         self.configuration.state.last_workspace = Some(displaced);
-        if self.configuration.state.menu_visible {
+        if crate::ui::menu_visible() {
             self.menu_hide();
         }
         if selected_monitor == current_monitor {
@@ -721,163 +678,6 @@ impl Runtime {
         Ok(())
     }
 
-    fn run_new_windows_menu(&mut self) {
-        let monitor = &self.configuration.state.monitors[0];
-        if let Some(menu) = &self.rust_nfm {
-            menu.set_preferred_center(
-                monitor.x_offset + monitor.width / 2,
-                (monitor.top + monitor.bottom) / 2,
-            );
-            match menu.show_windows() {
-                Ok(task) => {
-                    crate::platform::consume_picker_task(task, |response| match response {
-                        rust_nfm::request::PickerResponse::Selected(item) => unsafe {
-                            crate::platform::menu_window_selected(
-                                item.native_window,
-                                std::ptr::null_mut(),
-                            )
-                        },
-                        _ => unsafe { crate::platform::menu_on_closed() },
-                    });
-                    self.configuration.state.menu_visible = true;
-                }
-                Err(error) => {
-                    crate::error_log::report("failed to start window picker", format!("{error:#}"))
-                }
-            }
-        }
-    }
-
-    fn run_program_launcher_menu(&mut self, elevated: bool) {
-        let Some(definition) = self
-            .configuration
-            .program_launchers
-            .iter()
-            .find(|menu| menu.is_elevated == elevated)
-        else {
-            return;
-        };
-        let monitor = &self.configuration.state.monitors[0];
-        if let Some(menu) = &self.rust_nfm {
-            menu.set_preferred_center(
-                monitor.x_offset + monitor.width / 2,
-                (monitor.top + monitor.bottom) / 2,
-            );
-            match menu.show_programs(definition.directories.clone()) {
-                Ok(task) => {
-                    crate::platform::consume_picker_task(task, move |response| match response {
-                        rust_nfm::request::PickerResponse::Selected(value) => {
-                            if let Ok(value) = std::ffi::CString::new(value) {
-                                unsafe {
-                                    crate::platform::menu_program_selected(
-                                        value.as_ptr() as *mut _,
-                                        elevated as usize as *mut std::ffi::c_void,
-                                    )
-                                };
-                            }
-                        }
-                        _ => unsafe { crate::platform::menu_on_closed() },
-                    })
-                }
-                Err(error) => {
-                    crate::error_log::report(
-                        "failed to start program picker",
-                        format!("{error:#}"),
-                    );
-                    return;
-                }
-            }
-            self.configuration.state.menu_visible = true;
-        }
-    }
-
-    fn run_process_menu(&mut self) {
-        let monitor = &self.configuration.state.monitors[0];
-        if let Some(menu) = &self.rust_nfm {
-            menu.set_preferred_center(
-                monitor.x_offset + monitor.width / 2,
-                (monitor.top + monitor.bottom) / 2,
-            );
-            match menu.show_processes() {
-                Ok(task) => {
-                    crate::platform::consume_picker_task(task, |_| unsafe {
-                        crate::platform::menu_on_closed()
-                    });
-                    self.configuration.state.menu_visible = true;
-                }
-                Err(error) => {
-                    crate::error_log::report("failed to start process picker", format!("{error:#}"))
-                }
-            }
-            return;
-        }
-    }
-
-    fn run_services_menu(&mut self) {
-        crate::platform::show_services_menu(self);
-    }
-
-    fn run_file_system_menu(&mut self) {
-        let monitor = &self.configuration.state.monitors[0];
-        if let Some(menu) = &self.rust_nfm {
-            menu.set_preferred_center(
-                monitor.x_offset + monitor.width / 2,
-                (monitor.top + monitor.bottom) / 2,
-            );
-            let options = rust_nfm::runtime::FileSystemPickerOptions {
-                max_depth: 5,
-                preview_visible: true,
-                ..Default::default()
-            };
-            match menu.show_file_system(options) {
-                Ok(task) => {
-                    crate::platform::consume_picker_task(task, |response| match response {
-                        rust_nfm::request::PickerResponse::Selected(value) => {
-                            if let Ok(value) = std::ffi::CString::new(value) {
-                                unsafe {
-                                    crate::platform::menu_program_selected(
-                                        value.as_ptr() as *mut _,
-                                        std::ptr::null_mut(),
-                                    )
-                                };
-                            }
-                        }
-                        _ => unsafe { crate::platform::menu_on_closed() },
-                    });
-                    self.configuration.state.menu_visible = true;
-                }
-                Err(error) => {
-                    crate::error_log::report("failed to start file picker", format!("{error:#}"))
-                }
-            }
-        }
-    }
-
-    fn run_last_menu(&mut self) -> PlatformResult<()> {
-        if let Some(action) = self.last_menu_action {
-            self.execute(action)?;
-        }
-        Ok(())
-    }
-
-    pub fn run_commands_menu(&mut self) {
-        crate::platform::show_commands_menu(self);
-    }
-    fn run_float_logs_menu(&mut self) {
-        crate::platform::show_float_logs_menu(self);
-    }
-    fn run_client_logs_menu(&mut self) {
-        crate::platform::show_client_logs_menu(self);
-    }
-
-    fn run_error_logs_menu(&mut self) {
-        crate::platform::show_error_logs_menu(self);
-    }
-
-    fn run_configuration_state_menu(&mut self) {
-        crate::platform::show_configuration_state_menu(self);
-    }
-
     fn move_float_or_resize_main(&mut self, dx: i32, dy: i32) -> PlatformResult<()> {
         let hwnd = foreground_window();
         if self
@@ -948,7 +748,7 @@ impl Runtime {
         if self.configuration.state.selected_monitor == Some(monitor) {
             self.configuration.state.last_workspace = Some(displaced);
         }
-        if self.configuration.state.menu_visible {
+        if crate::ui::menu_visible() {
             self.menu_hide();
         }
         if source != monitor {
@@ -1027,11 +827,9 @@ impl Runtime {
         if let Err(error) = result {
             error.report();
         }
-        self.menu_hide();
     }
 
     pub fn menu_window_selected(&mut self, hwnd: isize) {
-        self.menu_hide();
         if let Some(client) = self
             .configuration
             .state
@@ -1095,30 +893,29 @@ impl Runtime {
     }
 
     pub fn menu_hide(&mut self) {
-        if let Some(menu) = &self.rust_nfm {
-            menu.hide();
-        }
-        self.configuration.state.menu_visible = false;
+        // Workspace changes close whichever menu is open when the UI handles
+        // this request, including a menu opened while the worker was busy.
+        crate::ui::post(crate::ui::Command::Hide);
+
         self.redraw_bars();
         self.border_window_update();
     }
 
     pub fn menu_closed(&mut self) {
-        self.menu_hide();
+        // This is a completion notification, not another request to hide.
+        // Avoid stealing focus if the UI has already opened another menu.
+
+        if crate::ui::menu_visible() {
+            return;
+        }
         let workspace = self.selected_workspace();
         self.focus_selected(workspace);
-    }
-
-    pub fn create_bars(&mut self) -> PlatformResult<()> {
-        self.bars = crate::bar::create_bars(
-            &self.configuration.state.monitors,
-            self.configuration.bar_height,
-        )?;
-        Ok(())
+        self.redraw_bars();
+        self.border_window_update();
     }
 
     pub fn redraw_bars(&self) {
-        crate::bar::redraw(&self.bars);
+        crate::worker::dirty();
     }
 
     pub fn refresh_ui_state(&mut self) {
@@ -1130,9 +927,7 @@ impl Runtime {
             .and_then(|monitor| self.configuration.state.monitors[monitor.0].workspace)
             .and_then(|workspace| self.configuration.state.workspaces[workspace.0].selected)
             .and_then(|client| self.configuration.state.clients[client.0].as_ref())
-            .is_some_and(|client| {
-                client.data.hwnd == foreground || self.configuration.state.menu_visible
-            });
+            .is_some_and(|client| client.data.hwnd == foreground);
         self.event_foreground_hwnd = foreground;
         self.redraw_bars();
         self.border_window_update();
@@ -1178,9 +973,9 @@ impl Runtime {
         let Some(border) = &self.border_window else {
             return;
         };
-        crate::platform::set_border_lost_focus(
-            !self.configuration.state.menu_visible && !self.is_foreground_window_same_as_selected,
-        );
+        if !crate::ui::menu_visible() {
+            crate::platform::set_border_lost_focus(!self.is_foreground_window_same_as_selected);
+        }
         let target = self
             .configuration
             .state
@@ -1317,6 +1112,11 @@ impl Runtime {
         if !hit_test_hwnd(hwnd) {
             return;
         }
+        let gesture = crate::worker::GESTURE.load(std::sync::atomic::Ordering::Acquire);
+        if gesture != self.input_gesture {
+            self.cancel_input_drag();
+            self.input_gesture = gesture;
+        }
         let (x, y) = match cursor_position() {
             Ok(position) => position,
             Err(error) => {
@@ -1408,7 +1208,7 @@ impl Runtime {
                             item.bottom - item.top - gap * 2,
                         ),
                         anchor,
-                        self.configuration.state.menu_visible,
+                        crate::ui::menu_visible(),
                     );
                 }
             }
@@ -1428,11 +1228,31 @@ impl Runtime {
             } {
                 return border.hwnd;
             }
+            return border.hwnd;
         }
         hwnd
     }
 
-    pub fn drag_drop_try_handle_left_mouse_up(&mut self) -> PlatformResult<bool> {
+    pub fn cancel_input_drag(&mut self) {
+        self.drag_drop_state = DragDropState::default();
+        self.regular_resize_client = None;
+        if let Some(overlay) = &self.drop_target_window {
+            crate::drop_target::hide(overlay);
+        }
+    }
+
+    pub fn input_release(&mut self, x: i32, y: i32, gesture: u64) -> PlatformResult<()> {
+        if gesture != self.input_gesture {
+            return Ok(());
+        }
+        if gesture != crate::worker::GESTURE.load(std::sync::atomic::Ordering::Acquire) {
+            self.cancel_input_drag();
+            return Ok(());
+        }
+        self.drag_drop_try_handle_left_mouse_up(x, y).map(|_| ())
+    }
+
+    pub fn drag_drop_try_handle_left_mouse_up(&mut self, x: i32, y: i32) -> PlatformResult<bool> {
         if !self.drag_drop_state.in_progress || self.drag_drop_state.drag_hwnd == 0 {
             if let Some(client) = self.regular_resize_client.take() {
                 if let Some(workspace) = self.configuration.state.clients[client.0]
@@ -1446,7 +1266,7 @@ impl Runtime {
             return Ok(false);
         }
         let hwnd = self.drag_drop_state.drag_hwnd;
-        let (monitor, target) = self.drag_drop_target_at_cursor();
+        let (monitor, target) = self.drag_drop_target_at_point(x, y);
         self.drag_drop_state = DragDropState::default();
         if let Some(overlay) = &self.drop_target_window {
             crate::drop_target::hide(overlay);
@@ -1595,14 +1415,11 @@ impl Runtime {
         Ok(true)
     }
 
-    fn drag_drop_target_at_cursor(&self) -> (Option<MonitorId>, Option<crate::ClientId>) {
-        let (x, y) = match cursor_position() {
-            Ok(position) => position,
-            Err(error) => {
-                error.report();
-                return (None, None);
-            }
-        };
+    fn drag_drop_target_at_point(
+        &self,
+        x: i32,
+        y: i32,
+    ) -> (Option<MonitorId>, Option<crate::ClientId>) {
         let monitor = self
             .configuration
             .state
@@ -1960,9 +1777,7 @@ fn show_unmanaged_window_on_selected_monitor(hwnd: isize, monitor: &Monitor) {
 }
 
 fn platform_exit() {
-    unsafe {
-        windows_sys::Win32::System::Threading::ExitProcess(0);
-    }
+    crate::ui::post(crate::ui::Command::Quit);
 }
 fn close_focused_window() -> PlatformResult<()> {
     use windows_sys::Win32::UI::WindowsAndMessaging::{

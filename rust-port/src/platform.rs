@@ -6,10 +6,13 @@ use std::sync::{Mutex, OnceLock};
 use crate::platform_error::{PlatformError, PlatformResult, check_hresult};
 use crate::runtime::Runtime;
 
-pub(crate) fn consume_picker_task<T, F>(task: rust_nfm::runtime::PickerTask<T>, completed: F)
-where
+pub(crate) fn consume_picker_task<T, F>(
+    task: rust_nfm::runtime::PickerTask<T>,
+    session: u64,
+    completed: F,
+) where
     T: Send + 'static,
-    F: FnOnce(rust_nfm::request::PickerResponse<T>) + Send + 'static,
+    F: FnOnce(rust_nfm::request::PickerResponse<T>) -> Option<crate::ui::Command> + Send + 'static,
 {
     let parent = tracing::Span::current();
     std::thread::spawn(move || {
@@ -20,7 +23,14 @@ where
         if let rust_nfm::request::PickerResponse::Error(error) = &response {
             crate::error_log::report("picker returned an error", error.to_string());
         }
-        completed(response);
+        let selection = completed(response);
+        crate::ui::post(crate::ui::Command::Closed {
+            session,
+            restore_focus: selection.is_none(),
+        });
+        if let Some(command) = selection {
+            crate::ui::post(command);
+        }
     });
 }
 
@@ -55,7 +65,7 @@ pub(crate) fn window_message_name(message: u32) -> &'static str {
     }
 }
 
-static SUPPRESSED_KEY_UPS: Mutex<[bool; 256]> = Mutex::new([false; 256]);
+thread_local! { static KEYS:std::cell::RefCell<crate::ui::KeyState>=std::cell::RefCell::new(crate::ui::KeyState::default()); }
 
 static WORKSPACE_MOVE_TIMER: Mutex<usize> = Mutex::new(0);
 
@@ -123,75 +133,7 @@ pub(crate) fn schedule_workspace_move_focus_finish() -> bool {
     timer != 0
 }
 
-pub(crate) unsafe extern "C" fn menu_window_selected(hwnd: isize, _state: *mut std::ffi::c_void) {
-    let span = tracing::info_span!("menu_window_selected", hwnd = hwnd as usize);
-    let _entered = span.enter();
-    if let Some(runtime) = RUNTIME.get() {
-        if let Ok(mut runtime) = runtime.try_lock() {
-            runtime.menu_window_selected(hwnd);
-        }
-    }
-}
-
-pub(crate) unsafe extern "C" fn menu_program_selected(
-    value: *mut std::ffi::c_char,
-    state: *mut std::ffi::c_void,
-) {
-    if value.is_null() {
-        return;
-    }
-    let value = unsafe { std::ffi::CStr::from_ptr(value) }.to_string_lossy();
-    let elevated = state as usize != 0;
-    let span = tracing::info_span!("menu_program_selected", command = %value, elevated);
-    let _entered = span.enter();
-    if let Some(runtime) = RUNTIME.get() {
-        if let Ok(mut runtime) = runtime.try_lock() {
-            runtime.menu_program_selected(&value, elevated);
-        }
-    }
-}
-
-pub(crate) unsafe extern "C" fn menu_on_closed() {
-    let span = tracing::info_span!("menu_closed");
-    let _entered = span.enter();
-    if let Some(runtime) = RUNTIME.get() {
-        if let Ok(mut runtime) = runtime.try_lock() {
-            runtime.menu_closed();
-        }
-    }
-}
-
-pub(crate) unsafe extern "C" fn menu_string_noop(
-    _value: *mut std::ffi::c_char,
-    _state: *mut std::ffi::c_void,
-) {
-    unsafe { menu_on_closed() };
-}
-
-fn command_selected(name: &str) {
-    if let Some(runtime) = RUNTIME.get() {
-        if let Ok(mut runtime) = runtime.try_lock() {
-            let action = runtime
-                .configuration
-                .commands
-                .iter()
-                .find(|command| command.name == name)
-                .map(|command| command.action);
-            // Close the commands picker before executing the selection. Menu-opening
-            // actions otherwise create their picker and then immediately hide it.
-            runtime.menu_hide();
-            if let Some(action) = action {
-                let span = tracing::info_span!("command_selected", name, action = ?action);
-                let _entered = span.enter();
-                if let Err(error) = runtime.execute(action) {
-                    error.report();
-                }
-            }
-        }
-    }
-}
-
-pub(crate) fn show_commands_menu(runtime: &mut Runtime) {
+pub(crate) fn show_commands_menu(runtime: &mut crate::ui::Ui) {
     let columns = ["Name", "Type", "KeyBinding", "Description"]
         .into_iter()
         .map(str::to_owned)
@@ -218,22 +160,20 @@ pub(crate) fn show_commands_menu(runtime: &mut Runtime) {
         (monitor.top + monitor.bottom) / 2,
     );
     match menu.show_structured(columns, rows, None) {
-        Ok(task) => consume_picker_task(task, |response| match response {
-            rust_nfm::request::PickerResponse::Selected(item) => {
-                if let Some(name) = item.fields.get("Name") {
-                    command_selected(name);
-                } else {
-                    unsafe { menu_on_closed() };
-                }
-            }
-            _ => unsafe { menu_on_closed() },
+        Ok(task) => consume_picker_task(task, runtime.menu_session, |response| match response {
+            rust_nfm::request::PickerResponse::Selected(item) => item
+                .fields
+                .get("Name")
+                .cloned()
+                .map(crate::ui::Command::Named),
+            _ => None,
         }),
         Err(error) => {
             crate::error_log::report("failed to start commands picker", format!("{error:#}"));
             return;
         }
     }
-    runtime.configuration.state.menu_visible = true;
+    runtime.menu_visible = true;
 }
 
 pub(crate) fn binding_name(binding: &crate::commands::KeyBinding) -> String {
@@ -296,7 +236,6 @@ pub(crate) fn binding_name(binding: &crate::commands::KeyBinding) -> String {
         ShowClientLogs => "ClientLogsMenu".into(),
         ShowErrorLogs => "ErrorLogsMenu".into(),
         ShowConfigurationState => "ConfigurationStateMenu".into(),
-        RunLastMenu => "LastMenu".into(),
         ShowPrograms(true) => "ProgramLauncherMenu_elevated".into(),
         ShowPrograms(false) => "ProgramLauncherMenu_not_elevated".into(),
         Launch(_) => "Shell".into(),
@@ -326,7 +265,7 @@ fn command_type(action: crate::commands::Action) -> &'static str {
     }
 }
 
-fn command_description(runtime: &Runtime, action: crate::commands::Action) -> String {
+fn command_description(runtime: &crate::ui::Ui, action: crate::commands::Action) -> String {
     use crate::commands::Action::*;
     match action {
         SelectWorkspace(i) | MoveToWorkspace(i) | MoveWorkspaceToMonitor(i, _) => runtime
@@ -422,7 +361,7 @@ mod key_name_tests {
     }
 }
 
-pub(crate) fn show_float_logs_menu(_runtime: &mut Runtime) {
+pub(crate) fn show_float_logs_menu(_runtime: &mut crate::ui::Ui) {
     let rows: Vec<rust_nfm::runtime::StructuredPickerRow> = _runtime
         .configuration
         .state
@@ -488,7 +427,7 @@ pub(crate) fn show_float_logs_menu(_runtime: &mut Runtime) {
     );
 }
 
-pub(crate) fn show_client_logs_menu(_runtime: &mut Runtime) {
+pub(crate) fn show_client_logs_menu(_runtime: &mut crate::ui::Ui) {
     let rows: Vec<rust_nfm::runtime::StructuredPickerRow> = _runtime
         .configuration
         .state
@@ -549,7 +488,7 @@ pub(crate) fn show_client_logs_menu(_runtime: &mut Runtime) {
     );
 }
 
-pub(crate) fn show_error_logs_menu(runtime: &mut Runtime) {
+pub(crate) fn show_error_logs_menu(runtime: &mut crate::ui::Ui) {
     let mut rows: Vec<rust_nfm::runtime::StructuredPickerRow> = crate::error_log::entries()
         .into_iter()
         .rev()
@@ -619,7 +558,7 @@ pub(crate) fn show_error_logs_menu(runtime: &mut Runtime) {
     );
 }
 
-pub(crate) fn show_configuration_state_menu(runtime: &mut Runtime) {
+pub(crate) fn show_configuration_state_menu(runtime: &mut crate::ui::Ui) {
     let configuration = &runtime.configuration;
     let state = &configuration.state;
     let mut rows = Vec::new();
@@ -739,7 +678,7 @@ pub(crate) fn show_configuration_state_menu(runtime: &mut Runtime) {
         format!("{:?}", state.last_workspace),
         None,
     );
-    scalar!("State", menu_visible, state.menu_visible);
+    scalar!("UI", menu_visible, crate::ui::menu_visible());
     scalar!(
         "Logging",
         debug_output_enabled,
@@ -835,7 +774,7 @@ fn format_error_preview(entry: &crate::error_log::ErrorLogEntry) -> String {
 }
 
 fn show_array_columns(
-    runtime: &mut Runtime,
+    runtime: &mut crate::ui::Ui,
     rows: Vec<rust_nfm::runtime::StructuredPickerRow>,
     columns: &[&str],
     display: &[i32],
@@ -873,13 +812,13 @@ fn show_array_columns(
             )
         };
         match task {
-            Ok(task) => consume_picker_task(task, |_| unsafe { menu_on_closed() }),
+            Ok(task) => consume_picker_task(task, runtime.menu_session, |_| None),
             Err(error) => {
                 crate::error_log::report("failed to start structured picker", format!("{error:#}"));
                 return;
             }
         }
-        runtime.configuration.state.menu_visible = true;
+        runtime.menu_visible = true;
         return;
     }
     let lines = rows
@@ -901,7 +840,7 @@ fn show_array_columns(
         .filter_map(|index| columns.get(*index).copied())
         .collect::<Vec<_>>()
         .join(" | ");
-    show_string_items(runtime, &header, lines, menu_string_noop);
+    show_string_items(runtime, &header, lines);
 }
 
 fn local_log_time(value: std::time::SystemTime) -> String {
@@ -1009,21 +948,16 @@ fn format_extended_styles(styles: i32) -> String {
     }
 }
 
-pub(crate) fn show_services_menu(runtime: &mut Runtime) {
+pub(crate) fn show_services_menu(runtime: &mut crate::ui::Ui) {
     let lines = crate::process::list_services().unwrap_or_else(|error| {
         let message = format!("Unable to enumerate services: {error}");
         error.report();
         vec![message]
     });
-    show_string_items(runtime, "State      Service", lines, menu_string_noop);
+    show_string_items(runtime, "State      Service", lines);
 }
 
-fn show_string_items(
-    runtime: &mut Runtime,
-    _header: &str,
-    mut lines: Vec<String>,
-    select: unsafe extern "C" fn(*mut std::ffi::c_char, *mut std::ffi::c_void),
-) {
+fn show_string_items(runtime: &mut crate::ui::Ui, _header: &str, mut lines: Vec<String>) {
     if lines.is_empty() {
         lines.push("No entries logged yet".into());
     }
@@ -1035,47 +969,27 @@ fn show_string_items(
             (monitor.top + monitor.bottom) / 2,
         );
         match menu.show_items(rust_values, None) {
-            Ok(task) => consume_picker_task(task, move |response| match response {
-                rust_nfm::request::PickerResponse::Selected(value) => {
-                    if let Ok(value) = std::ffi::CString::new(value) {
-                        unsafe { select(value.as_ptr() as *mut _, std::ptr::null_mut()) };
-                    }
-                }
-                _ => unsafe { menu_on_closed() },
-            }),
+            Ok(task) => consume_picker_task(task, runtime.menu_session, |_| None),
             Err(error) => {
                 crate::error_log::report("failed to start item picker", format!("{error:#}"));
                 return;
             }
         }
-        runtime.configuration.state.menu_visible = true;
+        runtime.menu_visible = true;
     }
 }
 
 pub(crate) fn bar_snapshot(monitor: usize) -> Option<crate::bar::BarSnapshot> {
-    RUNTIME.get()?.try_lock().ok()?.bar_snapshot(monitor)
+    crate::ui::bar_snapshot(monitor)
 }
-
 pub(crate) fn bar_workspace_clicked(monitor: usize, workspace: usize) {
-    let span = tracing::info_span!("bar_workspace_clicked", monitor, workspace);
-    let _entered = span.enter();
-    if let Some(runtime) = RUNTIME.get() {
-        if let Ok(mut runtime) = runtime.try_lock() {
-            runtime.bar_workspace_clicked(monitor, workspace);
-        }
-    }
+    crate::worker::send(crate::worker::Command::Workspace(monitor, workspace));
 }
-
 pub(crate) fn bar_commands_clicked() {
-    let span = tracing::info_span!("bar_commands_clicked");
-    let _entered = span.enter();
-    if let Some(runtime) = RUNTIME.get() {
-        if let Ok(mut runtime) = runtime.try_lock() {
-            runtime.run_commands_menu();
-        }
-    }
+    crate::ui::post(crate::ui::Command::Action(
+        crate::commands::Action::ShowCommands,
+    ));
 }
-
 fn get_modifiers_pressed() -> i32 {
     use crate::commands::{LALT, LCTL, LSHIFT, LWIN, RALT, RSHIFT, RWIN};
     use windows_sys::Win32::UI::Input::KeyboardAndMouse::*;
@@ -1112,24 +1026,16 @@ unsafe extern "system" fn handle_key_press(code: i32, wparam: usize, lparam: isi
     if code == 0 {
         let event = wparam as u32;
         let key = unsafe { (*(lparam as *const KBDLLHOOKSTRUCT)).vkCode };
-        if event == WM_KEYUP || event == WM_SYSKEYUP {
-            if key < 256 {
-                let mut suppressed = SUPPRESSED_KEY_UPS.lock().unwrap();
-                if suppressed[key as usize] {
-                    suppressed[key as usize] = false;
-                    return 1;
-                }
-            }
-        } else if event == WM_KEYDOWN || event == WM_SYSKEYDOWN {
-            if let Some(runtime) = RUNTIME.get() {
-                if let Ok(mut runtime) = runtime.try_lock() {
-                    if runtime.key_bindings_try_handle(key, get_modifiers_pressed()) {
-                        if key < 256 {
-                            SUPPRESSED_KEY_UPS.lock().unwrap()[key as usize] = true;
-                        }
-                        return 1;
-                    }
-                }
+        if matches!(event, WM_KEYUP | WM_SYSKEYUP | WM_KEYDOWN | WM_SYSKEYDOWN) {
+            let up = matches!(event, WM_KEYUP | WM_SYSKEYUP);
+            let swallowed = KEYS.with(|state| {
+                state.borrow_mut().event(key, up, || {
+                    crate::ui::binding(key, get_modifiers_pressed())
+                        .is_some_and(crate::ui::queue_action)
+                })
+            });
+            if swallowed {
+                return 1;
             }
         }
     }
@@ -1138,20 +1044,14 @@ unsafe extern "system" fn handle_key_press(code: i32, wparam: usize, lparam: isi
 
 unsafe extern "system" fn handle_mouse(code: i32, wparam: usize, lparam: isize) -> isize {
     use windows_sys::Win32::UI::WindowsAndMessaging::{CallNextHookEx, WM_LBUTTONUP};
-    if code >= 0 && wparam as u32 == WM_LBUTTONUP {
-        let span = tracing::info_span!(
-            "mouse_hook",
-            event_name = "WM_LBUTTONUP",
-            message = wparam as u32,
-            hook_code = code,
-        );
-        let _entered = span.enter();
-        if let Some(runtime) = RUNTIME.get() {
-            if let Ok(mut runtime) = runtime.try_lock() {
-                if let Err(error) = runtime.drag_drop_try_handle_left_mouse_up() {
-                    error.report();
-                }
-            }
+    if code == 0 {
+        use windows_sys::Win32::UI::WindowsAndMessaging::{MSLLHOOKSTRUCT, WM_LBUTTONDOWN};
+        if wparam as u32 == WM_LBUTTONDOWN {
+            crate::worker::GESTURE.fetch_add(1, Ordering::AcqRel);
+        }
+        if wparam as u32 == WM_LBUTTONUP {
+            let point = unsafe { (*(lparam as *const MSLLHOOKSTRUCT)).pt };
+            crate::worker::release(point.x, point.y);
         }
     }
     unsafe { CallNextHookEx(std::ptr::null_mut(), code, wparam, lparam) }
@@ -1357,7 +1257,9 @@ fn install_win_event_hooks()
 }
 
 #[tracing::instrument]
-pub fn run_message_loop() -> PlatformResult<()> {
+fn run_message_loop(
+    receiver: &std::sync::mpsc::Receiver<crate::ui::Command>,
+) -> PlatformResult<()> {
     use std::mem::zeroed;
     use windows_sys::Win32::Foundation::HWND;
     use windows_sys::Win32::UI::WindowsAndMessaging::{
@@ -1374,10 +1276,180 @@ pub fn run_message_loop() -> PlatformResult<()> {
             if result == 0 {
                 return Ok(());
             }
+            crate::ui::pump(receiver);
             TranslateMessage(&message);
             DispatchMessageW(&message);
         }
     }
+}
+
+pub(crate) fn run_worker(
+    runtime: Runtime,
+    receiver: std::sync::mpsc::Receiver<crate::worker::QueuedCommand>,
+    stop: &AtomicBool,
+) -> PlatformResult<()> {
+    use windows_sys::Win32::System::Com::*;
+    use windows_sys::Win32::UI::WindowsAndMessaging::*;
+    check_hresult(
+        unsafe { CoInitializeEx(std::ptr::null(), COINIT_MULTITHREADED as u32) },
+        "CoInitializeEx(worker)",
+    )?;
+    // The guard runs on this thread on both startup failures and normal exit.
+    struct Cleanup {
+        hooks: Vec<windows_sys::Win32::UI::Accessibility::HWINEVENTHOOK>,
+        timer: usize,
+    }
+    impl Drop for Cleanup {
+        fn drop(&mut self) {
+            unsafe {
+                for hook in self.hooks.drain(..) {
+                    windows_sys::Win32::UI::Accessibility::UnhookWinEvent(hook);
+                }
+                if self.timer != 0 {
+                    KillTimer(std::ptr::null_mut(), self.timer);
+                }
+                let timer = *WORKSPACE_MOVE_TIMER.lock().unwrap();
+                if timer != 0 {
+                    KillTimer(std::ptr::null_mut(), timer);
+                }
+                if let Some(runtime) = RUNTIME.get() {
+                    let mut runtime = runtime
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner);
+                    if let Some(window) = runtime.border_window.take() {
+                        DestroyWindow(window.hwnd as _);
+                    }
+                    if let Some(window) = runtime.drop_target_window.take() {
+                        DestroyWindow(window.hwnd as _);
+                    }
+                }
+                crate::border::clean();
+                CoUninitialize();
+            }
+        }
+    }
+    let mut cleanup = Cleanup {
+        hooks: Vec::new(),
+        timer: 0,
+    };
+    RUNTIME
+        .set(Mutex::new(runtime))
+        .map_err(|_| PlatformError::win32("initialize worker runtime", 183))?;
+    {
+        let mut runtime = RUNTIME.get().unwrap().lock().unwrap();
+        runtime.apply_all_workspaces()?;
+        runtime.create_border_window()?;
+        runtime.create_drop_target_window()?;
+        runtime.finish_startup();
+        crate::worker::publish(&runtime);
+    }
+    cleanup.hooks = install_win_event_hooks()?;
+    cleanup.timer = unsafe { SetTimer(std::ptr::null_mut(), 0, 1500, Some(refresh_ui_state)) };
+    let mut message = MSG::default();
+    while !stop.load(Ordering::Acquire) {
+        // Polling also drains commands whose wake arrived during a nested loop.
+        let wait = unsafe {
+            MsgWaitForMultipleObjectsEx(0, std::ptr::null(), 50, QS_ALLINPUT, MWMO_INPUTAVAILABLE)
+        };
+        if wait == windows_sys::Win32::Foundation::WAIT_FAILED {
+            return Err(PlatformError::last_win32("worker message wait"));
+        }
+        for _ in 0..64 {
+            if unsafe { PeekMessageW(&mut message, std::ptr::null_mut(), 0, 0, PM_REMOVE) } == 0 {
+                break;
+            }
+            if message.message == WM_QUIT {
+                return Ok(());
+            }
+            unsafe {
+                TranslateMessage(&message);
+                DispatchMessageW(&message);
+            }
+        }
+        let mut runtime = RUNTIME.get().unwrap().lock().unwrap();
+        crate::worker::drain(&receiver, &mut runtime);
+    }
+    Ok(())
+}
+
+#[tracing::instrument(skip(runtime), fields(instance_mutex=instance_mutex as usize))]
+pub fn run(runtime: Runtime, instance_mutex: isize) -> PlatformResult<()> {
+    use windows_sys::Win32::System::{Com::*, LibraryLoader::GetModuleHandleW};
+    use windows_sys::Win32::UI::WindowsAndMessaging::*;
+    check_hresult(
+        unsafe { CoInitializeEx(std::ptr::null(), COINIT_MULTITHREADED as u32) },
+        "CoInitializeEx(UI)",
+    )?;
+    struct Cleanup {
+        key: HHOOK,
+        mouse: HHOOK,
+        timer: usize,
+        mutex: isize,
+    }
+    impl Drop for Cleanup {
+        fn drop(&mut self) {
+            unsafe {
+                if !self.key.is_null() {
+                    UnhookWindowsHookEx(self.key);
+                }
+                if !self.mouse.is_null() {
+                    UnhookWindowsHookEx(self.mouse);
+                }
+                if self.timer != 0 {
+                    KillTimer(std::ptr::null_mut(), self.timer);
+                }
+                crate::ui::shutdown();
+                crate::status::shutdown();
+                CoUninitialize();
+                windows_sys::Win32::Foundation::CloseHandle(self.mutex as _);
+            }
+        }
+    }
+    let mut cleanup = Cleanup {
+        key: std::ptr::null_mut(),
+        mouse: std::ptr::null_mut(),
+        timer: 0,
+        mutex: instance_mutex,
+    };
+    check_hresult(
+        unsafe {
+            CoInitializeSecurity(
+                std::ptr::null_mut(),
+                -1,
+                std::ptr::null(),
+                std::ptr::null(),
+                RPC_C_AUTHN_LEVEL_DEFAULT,
+                RPC_C_IMP_LEVEL_IMPERSONATE,
+                std::ptr::null(),
+                EOAC_NONE as u32,
+                std::ptr::null(),
+            )
+        },
+        "CoInitializeSecurity",
+    )?;
+    crate::status::initialize();
+    crate::worker::publish(&runtime);
+    let receiver =
+        crate::ui::initialize(runtime.configuration.clone(), runtime.key_bindings.clone())?;
+    let module = unsafe { GetModuleHandleW(std::ptr::null()) };
+    if module.is_null() {
+        return Err(PlatformError::last_win32("GetModuleHandleW(input)"));
+    }
+    cleanup.key = unsafe { SetWindowsHookExW(WH_KEYBOARD_LL, Some(handle_key_press), module, 0) };
+    if cleanup.key.is_null() {
+        return Err(PlatformError::last_win32("keyboard hook"));
+    }
+    cleanup.mouse = unsafe { SetWindowsHookExW(WH_MOUSE_LL, Some(handle_mouse), module, 0) };
+    if cleanup.mouse.is_null() {
+        return Err(PlatformError::last_win32("mouse hook"));
+    }
+    // Thread messages can be consumed by modal loops; a UI timer supplies an
+    // independent wake and keeps status painting independent of worker health.
+    cleanup.timer = unsafe { SetTimer(std::ptr::null_mut(), 0, 250, None) };
+    let worker = crate::worker::Worker::start(runtime)?;
+    let result = run_message_loop(&receiver);
+    drop(worker);
+    result
 }
 
 #[tracing::instrument]
@@ -1407,149 +1479,5 @@ pub fn acquire_single_instance() -> PlatformResult<Option<isize>> {
         Ok(None)
     } else {
         Ok(Some(mutex as isize))
-    }
-}
-
-#[tracing::instrument(skip(runtime), fields(instance_mutex = instance_mutex as usize))]
-pub fn run(runtime: Runtime, instance_mutex: isize) -> PlatformResult<()> {
-    use windows_sys::Win32::Foundation::{CloseHandle, GetLastError};
-    use windows_sys::Win32::System::Com::{
-        COINIT_MULTITHREADED, CoInitializeEx, CoInitializeSecurity, CoUninitialize, EOAC_NONE,
-        RPC_C_AUTHN_LEVEL_DEFAULT, RPC_C_IMP_LEVEL_IMPERSONATE,
-    };
-    use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
-    use windows_sys::Win32::UI::Accessibility::UnhookWinEvent;
-    use windows_sys::Win32::UI::WindowsAndMessaging::{
-        SetWindowsHookExW, UnhookWindowsHookEx, WH_KEYBOARD_LL, WH_MOUSE_LL,
-    };
-    let com_result = unsafe { CoInitializeEx(std::ptr::null(), COINIT_MULTITHREADED as u32) };
-    check_hresult(com_result, "CoInitializeEx")?;
-    let security_result = unsafe {
-        CoInitializeSecurity(
-            std::ptr::null_mut(),
-            -1,
-            std::ptr::null(),
-            std::ptr::null(),
-            RPC_C_AUTHN_LEVEL_DEFAULT,
-            RPC_C_IMP_LEVEL_IMPERSONATE,
-            std::ptr::null(),
-            EOAC_NONE as u32,
-            std::ptr::null(),
-        )
-    };
-    if let Err(error) = check_hresult(security_result, "CoInitializeSecurity") {
-        unsafe { CoUninitialize() };
-        return Err(error);
-    }
-    crate::status::initialize();
-    RUNTIME
-        .set(Mutex::new(runtime))
-        .map_err(|_| PlatformError::win32("initialize global runtime", 183))?;
-    if let Some(runtime) = RUNTIME.get() {
-        let mut runtime = runtime.lock().unwrap();
-        runtime.create_bars()?;
-        runtime.apply_all_workspaces()?;
-        runtime.create_border_window()?;
-        runtime.create_drop_target_window()?;
-    }
-    let module = unsafe { GetModuleHandleW(std::ptr::null()) };
-    if module.is_null() {
-        return Err(PlatformError::last_win32("GetModuleHandleW(input hooks)"));
-    }
-    let keyboard_hook =
-        unsafe { SetWindowsHookExW(WH_KEYBOARD_LL, Some(handle_key_press), module, 0) };
-    if keyboard_hook.is_null() {
-        let error = unsafe { GetLastError() };
-        return Err(PlatformError::win32("SetWindowsHookExW(keyboard)", error));
-    }
-    let mouse_hook = unsafe { SetWindowsHookExW(WH_MOUSE_LL, Some(handle_mouse), module, 0) };
-    if mouse_hook.is_null() {
-        let error = unsafe { GetLastError() };
-        if unsafe { UnhookWindowsHookEx(keyboard_hook) } == 0 {
-            crate::error_log::last_win32("UnhookWindowsHookEx(keyboard cleanup) failed");
-        }
-        return Err(PlatformError::win32("SetWindowsHookExW(mouse)", error));
-    }
-    let hooks = match install_win_event_hooks() {
-        Ok(hooks) => hooks,
-        Err(error) => {
-            if unsafe { UnhookWindowsHookEx(keyboard_hook) } == 0 {
-                PlatformError::last_win32("UnhookWindowsHookEx(keyboard cleanup)").report();
-            }
-            if unsafe { UnhookWindowsHookEx(mouse_hook) } == 0 {
-                PlatformError::last_win32("UnhookWindowsHookEx(mouse cleanup)").report();
-            }
-            return Err(error);
-        }
-    };
-    if let Some(runtime) = RUNTIME.get() {
-        runtime.lock().unwrap().finish_startup();
-    }
-    let ui_refresh_timer = unsafe {
-        windows_sys::Win32::UI::WindowsAndMessaging::SetTimer(
-            std::ptr::null_mut(),
-            0,
-            1500,
-            Some(refresh_ui_state),
-        )
-    };
-    if ui_refresh_timer == 0 {
-        crate::error_log::last_win32("SetTimer(UI refresh) failed");
-    }
-    let result = run_message_loop();
-    let mut cleanup_error = None;
-    let mut record_cleanup_error = |error: PlatformError| {
-        if cleanup_error.is_none() {
-            cleanup_error = Some(error);
-        } else {
-            error.report();
-        }
-    };
-    for hook in hooks {
-        if unsafe { UnhookWinEvent(hook) } == 0 {
-            record_cleanup_error(PlatformError::last_win32("UnhookWinEvent"));
-        }
-    }
-    unsafe {
-        if ui_refresh_timer != 0
-            && windows_sys::Win32::UI::WindowsAndMessaging::KillTimer(
-                std::ptr::null_mut(),
-                ui_refresh_timer,
-            ) == 0
-        {
-            record_cleanup_error(PlatformError::last_win32("KillTimer(UI refresh)"));
-        }
-        let timer = *WORKSPACE_MOVE_TIMER.lock().unwrap();
-        if timer != 0 {
-            if windows_sys::Win32::UI::WindowsAndMessaging::KillTimer(std::ptr::null_mut(), timer)
-                == 0
-            {
-                record_cleanup_error(PlatformError::last_win32(
-                    "KillTimer(workspace focus shutdown)",
-                ));
-            }
-        }
-        if UnhookWindowsHookEx(keyboard_hook) == 0 {
-            record_cleanup_error(PlatformError::last_win32("UnhookWindowsHookEx(keyboard)"));
-        }
-        if UnhookWindowsHookEx(mouse_hook) == 0 {
-            record_cleanup_error(PlatformError::last_win32("UnhookWindowsHookEx(mouse)"));
-        }
-        crate::border::clean();
-        crate::status::shutdown();
-        CoUninitialize();
-        if CloseHandle(instance_mutex as _) == 0 {
-            record_cleanup_error(PlatformError::last_win32(
-                "CloseHandle(single-instance mutex)",
-            ));
-        }
-    }
-    match (result, cleanup_error) {
-        (Err(error), Some(cleanup_error)) => {
-            cleanup_error.report();
-            Err(error)
-        }
-        (Err(error), None) | (Ok(()), Some(error)) => Err(error),
-        (Ok(()), None) => Ok(()),
     }
 }
