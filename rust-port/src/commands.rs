@@ -48,6 +48,16 @@ pub enum Action {
     MoveSecondaryFocusedToMain,
 }
 
+/// Sends directly to the action's UI or worker queue on the calling thread.
+/// Returns whether the queue accepted the action.
+pub fn dispatch_action(action: Action) -> bool {
+    if crate::ui::is_menu(action) || action == Action::Quit {
+        crate::ui::post(crate::ui::Command::Action(action))
+    } else {
+        crate::worker::send(crate::worker::Command::Action(action))
+    }
+}
+
 #[derive(Clone, Copy, Debug)]
 pub struct KeyBinding {
     pub modifiers: i32,

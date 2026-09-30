@@ -98,13 +98,6 @@ pub fn is_menu(action: Action) -> bool {
             | Action::ShowConfigurationState
     )
 }
-pub fn queue_action(action: Action) -> bool {
-    if is_menu(action) || action == Action::Quit {
-        post(Command::Action(action))
-    } else {
-        crate::worker::send(crate::worker::Command::Action(action))
-    }
-}
 pub struct Ui {
     pub(crate) menu_session: u64,
     pub configuration: std::sync::Arc<Configuration>,

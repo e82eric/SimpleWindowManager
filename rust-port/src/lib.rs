@@ -7,6 +7,7 @@ pub mod commands;
 pub mod config;
 pub mod drop_target;
 pub mod error_log;
+mod input;
 pub mod layout;
 pub mod list_windows;
 pub mod model;

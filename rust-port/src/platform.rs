@@ -65,8 +65,6 @@ pub(crate) fn window_message_name(message: u32) -> &'static str {
     }
 }
 
-thread_local! { static KEYS:std::cell::RefCell<crate::ui::KeyState>=std::cell::RefCell::new(crate::ui::KeyState::default()); }
-
 static WORKSPACE_MOVE_TIMER: Mutex<usize> = Mutex::new(0);
 
 unsafe extern "system" fn refresh_ui_state(
@@ -990,73 +988,6 @@ pub(crate) fn bar_commands_clicked() {
         crate::commands::Action::ShowCommands,
     ));
 }
-fn get_modifiers_pressed() -> i32 {
-    use crate::commands::{LALT, LCTL, LSHIFT, LWIN, RALT, RSHIFT, RWIN};
-    use windows_sys::Win32::UI::Input::KeyboardAndMouse::*;
-    let down = |key| unsafe { GetAsyncKeyState(key) as u16 & 0x8000 != 0 };
-    let mut result = 0;
-    if down(VK_LSHIFT as i32) {
-        result |= LSHIFT;
-    }
-    if down(VK_RSHIFT as i32) {
-        result |= RSHIFT;
-    }
-    if down(VK_LMENU as i32) {
-        result |= LALT;
-    }
-    if down(VK_RMENU as i32) {
-        result |= RALT;
-    }
-    if down(VK_CONTROL as i32) {
-        result |= LCTL;
-    }
-    if down(VK_LWIN as i32) {
-        result |= LWIN;
-    }
-    if down(VK_RWIN as i32) {
-        result |= RWIN;
-    }
-    result
-}
-
-unsafe extern "system" fn handle_key_press(code: i32, wparam: usize, lparam: isize) -> isize {
-    use windows_sys::Win32::UI::WindowsAndMessaging::{
-        CallNextHookEx, KBDLLHOOKSTRUCT, WM_KEYDOWN, WM_KEYUP, WM_SYSKEYDOWN, WM_SYSKEYUP,
-    };
-    if code == 0 {
-        let event = wparam as u32;
-        let key = unsafe { (*(lparam as *const KBDLLHOOKSTRUCT)).vkCode };
-        if matches!(event, WM_KEYUP | WM_SYSKEYUP | WM_KEYDOWN | WM_SYSKEYDOWN) {
-            let up = matches!(event, WM_KEYUP | WM_SYSKEYUP);
-            let swallowed = KEYS.with(|state| {
-                state.borrow_mut().event(key, up, || {
-                    crate::ui::binding(key, get_modifiers_pressed())
-                        .is_some_and(crate::ui::queue_action)
-                })
-            });
-            if swallowed {
-                return 1;
-            }
-        }
-    }
-    unsafe { CallNextHookEx(std::ptr::null_mut(), code, wparam, lparam) }
-}
-
-unsafe extern "system" fn handle_mouse(code: i32, wparam: usize, lparam: isize) -> isize {
-    use windows_sys::Win32::UI::WindowsAndMessaging::{CallNextHookEx, WM_LBUTTONUP};
-    if code == 0 {
-        use windows_sys::Win32::UI::WindowsAndMessaging::{MSLLHOOKSTRUCT, WM_LBUTTONDOWN};
-        if wparam as u32 == WM_LBUTTONDOWN {
-            crate::worker::GESTURE.fetch_add(1, Ordering::AcqRel);
-        }
-        if wparam as u32 == WM_LBUTTONUP {
-            let point = unsafe { (*(lparam as *const MSLLHOOKSTRUCT)).pt };
-            crate::worker::release(point.x, point.y);
-        }
-    }
-    unsafe { CallNextHookEx(std::ptr::null_mut(), code, wparam, lparam) }
-}
-
 unsafe extern "system" fn handle_windows_event(
     _hook: windows_sys::Win32::UI::Accessibility::HWINEVENTHOOK,
     event: u32,
@@ -1374,27 +1305,19 @@ pub(crate) fn run_worker(
 
 #[tracing::instrument(skip(runtime), fields(instance_mutex=instance_mutex as usize))]
 pub fn run(runtime: Runtime, instance_mutex: isize) -> PlatformResult<()> {
-    use windows_sys::Win32::System::{Com::*, LibraryLoader::GetModuleHandleW};
+    use windows_sys::Win32::System::Com::*;
     use windows_sys::Win32::UI::WindowsAndMessaging::*;
     check_hresult(
         unsafe { CoInitializeEx(std::ptr::null(), COINIT_MULTITHREADED as u32) },
         "CoInitializeEx(UI)",
     )?;
     struct Cleanup {
-        key: HHOOK,
-        mouse: HHOOK,
         timer: usize,
         mutex: isize,
     }
     impl Drop for Cleanup {
         fn drop(&mut self) {
             unsafe {
-                if !self.key.is_null() {
-                    UnhookWindowsHookEx(self.key);
-                }
-                if !self.mouse.is_null() {
-                    UnhookWindowsHookEx(self.mouse);
-                }
                 if self.timer != 0 {
                     KillTimer(std::ptr::null_mut(), self.timer);
                 }
@@ -1406,8 +1329,6 @@ pub fn run(runtime: Runtime, instance_mutex: isize) -> PlatformResult<()> {
         }
     }
     let mut cleanup = Cleanup {
-        key: std::ptr::null_mut(),
-        mouse: std::ptr::null_mut(),
         timer: 0,
         mutex: instance_mutex,
     };
@@ -1431,23 +1352,13 @@ pub fn run(runtime: Runtime, instance_mutex: isize) -> PlatformResult<()> {
     crate::worker::publish(&runtime);
     let receiver =
         crate::ui::initialize(runtime.configuration.clone(), runtime.key_bindings.clone())?;
-    let module = unsafe { GetModuleHandleW(std::ptr::null()) };
-    if module.is_null() {
-        return Err(PlatformError::last_win32("GetModuleHandleW(input)"));
-    }
-    cleanup.key = unsafe { SetWindowsHookExW(WH_KEYBOARD_LL, Some(handle_key_press), module, 0) };
-    if cleanup.key.is_null() {
-        return Err(PlatformError::last_win32("keyboard hook"));
-    }
-    cleanup.mouse = unsafe { SetWindowsHookExW(WH_MOUSE_LL, Some(handle_mouse), module, 0) };
-    if cleanup.mouse.is_null() {
-        return Err(PlatformError::last_win32("mouse hook"));
-    }
     // Thread messages can be consumed by modal loops; a UI timer supplies an
     // independent wake and keeps status painting independent of worker health.
     cleanup.timer = unsafe { SetTimer(std::ptr::null_mut(), 0, 250, None) };
     let worker = crate::worker::Worker::start(runtime)?;
+    let input = crate::input::InputHooks::start()?;
     let result = run_message_loop(&receiver);
+    drop(input);
     drop(worker);
     result
 }

@@ -10,3 +10,4 @@ logs
 target
 /rust-port/target*/
 /rust-port/build.local.ps1
+/rust-port/.idea*/
