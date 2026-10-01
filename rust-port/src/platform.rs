@@ -6,34 +6,6 @@ use std::sync::{Mutex, OnceLock};
 use crate::platform_error::{PlatformError, PlatformResult, check_hresult};
 use crate::runtime::Runtime;
 
-pub(crate) fn consume_picker_task<T, F>(
-    task: rust_nfm::runtime::PickerTask<T>,
-    session: u64,
-    completed: F,
-) where
-    T: Send + 'static,
-    F: FnOnce(rust_nfm::request::PickerResponse<T>) -> Option<crate::ui::Command> + Send + 'static,
-{
-    let parent = tracing::Span::current();
-    std::thread::spawn(move || {
-        let _entered = parent.enter();
-        let response = task
-            .recv()
-            .unwrap_or_else(|error| rust_nfm::request::PickerResponse::Error(error.to_string()));
-        if let rust_nfm::request::PickerResponse::Error(error) = &response {
-            crate::error_log::report("picker returned an error", error.to_string());
-        }
-        let selection = completed(response);
-        crate::ui::post(crate::ui::Command::Closed {
-            session,
-            restore_focus: selection.is_none(),
-        });
-        if let Some(command) = selection {
-            crate::ui::post(command);
-        }
-    });
-}
-
 static RUNTIME: OnceLock<Mutex<Runtime>> = OnceLock::new();
 
 static BORDER_LOST_FOCUS: AtomicBool = AtomicBool::new(false);
@@ -131,11 +103,7 @@ pub(crate) fn schedule_workspace_move_focus_finish() -> bool {
     timer != 0
 }
 
-pub(crate) fn show_commands_menu(runtime: &mut crate::ui::Ui) {
-    let columns = ["Name", "Type", "KeyBinding", "Description"]
-        .into_iter()
-        .map(str::to_owned)
-        .collect();
+pub(crate) fn command_menu_rows(runtime: &crate::ui::Ui) -> Vec<Vec<String>> {
     let rows = runtime
         .configuration
         .commands
@@ -149,29 +117,7 @@ pub(crate) fn show_commands_menu(runtime: &mut crate::ui::Ui) {
             ]
         })
         .collect();
-    let monitor = &runtime.configuration.state.monitors[0];
-    let Some(menu) = &runtime.rust_nfm else {
-        return;
-    };
-    menu.set_preferred_center(
-        monitor.x_offset + monitor.width / 2,
-        (monitor.top + monitor.bottom) / 2,
-    );
-    match menu.show_structured(columns, rows, None) {
-        Ok(task) => consume_picker_task(task, runtime.menu_session, |response| match response {
-            rust_nfm::request::PickerResponse::Selected(item) => item
-                .fields
-                .get("Name")
-                .cloned()
-                .map(crate::ui::Command::Named),
-            _ => None,
-        }),
-        Err(error) => {
-            crate::error_log::report("failed to start commands picker", format!("{error:#}"));
-            return;
-        }
-    }
-    runtime.menu_visible = true;
+    rows
 }
 
 pub(crate) fn binding_name(binding: &crate::commands::KeyBinding) -> String {
@@ -360,12 +306,12 @@ mod key_name_tests {
 }
 
 pub(crate) fn show_float_logs_menu(_runtime: &mut crate::ui::Ui) {
-    let rows: Vec<rust_nfm::runtime::StructuredPickerRow> = _runtime
+    let rows: Vec<crate::egui_data_menu::DataRow> = _runtime
         .configuration
         .state
         .float_log_buffer
         .iter()
-        .map(|entry| rust_nfm::runtime::StructuredPickerRow {
+        .map(|entry| crate::egui_data_menu::DataRow {
             cells: vec![
                 local_log_time(entry.timestamp),
                 if entry.is_floated { "FLOAT" } else { "TILE" }.into(),
@@ -384,7 +330,7 @@ pub(crate) fn show_float_logs_menu(_runtime: &mut crate::ui::Ui) {
         })
         .collect();
     let rows = if rows.is_empty() {
-        vec![rust_nfm::runtime::StructuredPickerRow {
+        vec![crate::egui_data_menu::DataRow {
             cells: vec![
                 "".into(),
                 "".into(),
@@ -407,6 +353,7 @@ pub(crate) fn show_float_logs_menu(_runtime: &mut crate::ui::Ui) {
     show_array_columns(
         _runtime,
         rows,
+        "Float logs",
         &[
             "Time",
             "Action",
@@ -426,12 +373,12 @@ pub(crate) fn show_float_logs_menu(_runtime: &mut crate::ui::Ui) {
 }
 
 pub(crate) fn show_client_logs_menu(_runtime: &mut crate::ui::Ui) {
-    let rows: Vec<rust_nfm::runtime::StructuredPickerRow> = _runtime
+    let rows: Vec<crate::egui_data_menu::DataRow> = _runtime
         .configuration
         .state
         .client_log_buffer
         .iter()
-        .map(|entry| rust_nfm::runtime::StructuredPickerRow {
+        .map(|entry| crate::egui_data_menu::DataRow {
             cells: vec![
                 local_log_time(entry.timestamp),
                 if entry.was_minimized { "MIN" } else { "NORM" }.into(),
@@ -455,7 +402,7 @@ pub(crate) fn show_client_logs_menu(_runtime: &mut crate::ui::Ui) {
     let rows = if rows.is_empty() {
         let mut cells = vec![String::new(); 15];
         cells[0] = "No clients logged yet".into();
-        vec![rust_nfm::runtime::StructuredPickerRow {
+        vec![crate::egui_data_menu::DataRow {
             cells,
             preview: None,
         }]
@@ -465,6 +412,7 @@ pub(crate) fn show_client_logs_menu(_runtime: &mut crate::ui::Ui) {
     show_array_columns(
         _runtime,
         rows,
+        "Client logs",
         &[
             "Time",
             "State",
@@ -487,7 +435,7 @@ pub(crate) fn show_client_logs_menu(_runtime: &mut crate::ui::Ui) {
 }
 
 pub(crate) fn show_error_logs_menu(runtime: &mut crate::ui::Ui) {
-    let mut rows: Vec<rust_nfm::runtime::StructuredPickerRow> = crate::error_log::entries()
+    let mut rows: Vec<crate::egui_data_menu::DataRow> = crate::error_log::entries()
         .into_iter()
         .rev()
         .map(|entry| {
@@ -506,7 +454,7 @@ pub(crate) fn show_error_logs_menu(runtime: &mut crate::ui::Ui) {
             let source = entry
                 .line
                 .map_or(entry.file.clone(), |line| format!("{}:{line}", entry.file));
-            rust_nfm::runtime::StructuredPickerRow {
+            crate::egui_data_menu::DataRow {
                 cells: vec![
                     local_log_time(entry.timestamp),
                     entry.entry_method,
@@ -525,7 +473,7 @@ pub(crate) fn show_error_logs_menu(runtime: &mut crate::ui::Ui) {
         let log_path = crate::error_log::log_file_path()
             .map(|path| path.display().to_string())
             .unwrap_or_else(|| "File logging unavailable: LOCALAPPDATA is not set".into());
-        rows.push(rust_nfm::runtime::StructuredPickerRow {
+        rows.push(crate::egui_data_menu::DataRow {
             cells: vec![
                 String::new(),
                 String::new(),
@@ -542,6 +490,7 @@ pub(crate) fn show_error_logs_menu(runtime: &mut crate::ui::Ui) {
     show_array_columns(
         runtime,
         rows,
+        "Error logs",
         &[
             "Time",
             "Entry",
@@ -564,7 +513,7 @@ pub(crate) fn show_configuration_state_menu(runtime: &mut crate::ui::Ui) {
         let preview = details.unwrap_or_else(|| {
             format!("Category: {category}\nProperty: {property}\nValue: {value}")
         });
-        rows.push(rust_nfm::runtime::StructuredPickerRow {
+        rows.push(crate::egui_data_menu::DataRow {
             cells: vec![category.into(), property.into(), value],
             preview: Some(preview),
         });
@@ -724,6 +673,7 @@ pub(crate) fn show_configuration_state_menu(runtime: &mut crate::ui::Ui) {
     show_array_columns(
         runtime,
         rows,
+        "Configuration state",
         &["Category", "Property", "Value"],
         &[0, 1, 2],
     );
@@ -773,72 +723,27 @@ fn format_error_preview(entry: &crate::error_log::ErrorLogEntry) -> String {
 
 fn show_array_columns(
     runtime: &mut crate::ui::Ui,
-    rows: Vec<rust_nfm::runtime::StructuredPickerRow>,
+    rows: Vec<crate::egui_data_menu::DataRow>,
+    title: &str,
     columns: &[&str],
     display: &[i32],
 ) {
-    let visible_columns: Vec<usize> = display.iter().map(|column| *column as usize).collect();
-    if let Some(menu) = &runtime.rust_nfm {
-        let monitor = &runtime.configuration.state.monitors[0];
-        menu.set_preferred_center(
-            monitor.x_offset + monitor.width / 2,
-            (monitor.top + monitor.bottom) / 2,
-        );
-        let picker_columns = visible_columns
-            .iter()
-            .filter_map(|index| columns.get(*index))
-            .map(|column| (*column).to_owned())
-            .collect::<Vec<_>>();
-        let has_previews = rows.iter().any(|row| row.preview.is_some());
-        let picker_rows = rows
-            .into_iter()
-            .map(|row| rust_nfm::runtime::StructuredPickerRow {
-                cells: visible_columns
-                    .iter()
-                    .map(|index| row.cells.get(*index).cloned().unwrap_or_default())
-                    .collect(),
-                preview: row.preview,
-            })
-            .collect();
-        let task = if has_previews {
-            menu.show_structured_with_previews(picker_columns, picker_rows, None)
-        } else {
-            menu.show_structured(
-                picker_columns,
-                picker_rows.into_iter().map(|row| row.cells).collect(),
-                None,
-            )
-        };
-        match task {
-            Ok(task) => consume_picker_task(task, runtime.menu_session, |_| None),
-            Err(error) => {
-                crate::error_log::report("failed to start structured picker", format!("{error:#}"));
-                return;
-            }
-        }
-        runtime.menu_visible = true;
-        return;
-    }
-    let lines = rows
+    let columns = display
+        .iter()
+        .filter_map(|index| columns.get(*index as usize))
+        .map(|column| (*column).to_owned())
+        .collect();
+    let rows = rows
         .into_iter()
-        .map(|row| {
-            visible_columns
+        .map(|row| crate::egui_data_menu::DataRow {
+            cells: display
                 .iter()
-                .filter_map(|index| {
-                    let name = columns.get(*index)?;
-                    let value = row.cells.get(*index)?;
-                    Some(format!("{name}: {}", value.replace(['\r', '\n'], " ")))
-                })
-                .collect::<Vec<_>>()
-                .join(" | ")
+                .map(|index| row.cells.get(*index as usize).cloned().unwrap_or_default())
+                .collect(),
+            preview: row.preview,
         })
         .collect();
-    let header = visible_columns
-        .iter()
-        .filter_map(|index| columns.get(*index).copied())
-        .collect::<Vec<_>>()
-        .join(" | ");
-    show_string_items(runtime, &header, lines);
+    runtime.show_data_menu(title, columns, rows);
 }
 
 fn local_log_time(value: std::time::SystemTime) -> String {
@@ -947,34 +852,28 @@ fn format_extended_styles(styles: i32) -> String {
 }
 
 pub(crate) fn show_services_menu(runtime: &mut crate::ui::Ui) {
-    let lines = crate::process::list_services().unwrap_or_else(|error| {
+    let mut lines = crate::process::list_services().unwrap_or_else(|error| {
         let message = format!("Unable to enumerate services: {error}");
         error.report();
         vec![message]
     });
-    show_string_items(runtime, "State      Service", lines);
-}
-
-fn show_string_items(runtime: &mut crate::ui::Ui, _header: &str, mut lines: Vec<String>) {
     if lines.is_empty() {
-        lines.push("No entries logged yet".into());
+        lines.push("No services found".into());
     }
-    let rust_values = lines;
-    let monitor = &runtime.configuration.state.monitors[0];
-    if let Some(menu) = &runtime.rust_nfm {
-        menu.set_preferred_center(
-            monitor.x_offset + monitor.width / 2,
-            (monitor.top + monitor.bottom) / 2,
-        );
-        match menu.show_items(rust_values, None) {
-            Ok(task) => consume_picker_task(task, runtime.menu_session, |_| None),
-            Err(error) => {
-                crate::error_log::report("failed to start item picker", format!("{error:#}"));
-                return;
+    let rows = lines
+        .into_iter()
+        .map(|line| {
+            let (state, service) = line
+                .split_once(' ')
+                .filter(|(state, _)| matches!(*state, "RUNNING" | "STOPPED"))
+                .unwrap_or(("", line.as_str()));
+            crate::egui_data_menu::DataRow {
+                cells: vec![state.into(), service.trim_start().into()],
+                preview: None,
             }
-        }
-        runtime.menu_visible = true;
-    }
+        })
+        .collect();
+    runtime.show_data_menu("Services", vec!["State".into(), "Service".into()], rows);
 }
 
 pub(crate) fn bar_snapshot(monitor: usize) -> Option<crate::bar::BarSnapshot> {

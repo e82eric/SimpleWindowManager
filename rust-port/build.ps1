@@ -1,6 +1,7 @@
 param(
     [switch]$Dev,
     [switch]$Timings,
+    [string]$GhosttyRoot = 'C:\src\ghostty2',
     [Parameter(ValueFromRemainingArguments = $true)]
     [string[]]$CargoArgs
 )
@@ -8,16 +9,22 @@ param(
 $ErrorActionPreference = 'Stop'
 $portDirectory = $PSScriptRoot
 $selectedConfig = $env:SWM_CONFIG_RS
-
-if ([string]::IsNullOrWhiteSpace($selectedConfig)) {
-    $localSettings = Join-Path $portDirectory 'build.local.ps1'
-    if (Test-Path -LiteralPath $localSettings) {
-        $SwmConfigRs = $null
-        . $localSettings
-        $selectedConfig = $SwmConfigRs
-    }
+$SwmConfigRs = $null
+$localSettings = Join-Path $portDirectory 'build.local.ps1'
+if (Test-Path -LiteralPath $localSettings) {
+    . $localSettings
 }
-
+if ([string]::IsNullOrWhiteSpace($selectedConfig)) {
+    $selectedConfig = $SwmConfigRs
+}
+if (-not [string]::IsNullOrWhiteSpace($GhosttyRoot)) {
+    $env:GHOSTTY_ROOT = (Resolve-Path -LiteralPath $GhosttyRoot).Path
+}
+if ([string]::IsNullOrWhiteSpace($env:GHOSTTY_ROOT) -and
+    ([string]::IsNullOrWhiteSpace($env:NFM_GHOSTTY_VT_INCLUDE_DIR) -or
+     [string]::IsNullOrWhiteSpace($env:NFM_GHOSTTY_VT_LIB_DIR))) {
+    throw 'ANSI previews require Ghostty VT. Pass -GhosttyRoot <checkout> or set GHOSTTY_ROOT (or both NFM_GHOSTTY_VT_INCLUDE_DIR and NFM_GHOSTTY_VT_LIB_DIR). Build the VT library with zig build -Demit-lib-vt -Doptimize=ReleaseFast -Dvt-features=-kitty-graphics --prefix zig-out/nfm-vt first.'
+}
 if ([string]::IsNullOrWhiteSpace($selectedConfig)) {
     $selectedConfig = Join-Path $portDirectory 'default_user_config.rs'
 } elseif (-not [System.IO.Path]::IsPathRooted($selectedConfig)) {

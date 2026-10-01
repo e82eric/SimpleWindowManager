@@ -76,6 +76,12 @@ pub struct Configuration {
     pub bar_right_padding: i32,
     pub prevent_float_processes: Vec<String>,
     pub cloak_to_hide_all: bool,
+    /// Maximum visible picker results (clamped to 1..=100).
+    pub picker_result_rows: usize,
+    /// Maximum visible preview rows (clamped to 1..=256).
+    pub picker_preview_rows: usize,
+    /// Bat syntax theme for file previews; None uses bat's own settings.
+    pub file_preview_bat_theme: Option<String>,
 }
 
 impl Default for Configuration {
@@ -100,6 +106,9 @@ impl Default for Configuration {
             bar_right_padding: 10,
             prevent_float_processes: Vec::new(),
             cloak_to_hide_all: false,
+            picker_result_rows: 7,
+            picker_preview_rows: 14,
+            file_preview_bat_theme: Some("gruvbox-dark".into()),
         }
     }
 }

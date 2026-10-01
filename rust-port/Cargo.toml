@@ -5,7 +5,17 @@ edition = "2024"
 publish = false
 
 [dependencies]
-rust_nfm = { package = "nfm-rust-win32host", path = "../../RustWin32Host" }
+csv = "1"
+crossbeam-channel = "0.5"
+nfm-picker-sources = { git = "https://github.com/e82eric/npicker", rev = "de012392133660e8678c54afadefaadf1ec4c1b3" }
+nfm-window-egui = { git = "https://github.com/e82eric/npicker", rev = "de012392133660e8678c54afadefaadf1ec4c1b3" }
+nfm-process-egui = { git = "https://github.com/e82eric/npicker", rev = "de012392133660e8678c54afadefaadf1ec4c1b3" }
+nfm-file-system-egui = { git = "https://github.com/e82eric/npicker", rev = "de012392133660e8678c54afadefaadf1ec4c1b3" }
+nfm_file_system = { git = "https://github.com/e82eric/npicker", rev = "de012392133660e8678c54afadefaadf1ec4c1b3" }
+nfm-egui = { git = "https://github.com/e82eric/npicker", rev = "de012392133660e8678c54afadefaadf1ec4c1b3", features = ["opengl"] }
+nfm_search_core = { git = "https://github.com/e82eric/npicker", rev = "de012392133660e8678c54afadefaadf1ec4c1b3" }
+nfm-win32 = { git = "https://github.com/e82eric/npicker", rev = "de012392133660e8678c54afadefaadf1ec4c1b3" }
+nfm-preview = { git = "https://github.com/e82eric/npicker", rev = "de012392133660e8678c54afadefaadf1ec4c1b3", features = ["egui"] }
 skia-safe = "0.97.2"
 serde_json = "1"
 tracing = { version = "0.1", features = ["attributes"] }
@@ -24,6 +34,10 @@ windows = { version = "0.62.2", features = [
 ] }
 windows-sys = { version = "0.61.2", features = [
     "Win32_Foundation",
+    "Win32_UI_Input_Ime",
+    "Win32_System_Memory",
+    "Win32_System_DataExchange",
+    "Win32_Graphics_OpenGL",
     "Win32_Graphics_Dwm",
     "Win32_Graphics_Gdi",
     "Win32_Security",

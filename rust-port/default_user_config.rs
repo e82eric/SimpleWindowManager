@@ -4,6 +4,10 @@ use crate::model::WindowRoutingMode;
 use crate::{Configuration, Layout};
 
 pub fn configure(configuration: &mut Configuration) {
+    // Override these to change picker sizes; available screen space may reduce them.
+    configuration.picker_result_rows = 7;
+    configuration.picker_preview_rows = 14;
+    configuration.file_preview_bat_theme = Some("gruvbox-dark".into());
     use crate::commands::{LALT, LSHIFT, LWIN};
     use windows_sys::Win32::UI::Input::KeyboardAndMouse::*;
 

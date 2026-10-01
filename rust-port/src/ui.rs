@@ -57,6 +57,7 @@ thread_local! { static UI:RefCell<Option<Ui>>=const { RefCell::new(None) }; }
 pub enum Command {
     Action(Action),
     Named(String),
+    MenuRequested { session: u64, name: String },
     Closed { session: u64, restore_focus: bool },
     Window(isize),
     Program(String, bool),
@@ -101,8 +102,8 @@ pub fn is_menu(action: Action) -> bool {
 pub struct Ui {
     pub(crate) menu_session: u64,
     pub configuration: std::sync::Arc<Configuration>,
-    pub rust_nfm: Option<rust_nfm::runtime::PickerRuntime>,
     pub menu_visible: bool,
+    egui_windows: Option<crate::egui_window_menu::WindowMenuHost>,
     bars: Vec<crate::bar::BarWindow>,
     snapshot: Option<std::sync::Arc<crate::worker::Snapshot>>,
 }
@@ -128,17 +129,19 @@ impl Ui {
         MENU_VISIBLE.store(self.menu_visible, Ordering::Release);
     }
     fn request_menu(&mut self, action: Action) {
-        if self.menu_visible {
-            if let Some(menu) = &self.rust_nfm {
+        self.start_menu(action);
+        // A menu without an available source must not leave a closed picker visible.
+        if !self.menu_visible {
+            if let Some(menu) = &self.egui_windows {
                 menu.hide();
             }
-            self.menu_visible = false;
+            crate::worker::send(crate::worker::Command::MenuClosed);
         }
-        self.start_menu(action);
     }
     fn start_menu(&mut self, action: Action) {
         use Action::*;
         self.menu_session = self.menu_session.wrapping_add(1);
+        self.menu_visible = false;
         match action {
             ShowWindows => self.run_new_windows_menu(),
             ShowPrograms(elevated) => self.run_program_launcher_menu(elevated),
@@ -161,41 +164,40 @@ impl Ui {
         self.publish_menu_visibility();
     }
     fn hide(&mut self) {
-        self.menu_session = self.menu_session.wrapping_add(1);
-        if let Some(menu) = &self.rust_nfm {
+        if let Some(menu) = &self.egui_windows {
             menu.hide();
         }
+        self.menu_session = self.menu_session.wrapping_add(1);
         self.menu_visible = false;
         self.publish_menu_visibility();
         crate::worker::send(crate::worker::Command::MenuClosed);
     }
     fn run_new_windows_menu(&mut self) {
-        let monitor = &self.configuration.state.monitors[0];
-        if let Some(menu) = &self.rust_nfm {
-            menu.set_preferred_center(
-                monitor.x_offset + monitor.width / 2,
-                (monitor.top + monitor.bottom) / 2,
-            );
-            match menu.show_windows() {
-                Ok(task) => {
-                    crate::platform::consume_picker_task(task, self.menu_session, |response| {
-                        match response {
-                            rust_nfm::request::PickerResponse::Selected(item) => {
-                                Some(Command::Window(item.native_window))
-                            }
-                            _ => None,
-                        }
-                    });
-                    self.menu_visible = true;
-                }
-                Err(error) => {
-                    crate::error_log::report("failed to start window picker", format!("{error:#}"))
-                }
+        use crate::egui_window_menu::ScreenBounds;
+        let Some(host) = self.egui_windows.as_ref() else {
+            return;
+        };
+        let Some(monitor) = self.configuration.state.monitors.first() else {
+            return;
+        };
+        let bounds = ScreenBounds {
+            left: monitor.x_offset,
+            top: monitor.top,
+            width: monitor.width,
+            height: monitor.bottom - monitor.top,
+        };
+        match host.show(self.menu_session, bounds) {
+            Ok(()) => {
+                self.menu_visible = true;
+            }
+            Err(error) => {
+                crate::error_log::report("failed to show egui window picker", error);
+                self.egui_windows = None;
             }
         }
     }
-
     fn run_program_launcher_menu(&mut self, elevated: bool) {
+        use crate::egui_window_menu::ScreenBounds;
         let Some(definition) = self
             .configuration
             .program_launchers
@@ -204,92 +206,152 @@ impl Ui {
         else {
             return;
         };
-        let monitor = &self.configuration.state.monitors[0];
-        if let Some(menu) = &self.rust_nfm {
-            menu.set_preferred_center(
-                monitor.x_offset + monitor.width / 2,
-                (monitor.top + monitor.bottom) / 2,
-            );
-            match menu.show_programs(definition.directories.clone()) {
-                Ok(task) => {
-                    crate::platform::consume_picker_task(task, self.menu_session, move |response| {
-                        match response {
-                            rust_nfm::request::PickerResponse::Selected(value) => {
-                                Some(Command::Program(value, elevated))
-                            }
-                            _ => None,
-                        }
-                    })
-                }
-                Err(error) => {
-                    crate::error_log::report(
-                        "failed to start program picker",
-                        format!("{error:#}"),
-                    );
-                    return;
-                }
-            }
-            self.menu_visible = true;
-        }
-    }
-
-    fn run_process_menu(&mut self) {
-        let monitor = &self.configuration.state.monitors[0];
-        if let Some(menu) = &self.rust_nfm {
-            menu.set_preferred_center(
-                monitor.x_offset + monitor.width / 2,
-                (monitor.top + monitor.bottom) / 2,
-            );
-            match menu.show_processes() {
-                Ok(task) => {
-                    crate::platform::consume_picker_task(task, self.menu_session, |_| None);
-                    self.menu_visible = true;
-                }
-                Err(error) => {
-                    crate::error_log::report("failed to start process picker", format!("{error:#}"))
-                }
-            }
+        let directories = definition.directories.clone();
+        let Some(host) = self.egui_windows.as_ref() else {
             return;
+        };
+        let Some(monitor) = self.configuration.state.monitors.first() else {
+            return;
+        };
+        let bounds = ScreenBounds {
+            left: monitor.x_offset,
+            top: monitor.top,
+            width: monitor.width,
+            height: monitor.bottom - monitor.top,
+        };
+        match host.show_programs(
+            self.menu_session,
+            bounds,
+            directories,
+            elevated,
+            self.configuration.file_preview_bat_theme.clone(),
+        ) {
+            Ok(()) => {
+                self.menu_visible = true;
+            }
+            Err(error) => {
+                crate::error_log::report("failed to show egui program picker", error);
+                self.egui_windows = None;
+            }
         }
     }
-
+    fn run_process_menu(&mut self) {
+        use crate::egui_window_menu::ScreenBounds;
+        let Some(host) = self.egui_windows.as_ref() else {
+            return;
+        };
+        let Some(monitor) = self.configuration.state.monitors.first() else {
+            return;
+        };
+        let bounds = ScreenBounds {
+            left: monitor.x_offset,
+            top: monitor.top,
+            width: monitor.width,
+            height: monitor.bottom - monitor.top,
+        };
+        match host.show_processes(self.menu_session, bounds) {
+            Ok(()) => {
+                self.menu_visible = true;
+            }
+            Err(error) => {
+                crate::error_log::report("failed to show egui process picker", error);
+                self.egui_windows = None;
+            }
+        }
+    }
     fn run_services_menu(&mut self) {
         crate::platform::show_services_menu(self);
     }
 
     fn run_file_system_menu(&mut self) {
-        let monitor = &self.configuration.state.monitors[0];
-        if let Some(menu) = &self.rust_nfm {
-            menu.set_preferred_center(
-                monitor.x_offset + monitor.width / 2,
-                (monitor.top + monitor.bottom) / 2,
-            );
-            let options = rust_nfm::runtime::FileSystemPickerOptions {
-                max_depth: 5,
-                preview_visible: true,
-                ..Default::default()
-            };
-            match menu.show_file_system(options) {
-                Ok(task) => {
-                    crate::platform::consume_picker_task(task, self.menu_session, |response| {
-                        match response {
-                            rust_nfm::request::PickerResponse::Selected(value) => {
-                                Some(Command::Program(value, false))
-                            }
-                            _ => None,
-                        }
-                    });
-                    self.menu_visible = true;
-                }
-                Err(error) => {
-                    crate::error_log::report("failed to start file picker", format!("{error:#}"))
-                }
+        use crate::egui_window_menu::ScreenBounds;
+        let Some(host) = self.egui_windows.as_ref() else {
+            return;
+        };
+        let Some(monitor) = self.configuration.state.monitors.first() else {
+            return;
+        };
+        let bounds = ScreenBounds {
+            left: monitor.x_offset,
+            top: monitor.top,
+            width: monitor.width,
+            height: monitor.bottom - monitor.top,
+        };
+        let options = nfm_file_system::FileSystemPickerOptions {
+            bat_theme: self.configuration.file_preview_bat_theme.clone(),
+            max_depth: 5,
+            preview_visible: true,
+            ..Default::default()
+        };
+        match host.show_file_system(self.menu_session, bounds, options) {
+            Ok(()) => {
+                self.menu_visible = true;
+            }
+            Err(error) => {
+                crate::error_log::report("failed to show egui file picker", error);
+                self.egui_windows = None;
             }
         }
     }
-
     pub fn run_commands_menu(&mut self) {
-        crate::platform::show_commands_menu(self);
+        use crate::egui_window_menu::ScreenBounds;
+        let Some(host) = self.egui_windows.as_ref() else {
+            return;
+        };
+        let Some(monitor) = self.configuration.state.monitors.first() else {
+            return;
+        };
+        let bounds = ScreenBounds {
+            left: monitor.x_offset,
+            top: monitor.top,
+            width: monitor.width,
+            height: monitor.bottom - monitor.top,
+        };
+        match host.show_commands_with_menu_actions(
+            self.menu_session,
+            bounds,
+            crate::platform::command_menu_rows(self),
+            self.configuration
+                .commands
+                .iter()
+                .filter(|command| is_menu(command.action))
+                .map(|command| command.name.clone())
+                .collect(),
+        ) {
+            Ok(()) => {
+                self.menu_visible = true;
+            }
+            Err(error) => {
+                crate::error_log::report("failed to show egui commands picker", error);
+                self.egui_windows = None;
+            }
+        }
+    }
+    pub(crate) fn show_data_menu(
+        &mut self,
+        title: &str,
+        columns: Vec<String>,
+        rows: Vec<crate::egui_data_menu::DataRow>,
+    ) {
+        let Some(host) = self.egui_windows.as_ref() else {
+            return;
+        };
+        let Some(monitor) = self.configuration.state.monitors.first() else {
+            return;
+        };
+        let bounds = crate::egui_window_menu::ScreenBounds {
+            left: monitor.x_offset,
+            top: monitor.top,
+            width: monitor.width,
+            height: monitor.bottom - monitor.top,
+        };
+        match host.show_data(self.menu_session, bounds, title.into(), columns, rows) {
+            Ok(()) => self.menu_visible = true,
+            Err(error) => {
+                crate::error_log::report("failed to show egui data picker", error);
+                self.egui_windows = None;
+            }
+        }
     }
     fn run_float_logs_menu(&mut self) {
         crate::platform::show_float_logs_menu(self);
@@ -306,6 +368,43 @@ impl Ui {
         crate::platform::show_configuration_state_menu(self);
     }
 }
+fn start_egui_window_host(
+    configuration: &Configuration,
+) -> Result<crate::egui_window_menu::WindowMenuHost, String> {
+    use crate::egui_window_menu::{Outcome, WindowMenuHost};
+    WindowMenuHost::start_with_rows(
+        configuration.picker_result_rows,
+        configuration.picker_preview_rows,
+        |session, outcome| {
+            if let Outcome::MenuRequested(name) = outcome {
+                post(Command::MenuRequested { session, name });
+                return;
+            }
+            let selected = match outcome {
+                Outcome::Selected(hwnd) => Some(Command::Window(hwnd)),
+                Outcome::FileSelected(path) => Some(Command::Program(path, false)),
+                Outcome::ProgramSelected { path, elevated } => {
+                    Some(Command::Program(path, elevated))
+                }
+                Outcome::CommandSelected(name) => Some(Command::Named(name)),
+                Outcome::MenuRequested(_) => unreachable!(),
+                Outcome::Cancelled => None,
+                Outcome::Failed(error) => {
+                    crate::error_log::report("egui picker failed", error);
+                    None
+                }
+            };
+            post(Command::Closed {
+                session,
+                restore_focus: selected.is_none(),
+            });
+            if let Some(command) = selected {
+                post(command);
+            }
+        },
+    )
+}
+
 pub fn initialize(
     configuration: Configuration,
     bindings: Vec<KeyBinding>,
@@ -327,16 +426,23 @@ pub fn initialize(
             .map(|bar| (bar.monitor_index, bar.hwnd))
             .collect(),
     );
-    let rust_nfm = rust_nfm::runtime::PickerRuntime::start().ok();
+    // Prepare the native window and GL context before the first shortcut, like
+    // other persistent UI resources. The tool window remains hidden until requested.
+    let egui_windows = start_egui_window_host(&configuration)
+        .map_err(|error| {
+            crate::error_log::report("failed to initialize egui menu host", error);
+        })
+        .ok();
     UI.with(|slot| {
-        *slot.borrow_mut() = Some(Ui {
+        let ui = Ui {
             menu_session: 0,
             configuration: std::sync::Arc::new(configuration),
-            rust_nfm,
+            egui_windows,
             menu_visible: false,
             bars,
             snapshot: None,
-        })
+        };
+        *slot.borrow_mut() = Some(ui)
     });
     Ok(receiver)
 }
@@ -367,6 +473,24 @@ pub fn pump(receiver: &Receiver<Command>) {
                 continue;
             }
             match command {
+                Command::MenuRequested { session, name } => {
+                    if session != ui.menu_session || !ui.menu_visible {
+                        continue;
+                    }
+                    let action = ui
+                        .configuration
+                        .commands
+                        .iter()
+                        .find(|command| command.name == name)
+                        .map(|command| command.action);
+                    if let Some(action) = action.filter(|action| is_menu(*action)) {
+                        if let Err(error) = ui.execute(action) {
+                            error.report();
+                        }
+                    } else {
+                        ui.hide();
+                    }
+                }
                 Command::Action(action) => {
                     if let Err(error) = ui.execute(action) {
                         error.report();
@@ -396,7 +520,7 @@ pub fn pump(receiver: &Receiver<Command>) {
                 }
                 Command::Focus => {
                     if ui.menu_visible {
-                        if let Some(menu) = &ui.rust_nfm {
+                        if let Some(menu) = &ui.egui_windows {
                             menu.focus();
                         }
                     }
@@ -425,7 +549,6 @@ pub fn shutdown() {
                     DestroyWindow(bar.hwnd as _);
                 }
             }
-            drop(ui.rust_nfm);
         }
     });
 }

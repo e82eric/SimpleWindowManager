@@ -694,7 +694,7 @@ impl WindowManagerState {
             };
             if target != position {
                 self.swap_client_nodes_data(client, clients[target]);
-                self.workspaces[workspace.0].selected = Some(clients[target]);
+                // Grid Enter swaps windows while focus stays at the selected slot.
             }
         } else {
             let source = if client == clients[0] {
@@ -1084,6 +1084,62 @@ mod tests {
             [clients[0], clients[2], clients[3], clients[4], clients[1]]
         );
         assert_eq!(state.workspaces[workspace.0].selected, Some(clients[0]));
+    }
+
+    #[test]
+    fn grid_move_to_main_keeps_focus_at_the_selected_slot() {
+        for (count, position, target) in [
+            (1, 0, 0),
+            (2, 0, 1),
+            (2, 1, 0),
+            (4, 0, 2),
+            (4, 1, 3),
+            (4, 2, 0),
+            (4, 3, 1),
+            (5, 0, 2),
+            (5, 1, 3),
+            (5, 2, 0),
+            (5, 3, 1),
+            (5, 4, 1),
+        ] {
+            let (mut state, workspace, clients) = state_with_clients(count);
+            state.workspaces[workspace.0].layout = Layout::Grid;
+            state.workspaces[workspace.0].selected = Some(clients[position]);
+            let original_hwnds: Vec<_> = clients
+                .iter()
+                .map(|id| state.clients[id.0].as_ref().unwrap().data.hwnd)
+                .collect();
+
+            state.layout_move_client_to_main(workspace, clients[position]);
+
+            assert_eq!(state.workspaces[workspace.0].clients, clients);
+            assert_eq!(
+                state.workspaces[workspace.0].selected,
+                Some(clients[position]),
+                "selection moved for grid size {count}, slot {position}"
+            );
+            for (index, id) in clients.iter().enumerate() {
+                let expected = if index == position {
+                    original_hwnds[target]
+                } else if index == target {
+                    original_hwnds[position]
+                } else {
+                    original_hwnds[index]
+                };
+                assert_eq!(state.clients[id.0].as_ref().unwrap().data.hwnd, expected);
+            }
+            // Repeating the shortcut restores the windows and keeps the same slot.
+            state.layout_move_client_to_main(workspace, clients[position]);
+            assert_eq!(
+                state.workspaces[workspace.0].selected,
+                Some(clients[position])
+            );
+            let restored: Vec<_> = clients
+                .iter()
+                .map(|id| state.clients[id.0].as_ref().unwrap().data.hwnd)
+                .collect();
+            assert_eq!(restored, original_hwnds);
+        }
     }
 
     #[test]
