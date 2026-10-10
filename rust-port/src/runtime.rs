@@ -1524,9 +1524,8 @@ fn window_manager_try_add_window(
         workspace: placeholder_workspace,
     };
     client.data.use_cloak_to_hide = client_should_use_cloak_to_hide(configuration, &client);
-    if client.data.use_cloak_to_hide {
-        client.data.is_minimized = false;
-    }
+    // Cloaking controls workspace visibility; preserve the window's actual
+    // minimized state so startup does not reserve a tile for it.
     let workspace = window_manager_find_client_workspace_using_filters(configuration, &client);
     if let Some(workspace) = workspace {
         let was_minimized = client.data.is_minimized;
