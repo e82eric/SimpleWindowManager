@@ -117,7 +117,7 @@ configuration as normal output before building:
 ANSI previews require the standalone Ghostty VT library. In the Ghostty checkout,
 build it once with `zig build -Demit-lib-vt -Doptimize=ReleaseFast
 -Dvt-features=-kitty-graphics --prefix zig-out/nfm-vt` (as one command).
-Disabling Kitty graphics avoids image-codec symbol collisions with SWM's Skia.
+The shared VT preview build currently disables Kitty graphics.
 The wrapper currently defaults to `C:\src\ghostty2`; pass `-GhosttyRoot` to
 override it. Direct Cargo builds use `GHOSTTY_ROOT` instead.
 Explicit `NFM_GHOSTTY_VT_INCLUDE_DIR` and
@@ -167,7 +167,13 @@ actions, drive roots, and typed snapshots. `nfm-preview` supplies file previews
 through its optional egui adapter, and `nfm-file-system` owns filesystem options
 and scanning. SWM does not depend on `nfm-rust-win32host` or compile its legacy
 picker runtime, view model, DLL entry points, or Skia menu renderer.
-Neither `rust_nfm.dll` nor `LibNfm.dll` is required. Skia still renders the bar.
+Neither `rust_nfm.dll` nor `LibNfm.dll` is required. The bar also uses egui and
+OpenGL; SWM has no Skia dependency. Each bar owns a persistent OpenGL 3.3 context
+and font atlas on its Win32 window thread. Its existing pixel layout, workspace
+click targets, 1500 ms status timer, and non-activating tool window remain intact.
+Configured Windows fonts are loaded through GDI, with installed JetBrains Nerd
+Fonts and egui's default fonts as fallbacks. Text and shadows may differ slightly
+from the former Skia renderer.
 The C build remains independent.
 
 The standalone restore helper is built at

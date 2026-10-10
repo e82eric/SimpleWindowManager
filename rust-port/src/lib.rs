@@ -1,6 +1,7 @@
 extern crate self as simple_window_manager_rs;
 
 pub mod bar;
+mod bar_renderer;
 pub mod border;
 pub mod cloak;
 pub mod commands;
@@ -9,11 +10,11 @@ pub mod drop_target;
 mod egui_command_menu;
 mod egui_data_menu;
 mod egui_file_menu;
-pub mod file_preview;
 mod egui_native;
 mod egui_process_menu;
 pub mod egui_window_menu;
 pub mod error_log;
+pub mod file_preview;
 mod input;
 pub mod layout;
 pub mod list_windows;

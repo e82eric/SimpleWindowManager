@@ -17,7 +17,6 @@ nfm_search_core = { git = "https://github.com/e82eric/npicker", rev = "9f98b4487
 nfm-win32 = { git = "https://github.com/e82eric/npicker", rev = "9f98b448717cf24fe58c21f531a3245cb7a97127" }
 nfm-preview-file = { git = "https://github.com/e82eric/npicker", rev = "9f98b448717cf24fe58c21f531a3245cb7a97127" }
 nfm-preview = { git = "https://github.com/e82eric/npicker", rev = "9f98b448717cf24fe58c21f531a3245cb7a97127", features = ["egui"] }
-skia-safe = "0.97.2"
 serde_json = "1"
 tracing = { version = "0.1", features = ["attributes"] }
 tracing-appender = "0.2"

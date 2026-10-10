@@ -1,3 +1,5 @@
+use nfm_egui::egui;
+
 #[derive(Clone, Debug)]
 pub struct BarSnapshot {
     pub monitor_index: usize,
@@ -100,7 +102,13 @@ unsafe extern "system" fn bar_message_loop(
                 unsafe { EndPaint(hwnd, &paint) };
                 return 0;
             }
-            paint_skia(dc, client.right, client.bottom, &snapshot);
+            if let Err(error) = crate::bar_renderer::paint(
+                hwnd,
+                [client.right.max(0) as u32, client.bottom.max(0) as u32],
+                &snapshot,
+            ) {
+                crate::error_log::report("egui bar paint", error);
+            }
             // EndPaint is documented to always return nonzero.
             unsafe { EndPaint(hwnd, &paint) };
             0
@@ -112,6 +120,17 @@ unsafe extern "system" fn bar_message_loop(
             0
         }
         WM_ERASEBKGND => 1,
+        WM_MOUSEACTIVATE => MA_NOACTIVATE as isize,
+        WM_SIZE => {
+            unsafe {
+                InvalidateRect(hwnd, std::ptr::null(), 0);
+            }
+            0
+        }
+        WM_NCDESTROY => {
+            crate::bar_renderer::detach(hwnd);
+            unsafe { DefWindowProcW(hwnd, message, wparam, lparam) }
+        }
         WM_LBUTTONDOWN => {
             unsafe { windows_sys::Win32::Foundation::SetLastError(0) };
             let userdata = unsafe { GetWindowLongPtrW(hwnd, GWLP_USERDATA) };
@@ -178,99 +197,75 @@ fn workspace_at_x(snapshot: &BarSnapshot, x: i32) -> Option<usize> {
     None
 }
 
-fn icon_tag(_index: usize, configured: &str, _is_icon: bool) -> String {
-    configured.to_owned()
-}
-
-fn paint_skia(
-    dc: windows_sys::Win32::Graphics::Gdi::HDC,
-    width: i32,
-    height: i32,
-    snapshot: &BarSnapshot,
-) {
-    use skia_safe::{Font, FontMgr, FontStyle, Paint, Rect, surfaces};
-    use windows_sys::Win32::Graphics::Gdi::{
-        BI_RGB, BITMAPINFO, BITMAPINFOHEADER, DIB_RGB_COLORS, SRCCOPY, StretchDIBits,
-    };
-    if width <= 0 || height <= 0 {
-        return;
-    }
-    let Some(mut surface) = surfaces::raster_n32_premul((width, height)) else {
-        return;
-    };
-    let canvas = surface.canvas();
-    // canvas.clear(skia_safe::Color::from_rgb(0x1d, 0x20, 0x21));
-    canvas.clear(skia_safe::Color::from_rgb(0x3c, 0x38, 0x36));
-
-    let manager = FontMgr::default();
-    let typeface = resolve_bar_typeface(&manager, &snapshot.font_name, FontStyle::normal())
-        .or_else(|| manager.legacy_make_typeface(None, FontStyle::normal()));
-    let Some(typeface) = typeface else {
-        return;
-    };
-    let mut normal_font = Font::new(typeface.clone(), snapshot.normal_font_size as f32);
-    normal_font.set_subpixel(true);
-    let mut icon_font = Font::new(typeface, snapshot.icon_font_size as f32);
-    icon_font.set_subpixel(true);
-
+pub(super) fn paint_bar(ui: &mut egui::Ui, size: [u32; 2], snapshot: &BarSnapshot) {
+    use egui::{Color32, FontFamily, FontId, Rect, pos2};
+    let canvas = ui.ctx().layer_painter(egui::LayerId::background());
+    let normal_font = FontId::new(
+        snapshot.normal_font_size.max(1) as f32,
+        FontFamily::Name("bar".into()),
+    );
+    let icon_font = FontId::new(
+        snapshot.icon_font_size.max(1) as f32,
+        FontFamily::Name("bar".into()),
+    );
+    let rect = |left, top, right, bottom| Rect::from_min_max(pos2(left, top), pos2(right, bottom));
     let top = 4.0;
-    let bottom = height as f32 - 4.0;
+    let bottom = size[1] as f32 - 4.0;
     let groups = tag_groups(snapshot);
     for (start, end, left, right) in &groups {
-        let region = Rect::new(*left, top, *right, bottom);
-        draw_region(canvas, region, snapshot.selected_monitor, false);
+        draw_region(
+            &canvas,
+            rect(*left, top, *right, bottom),
+            snapshot.selected_monitor,
+            false,
+        );
         for index in *start..*end {
             let (_, tag, selected, has_clients, is_icon) = &snapshot.tags[index];
             let item_left = *left + REGION_PADDING + (index - *start) as f32 * TAG_WIDTH;
-            let item = Rect::new(item_left, top + 3.0, item_left + TAG_WIDTH, bottom - 3.0);
+            let item = rect(item_left, top + 3.0, item_left + TAG_WIDTH, bottom - 3.0);
             if *selected {
-                let mut selected_paint = Paint::default();
-                selected_paint.set_anti_alias(true);
-                selected_paint.set_color(if snapshot.selected_monitor {
-                    skia_safe::Color::from_rgb(0x28, 0x28, 0x28)
-                } else {
-                    skia_safe::Color::from_rgb(0x66, 0x5c, 0x54)
-                });
-                canvas.draw_round_rect(item, 7.0, 7.0, &selected_paint);
+                canvas.rect_filled(
+                    item,
+                    7,
+                    if snapshot.selected_monitor {
+                        Color32::from_rgb(0x28, 0x28, 0x28)
+                    } else {
+                        Color32::from_rgb(0x66, 0x5c, 0x54)
+                    },
+                );
             }
             let color = if snapshot.selected_monitor {
                 if *selected {
-                    skia_safe::Color::from_rgb(0xeb, 0xdb, 0xb2)
+                    Color32::from_rgb(0xeb, 0xdb, 0xb2)
                 } else {
-                    skia_safe::Color::from_rgb(0x28, 0x28, 0x28)
+                    Color32::from_rgb(0x28, 0x28, 0x28)
                 }
             } else if *selected {
-                skia_safe::Color::from_rgb(0xeb, 0xdb, 0xb2)
+                Color32::from_rgb(0xeb, 0xdb, 0xb2)
             } else {
-                skia_safe::Color::from_rgb(0x92, 0x83, 0x74)
+                Color32::from_rgb(0x92, 0x83, 0x74)
             };
-            let display_tag = icon_tag(index, tag, *is_icon);
             draw_centered_text(
-                canvas,
-                &display_tag,
-                // Reserve the same marker space for empty and occupied tags so
-                // their labels stay aligned as workspace occupancy changes.
-                Rect::new(item.left, item.top, item.right, item.bottom - 6.0),
+                &canvas,
+                tag,
+                rect(item.left(), item.top(), item.right(), item.bottom() - 6.0),
                 if *is_icon { &icon_font } else { &normal_font },
                 color,
             );
             if *has_clients {
-                let mut marker = Paint::default();
-                marker.set_anti_alias(true);
-                // Match the label contrast, including light markers in the
-                // selected workspace's dark pill.
-                marker.set_color(color);
-                let underline = Rect::new(
-                    item.center_x() - 6.0,
-                    item.bottom - 4.0,
-                    item.center_x() + 6.0,
-                    item.bottom - 1.0,
+                canvas.rect_filled(
+                    rect(
+                        item.center().x - 6.0,
+                        item.bottom() - 4.0,
+                        item.center().x + 6.0,
+                        item.bottom() - 1.0,
+                    ),
+                    egui::CornerRadius::same(2),
+                    color,
                 );
-                canvas.draw_round_rect(underline, 1.5, 1.5, &marker);
             }
         }
     }
-
     let mut left = groups
         .last()
         .map(|group| group.3 + REGION_GAP)
@@ -296,187 +291,121 @@ fn paint_skia(
             )
         })
         .collect::<String>();
-    let status_width = text_width(&normal_font, &status) + REGION_PADDING * 2.0;
-    let status_left = (width as f32 - BAR_MARGIN - status_width).max(left);
-
-    let info_width =
-        (text_width(&normal_font, &snapshot.workspace_info) + REGION_PADDING * 2.0).max(180.0);
-    let info = Rect::new(left, top, left + info_width, bottom);
+    let status_width = text_width(&canvas, &normal_font, &status) + REGION_PADDING * 2.0;
+    let status_left = (size[0] as f32 - BAR_MARGIN - status_width).max(left);
+    let info_width = (text_width(&canvas, &normal_font, &snapshot.workspace_info)
+        + REGION_PADDING * 2.0)
+        .max(180.0);
+    let info = rect(left, top, left + info_width, bottom);
     let region_text = if snapshot.selected_monitor {
-        skia_safe::Color::from_rgb(0xeb, 0xdb, 0xb2)
+        Color32::from_rgb(0xeb, 0xdb, 0xb2)
     } else {
-        skia_safe::Color::from_rgb(0xa8, 0x99, 0x84)
+        Color32::from_rgb(0xa8, 0x99, 0x84)
     };
-    draw_region(canvas, info, false, false);
+    draw_region(&canvas, info, false, false);
     draw_centered_text(
-        canvas,
+        &canvas,
         &snapshot.workspace_info,
         info,
         &normal_font,
         region_text,
     );
-    left = info.right + REGION_GAP;
-
-    let desired_focus =
-        (text_width(&normal_font, &snapshot.focused_window) + REGION_PADDING * 2.0).max(240.0);
+    left = info.right() + REGION_GAP;
+    let desired_focus = (text_width(&canvas, &normal_font, &snapshot.focused_window)
+        + REGION_PADDING * 2.0)
+        .max(240.0);
     let available_right = status_left - REGION_GAP;
     let focus_width = desired_focus.min((available_right - left).max(0.0));
-    let centered_left = width as f32 / 2.0 - focus_width / 2.0;
+    let centered_left = size[0] as f32 / 2.0 - focus_width / 2.0;
     let focus_left = centered_left
         .max(left)
         .min((available_right - focus_width).max(left));
-    let focus_right = focus_left + focus_width;
     if focus_width > 0.0 {
-        let focus = Rect::new(focus_left, top, focus_right, bottom);
+        let focus = rect(focus_left, top, focus_left + focus_width, bottom);
         draw_region(
-            canvas,
+            &canvas,
             focus,
             false,
             snapshot.selected_monitor && !snapshot.focused_window.is_empty(),
         );
         draw_centered_text(
-            canvas,
+            &canvas,
             &snapshot.focused_window,
             focus,
             &normal_font,
             region_text,
         );
     }
-
-    if status_left < width as f32 - BAR_MARGIN {
-        let region = Rect::new(status_left, top, width as f32 - BAR_MARGIN, bottom);
-        draw_region(canvas, region, false, false);
-        draw_centered_text(canvas, &status, region, &normal_font, region_text);
-    }
-    let Some(pixmap) = surface.peek_pixels() else {
-        return;
-    };
-    let Some(bytes) = pixmap.bytes() else {
-        return;
-    };
-    let mut bitmap = BITMAPINFO {
-        bmiHeader: BITMAPINFOHEADER {
-            biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
-            biWidth: width,
-            biHeight: -height,
-            biPlanes: 1,
-            biBitCount: 32,
-            biCompression: BI_RGB,
-            ..Default::default()
-        },
-        ..Default::default()
-    };
-    unsafe {
-        let copied = StretchDIBits(
-            dc,
-            0,
-            0,
-            width,
-            height,
-            0,
-            0,
-            width,
-            height,
-            bytes.as_ptr().cast(),
-            &mut bitmap,
-            DIB_RGB_COLORS,
-            SRCCOPY,
-        );
-        if copied == -1 {
-            crate::error_log::last_win32("StretchDIBits(bar) failed");
-        }
+    if status_left < size[0] as f32 - BAR_MARGIN {
+        let region = rect(status_left, top, size[0] as f32 - BAR_MARGIN, bottom);
+        draw_region(&canvas, region, false, false);
+        draw_centered_text(&canvas, &status, region, &normal_font, region_text);
     }
 }
 
-fn resolve_bar_typeface(
-    manager: &skia_safe::FontMgr,
-    family: &str,
-    style: skia_safe::FontStyle,
-) -> Option<skia_safe::Typeface> {
-    let supports_bar_icons = |face: &skia_safe::Typeface| {
-        ['\u{f028}', '\u{ea7a}', '\u{f127}', '\u{f128}']
-            .into_iter()
-            .all(|character| face.unichar_to_glyph(character as i32) != 0)
-    };
-    let named = manager.legacy_make_typeface(family, style);
-    if named.as_ref().is_some_and(supports_bar_icons) {
-        return named;
-    }
-    if let Some(fonts) = std::env::var_os("LOCALAPPDATA").map(|root| {
-        std::path::PathBuf::from(root)
-            .join("Microsoft")
-            .join("Windows")
-            .join("Fonts")
-    }) {
-        for file in [
-            "JetBrainsMonoNLNerdFontPropo-Regular.ttf",
-            "JetBrainsMonoNerdFontPropo-Regular.ttf",
-            "JetBrainsMonoNLNerdFontMono-Regular.ttf",
-        ] {
-            if let Ok(bytes) = std::fs::read(fonts.join(file))
-                && let Some(face) = manager.new_from_data(&bytes, None)
-                && supports_bar_icons(&face)
-            {
-                return Some(face);
-            }
-        }
-    }
-    named
-}
-
-fn text_width(font: &skia_safe::Font, text: &str) -> f32 {
-    font.measure_str(text, None).0
+fn text_width(canvas: &egui::Painter, font: &egui::FontId, text: &str) -> f32 {
+    canvas
+        .layout_no_wrap(text.to_owned(), font.clone(), egui::Color32::WHITE)
+        .size()
+        .x
 }
 
 fn draw_region(
-    canvas: &skia_safe::Canvas,
-    rect: skia_safe::Rect,
+    canvas: &egui::Painter,
+    rect: egui::Rect,
     blue_background: bool,
     yellow_outline: bool,
 ) {
-    use skia_safe::{Color, Paint};
-    let mut shadow = Paint::default();
-    shadow.set_anti_alias(true);
-    shadow.set_color(Color::from_argb(45, 0, 0, 0));
-    shadow.set_mask_filter(skia_safe::MaskFilter::blur(
-        skia_safe::BlurStyle::Normal,
-        2.5,
-        true,
-    ));
-    canvas.draw_round_rect(rect.with_offset((0.0, 2.0)), 8.0, 8.0, &shadow);
-
-    let mut panel = Paint::default();
-    panel.set_anti_alias(true);
-    panel.set_color(if blue_background {
-        Color::from_rgb(0x83, 0xa5, 0x98)
-    } else {
-        Color::from_rgb(0x28, 0x28, 0x28)
-    });
-    canvas.draw_round_rect(rect, 8.0, 8.0, &panel);
+    use egui::{Color32, Stroke, StrokeKind};
+    canvas.add(
+        egui::epaint::Shadow {
+            offset: [0, 2],
+            blur: 5,
+            spread: 0,
+            color: Color32::from_black_alpha(45),
+        }
+        .as_shape(rect, 8),
+    );
+    canvas.rect_filled(
+        rect,
+        8,
+        if blue_background {
+            Color32::from_rgb(0x83, 0xa5, 0x98)
+        } else {
+            Color32::from_rgb(0x28, 0x28, 0x28)
+        },
+    );
     if yellow_outline {
-        let mut outline = Paint::default();
-        outline.set_anti_alias(true);
-        outline.set_style(skia_safe::paint::Style::Stroke);
-        outline.set_stroke_width(1.5);
-        outline.set_color(Color::from_rgb(0xfa, 0xbd, 0x2f));
-        canvas.draw_round_rect(rect.with_inset((0.75, 0.75)), 7.25, 7.25, &outline);
+        canvas.rect_stroke(
+            rect.shrink(0.75),
+            egui::CornerRadius::same(7),
+            Stroke::new(1.5, Color32::from_rgb(0xfa, 0xbd, 0x2f)),
+            StrokeKind::Middle,
+        );
     }
 }
 
 fn draw_centered_text(
-    canvas: &skia_safe::Canvas,
+    canvas: &egui::Painter,
     text: &str,
-    rect: skia_safe::Rect,
-    font: &skia_safe::Font,
-    color: skia_safe::Color,
+    rect: egui::Rect,
+    font: &egui::FontId,
+    color: egui::Color32,
 ) {
-    let mut paint = skia_safe::Paint::default();
-    paint.set_anti_alias(true);
-    paint.set_color(color);
-    let (width, bounds) = font.measure_str(text, Some(&paint));
-    let x = rect.left + (rect.width() - width) / 2.0;
-    let y = rect.center_y() - (bounds.top + bounds.bottom) / 2.0;
-    canvas.draw_str(text, (x, y), font, &paint);
+    // Clip long titles horizontally so they cannot cover adjacent regions.
+    // Keep the bar's vertical clip: short workspace-label regions reserve room
+    // for occupancy markers but must not crop the font's ascenders/descenders.
+    let clip = egui::Rect::from_min_max(
+        egui::pos2(rect.left(), canvas.clip_rect().top()),
+        egui::pos2(rect.right(), canvas.clip_rect().bottom()),
+    );
+    canvas.with_clip_rect(clip).text(
+        rect.center(),
+        egui::Align2::CENTER_CENTER,
+        text,
+        font.clone(),
+        color,
+    );
 }
 
 pub fn create_bars(
@@ -497,6 +426,7 @@ pub fn create_bars(
     }
     let mut class: WNDCLASSEXW = unsafe { zeroed() };
     class.cbSize = size_of::<WNDCLASSEXW>() as u32;
+    class.style = CS_OWNDC;
     class.lpfnWndProc = Some(bar_message_loop);
     class.hInstance = instance;
     class.lpszClassName = class_name.as_ptr();
@@ -527,18 +457,10 @@ pub fn create_bars(
     {
         let hwnd = unsafe {
             CreateWindowExW(
-                WS_EX_TOOLWINDOW | WS_EX_CONTROLPARENT | WS_EX_COMPOSITED,
+                WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
                 class_name.as_ptr(),
                 title.as_ptr(),
-                !((WS_CAPTION
-                    | WS_THICKFRAME
-                    | WS_MINIMIZE
-                    | WS_MAXIMIZE
-                    | WS_SYSMENU
-                    | WS_DISABLED
-                    | WS_BORDER
-                    | WS_DLGFRAME
-                    | WS_SIZEBOX) as u32),
+                WS_POPUP | WS_CLIPSIBLINGS | WS_CLIPCHILDREN,
                 monitor.x_offset,
                 0,
                 monitor.width,
@@ -560,6 +482,19 @@ pub fn create_bars(
                 }
             }
             return Err(error);
+        }
+        if let Err(error) = crate::bar_renderer::attach(hwnd) {
+            crate::error_log::report("egui bar initialization", error);
+            unsafe {
+                DestroyWindow(hwnd);
+                for bar in &result {
+                    DestroyWindow(bar.hwnd as _);
+                }
+            }
+            return Err(crate::platform_error::PlatformError::api_code(
+                "egui bar initialization",
+                -1,
+            ));
         }
         unsafe {
             if ShowScrollBar(hwnd, SB_BOTH, 0) == 0 {
@@ -583,7 +518,7 @@ pub fn create_bars(
                 }
                 return Err(error);
             }
-            ShowWindow(hwnd, SW_SHOWDEFAULT);
+            ShowWindow(hwnd, SW_SHOWNOACTIVATE);
             if windows_sys::Win32::Graphics::Gdi::UpdateWindow(hwnd) == 0 {
                 crate::error_log::last_win32("UpdateWindow(bar) failed");
             }
@@ -734,4 +669,20 @@ fn cpu_percent() -> String {
     state.1 = kernel;
     state.2 = user;
     format!("{:3}%", state.3)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn workspace_hit_targets_use_the_rendered_pixel_layout() {
+        let mut snapshot = crate::bar_renderer::tests::snapshot();
+        snapshot.tags[0].0 = 10;
+        snapshot.tags[1].0 = 20;
+        assert_eq!(workspace_at_x(&snapshot, 15), None);
+        assert_eq!(workspace_at_x(&snapshot, 16), Some(10));
+        assert_eq!(workspace_at_x(&snapshot, 57), Some(10));
+        assert_eq!(workspace_at_x(&snapshot, 58), Some(20));
+        assert_eq!(workspace_at_x(&snapshot, 142), None);
+    }
 }
