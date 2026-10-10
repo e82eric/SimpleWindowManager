@@ -353,8 +353,8 @@ fn text_width(canvas: &egui::Painter, font: &egui::FontId, text: &str) -> f32 {
 fn draw_region(
     canvas: &egui::Painter,
     rect: egui::Rect,
-    blue_background: bool,
-    yellow_outline: bool,
+    focused_monitor_background: bool,
+    focus_outline: bool,
 ) {
     use egui::{Color32, Stroke, StrokeKind};
     canvas.add(
@@ -369,17 +369,17 @@ fn draw_region(
     canvas.rect_filled(
         rect,
         8,
-        if blue_background {
+        if focused_monitor_background {
             Color32::from_rgb(0x83, 0xa5, 0x98)
         } else {
             Color32::from_rgb(0x28, 0x28, 0x28)
         },
     );
-    if yellow_outline {
+    if focus_outline {
         canvas.rect_stroke(
             rect.shrink(0.75),
             egui::CornerRadius::same(7),
-            Stroke::new(1.5, Color32::from_rgb(0xfa, 0xbd, 0x2f)),
+            Stroke::new(1.5, Color32::from_rgb(0x83, 0xa5, 0x98)),
             StrokeKind::Middle,
         );
     }

@@ -549,6 +549,11 @@ pub(crate) fn show_configuration_state_menu(runtime: &mut crate::ui::Ui) {
     scalar!("Configuration", bar_height, configuration.bar_height);
     scalar!(
         "Configuration",
+        picker_monitor,
+        format!("{:?}", configuration.picker_monitor)
+    );
+    scalar!(
+        "Configuration",
         float_window_movement,
         configuration.float_window_movement
     );

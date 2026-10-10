@@ -55,6 +55,21 @@ pub struct CommandEntry {
     pub key: Option<u32>,
 }
 
+/// Monitor used to center all SWM pickers.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PickerMonitor {
+    /// Zero-based index in SWM's monitor list, rather than a Windows display number.
+    Fixed(usize),
+    /// Follow SWM's focused monitor each time a picker opens.
+    Focused,
+}
+
+impl Default for PickerMonitor {
+    fn default() -> Self {
+        Self::Fixed(0)
+    }
+}
+
 #[derive(Clone)]
 pub struct Configuration {
     pub state: WindowManagerState,
@@ -81,6 +96,8 @@ pub struct Configuration {
     pub cloak_to_hide_all: bool,
     /// Maximum visible picker results (clamped to 1..=100).
     pub picker_result_rows: usize,
+    /// Target for all pickers. Unavailable/hidden targets fall back to the first visible monitor.
+    pub picker_monitor: PickerMonitor,
     /// Maximum visible preview rows (clamped to 1..=256).
     pub picker_preview_rows: usize,
     /// Bat syntax theme for file previews; None uses bat's own settings.
@@ -113,6 +130,7 @@ impl Default for Configuration {
             always_exclude_processes: Vec::new(),
             cloak_to_hide_all: false,
             picker_result_rows: 7,
+            picker_monitor: PickerMonitor::default(),
             picker_preview_rows: 14,
             file_preview_bat_theme: Some("gruvbox-dark".into()),
             file_preview_resolver: crate::file_preview::resolver(Default::default()),
@@ -121,6 +139,21 @@ impl Default for Configuration {
 }
 
 impl Configuration {
+    pub(crate) fn selected_picker_monitor(&self) -> Option<&crate::Monitor> {
+        let monitors = &self.state.monitors;
+        let index = match self.picker_monitor {
+            PickerMonitor::Fixed(index) => Some(index),
+            PickerMonitor::Focused => self.state.selected_monitor.map(|monitor| monitor.0),
+        };
+        let usable = |monitor: &&crate::Monitor| {
+            !monitor.is_hidden && monitor.width > 0 && monitor.bottom > monitor.top
+        };
+        index
+            .and_then(|index| monitors.get(index))
+            .filter(usable)
+            .or_else(|| monitors.iter().find(usable))
+    }
+
     pub fn workspace_register(
         &mut self,
         name: &str,

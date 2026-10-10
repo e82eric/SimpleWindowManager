@@ -99,6 +99,16 @@ pub fn is_menu(action: Action) -> bool {
             | Action::ShowConfigurationState
     )
 }
+fn picker_bounds(configuration: &Configuration) -> Option<crate::egui_window_menu::ScreenBounds> {
+    let monitor = configuration.selected_picker_monitor()?;
+    Some(crate::egui_window_menu::ScreenBounds {
+        left: monitor.x_offset,
+        top: monitor.top,
+        width: monitor.width,
+        height: monitor.bottom - monitor.top,
+    })
+}
+
 pub struct Ui {
     pub(crate) menu_session: u64,
     pub configuration: std::sync::Arc<Configuration>,
@@ -173,18 +183,11 @@ impl Ui {
         crate::worker::send(crate::worker::Command::MenuClosed);
     }
     fn run_new_windows_menu(&mut self) {
-        use crate::egui_window_menu::ScreenBounds;
         let Some(host) = self.egui_windows.as_ref() else {
             return;
         };
-        let Some(monitor) = self.configuration.state.monitors.first() else {
+        let Some(bounds) = picker_bounds(&self.configuration) else {
             return;
-        };
-        let bounds = ScreenBounds {
-            left: monitor.x_offset,
-            top: monitor.top,
-            width: monitor.width,
-            height: monitor.bottom - monitor.top,
         };
         match host.show(self.menu_session, bounds) {
             Ok(()) => {
@@ -197,7 +200,6 @@ impl Ui {
         }
     }
     fn run_program_launcher_menu(&mut self, elevated: bool) {
-        use crate::egui_window_menu::ScreenBounds;
         let Some(definition) = self
             .configuration
             .program_launchers
@@ -210,14 +212,8 @@ impl Ui {
         let Some(host) = self.egui_windows.as_ref() else {
             return;
         };
-        let Some(monitor) = self.configuration.state.monitors.first() else {
+        let Some(bounds) = picker_bounds(&self.configuration) else {
             return;
-        };
-        let bounds = ScreenBounds {
-            left: monitor.x_offset,
-            top: monitor.top,
-            width: monitor.width,
-            height: monitor.bottom - monitor.top,
         };
         match host.show_programs(
             self.menu_session,
@@ -236,18 +232,11 @@ impl Ui {
         }
     }
     fn run_process_menu(&mut self) {
-        use crate::egui_window_menu::ScreenBounds;
         let Some(host) = self.egui_windows.as_ref() else {
             return;
         };
-        let Some(monitor) = self.configuration.state.monitors.first() else {
+        let Some(bounds) = picker_bounds(&self.configuration) else {
             return;
-        };
-        let bounds = ScreenBounds {
-            left: monitor.x_offset,
-            top: monitor.top,
-            width: monitor.width,
-            height: monitor.bottom - monitor.top,
         };
         match host.show_processes(self.menu_session, bounds) {
             Ok(()) => {
@@ -264,18 +253,11 @@ impl Ui {
     }
 
     fn run_file_system_menu(&mut self) {
-        use crate::egui_window_menu::ScreenBounds;
         let Some(host) = self.egui_windows.as_ref() else {
             return;
         };
-        let Some(monitor) = self.configuration.state.monitors.first() else {
+        let Some(bounds) = picker_bounds(&self.configuration) else {
             return;
-        };
-        let bounds = ScreenBounds {
-            left: monitor.x_offset,
-            top: monitor.top,
-            width: monitor.width,
-            height: monitor.bottom - monitor.top,
         };
         let options = nfm_file_system::FileSystemPickerOptions {
             bat_theme: self.configuration.file_preview_bat_theme.clone(),
@@ -294,18 +276,11 @@ impl Ui {
         }
     }
     pub fn run_commands_menu(&mut self) {
-        use crate::egui_window_menu::ScreenBounds;
         let Some(host) = self.egui_windows.as_ref() else {
             return;
         };
-        let Some(monitor) = self.configuration.state.monitors.first() else {
+        let Some(bounds) = picker_bounds(&self.configuration) else {
             return;
-        };
-        let bounds = ScreenBounds {
-            left: monitor.x_offset,
-            top: monitor.top,
-            width: monitor.width,
-            height: monitor.bottom - monitor.top,
         };
         match host.show_commands_with_menu_actions(
             self.menu_session,
@@ -336,14 +311,8 @@ impl Ui {
         let Some(host) = self.egui_windows.as_ref() else {
             return;
         };
-        let Some(monitor) = self.configuration.state.monitors.first() else {
+        let Some(bounds) = picker_bounds(&self.configuration) else {
             return;
-        };
-        let bounds = crate::egui_window_menu::ScreenBounds {
-            left: monitor.x_offset,
-            top: monitor.top,
-            width: monitor.width,
-            height: monitor.bottom - monitor.top,
         };
         match host.show_data(self.menu_session, bounds, title.into(), columns, rows) {
             Ok(()) => self.menu_visible = true,
@@ -573,5 +542,84 @@ mod tests {
         assert_eq!(ui_rx.try_recv().unwrap(), Action::ShowCommands);
         assert_eq!(worker_rx.try_recv().unwrap(), Action::SelectLeft);
         assert!(worker_rx.try_recv().is_err());
+    }
+}
+
+#[cfg(test)]
+mod picker_monitor_tests {
+    use super::*;
+    use crate::{Monitor, MonitorId, config::PickerMonitor};
+
+    fn configuration() -> Configuration {
+        let mut configuration = Configuration::default();
+        configuration.state.monitors = vec![
+            Monitor {
+                id: 10,
+                top: 29,
+                bottom: 1080,
+                x_offset: -1920,
+                width: 1920,
+                height: 1051,
+                workspace: None,
+                is_hidden: false,
+                selected: false,
+                gap_width: 0,
+            },
+            Monitor {
+                id: 20,
+                top: 50,
+                bottom: 1440,
+                x_offset: 0,
+                width: 2560,
+                height: 1390,
+                workspace: None,
+                is_hidden: false,
+                selected: true,
+                gap_width: 0,
+            },
+        ];
+        configuration.state.selected_monitor = Some(MonitorId(1));
+        configuration
+    }
+    fn bounds(configuration: &Configuration) -> Option<[i32; 4]> {
+        picker_bounds(configuration)
+            .map(|bounds| [bounds.left, bounds.top, bounds.width, bounds.height])
+    }
+
+    #[test]
+    fn fixed_monitor_uses_swm_index_and_preserves_work_area() {
+        let mut configuration = configuration();
+        assert_eq!(bounds(&configuration), Some([-1920, 29, 1920, 1051]));
+        configuration.picker_monitor = PickerMonitor::Fixed(1);
+        assert_eq!(bounds(&configuration), Some([0, 50, 2560, 1390]));
+        configuration.state.selected_monitor = Some(MonitorId(0));
+        assert_eq!(bounds(&configuration), Some([0, 50, 2560, 1390]));
+    }
+
+    #[test]
+    fn focused_monitor_follows_the_latest_configuration_snapshot() {
+        let mut configuration = configuration();
+        configuration.picker_monitor = PickerMonitor::Focused;
+        assert_eq!(bounds(&configuration), Some([0, 50, 2560, 1390]));
+        configuration.state.selected_monitor = Some(MonitorId(0));
+        assert_eq!(bounds(&configuration), Some([-1920, 29, 1920, 1051]));
+    }
+
+    #[test]
+    fn unavailable_targets_fall_back_to_a_visible_monitor() {
+        let mut configuration = configuration();
+        configuration.picker_monitor = PickerMonitor::Fixed(99);
+        assert_eq!(bounds(&configuration), Some([-1920, 29, 1920, 1051]));
+        configuration.state.monitors[0].is_hidden = true;
+        assert_eq!(bounds(&configuration), Some([0, 50, 2560, 1390]));
+        configuration.picker_monitor = PickerMonitor::Fixed(0);
+        assert_eq!(bounds(&configuration), Some([0, 50, 2560, 1390]));
+        configuration.picker_monitor = PickerMonitor::Focused;
+        configuration.state.selected_monitor = None;
+        assert_eq!(bounds(&configuration), Some([0, 50, 2560, 1390]));
+        configuration.state.monitors[1].width = 0;
+        assert_eq!(bounds(&configuration), None);
+        configuration.state.monitors.clear();
+        assert_eq!(bounds(&configuration), None);
     }
 }

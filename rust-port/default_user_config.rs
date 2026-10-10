@@ -1,5 +1,5 @@
 use crate::commands::{Action, KeyBinding};
-use crate::config::BarSegmentValue;
+use crate::config::{BarSegmentValue, PickerMonitor};
 use crate::model::WindowRoutingMode;
 use crate::{Configuration, Layout};
 
@@ -10,6 +10,9 @@ pub fn configure(configuration: &mut Configuration) {
     // Override these to change picker sizes; available screen space may reduce them.
     configuration.picker_result_rows = 7;
     configuration.picker_preview_rows = 14;
+    // Zero-based SWM monitor index: Fixed(1) selects the second monitor.
+    configuration.picker_monitor = PickerMonitor::Fixed(0);
+    // Use PickerMonitor::Focused instead to follow the focused monitor.
     // Routing, tool paths, and video frame position belong to this Rust config.
     configuration.file_preview_resolver =
         crate::file_preview::resolver(crate::file_preview::MediaPreviewSettings {

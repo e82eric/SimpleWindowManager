@@ -280,3 +280,19 @@ The egui workflows use NFM's `SharedPicker` for cross-type source replacement.
 SWM no longer maintains its own menu item enum, source mapper, or native-source
 adapters. NFM preserves transitions and supplies previews and workflow actions;
 SWM handles native hosting, presentation, and selection outcomes.
+
+### Picker monitor
+
+All pickers (windows, processes, programs, files, commands, services, and data/log
+menus) share `Configuration.picker_monitor`. In your Rust configuration:
+
+```rust
+use crate::config::PickerMonitor;
+configuration.picker_monitor = PickerMonitor::Fixed(1); // Second SWM monitor
+// Or follow SWM's focused monitor whenever a picker opens:
+// configuration.picker_monitor = PickerMonitor::Focused;
+```
+
+The default is `Fixed(0)`. Indices refer to SWM's zero-based monitor list, not
+Windows display numbers. Hidden, missing, or unusable targets fall back to the
+first visible monitor. Rebuild and restart SWM after changing the Rust config.

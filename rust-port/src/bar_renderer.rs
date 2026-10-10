@@ -474,7 +474,11 @@ pub(crate) mod tests {
         assert!(
             rendered
                 .chunks_exact(4)
-                .filter(|p| p[0] > 200 && p[1] > 120 && p[2] < 100)
+                .enumerate()
+                .filter(|(index, p)| {
+                    let x = *index % size[0] as usize;
+                    x > 600 && x < 1000 && p[1] > 110 && p[1] > p[0] + 10 && p[2] > p[0] + 5
+                })
                 .count()
                 > 10,
             "focus outline must render"
