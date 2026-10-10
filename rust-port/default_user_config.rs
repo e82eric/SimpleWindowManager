@@ -4,6 +4,9 @@ use crate::model::WindowRoutingMode;
 use crate::{Configuration, Layout};
 
 pub fn configure(configuration: &mut Configuration) {
+    configuration
+        .always_exclude_processes
+        .push("ExampleProgram.exe".into());
     // Override these to change picker sizes; available screen space may reduce them.
     configuration.picker_result_rows = 7;
     configuration.picker_preview_rows = 14;

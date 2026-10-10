@@ -1527,8 +1527,7 @@ fn window_manager_try_add_window(
     if client.data.use_cloak_to_hide {
         client.data.is_minimized = false;
     }
-    let workspace =
-        window_manager_find_client_workspace_using_filters(&configuration.state, &client);
+    let workspace = window_manager_find_client_workspace_using_filters(configuration, &client);
     if let Some(workspace) = workspace {
         let was_minimized = client.data.is_minimized;
         let data = client.data.clone();
@@ -1563,9 +1562,23 @@ fn window_manager_try_add_window(
 }
 
 fn window_manager_find_client_workspace_using_filters(
-    state: &WindowManagerState,
+    configuration: &Configuration,
     client: &Client,
 ) -> Option<WorkspaceId> {
+    let process_name = client
+        .data
+        .process_image_name
+        .rsplit(['\\', '/'])
+        .next()
+        .unwrap_or("");
+    if configuration
+        .always_exclude_processes
+        .iter()
+        .any(|name| !name.is_empty() && process_name.eq_ignore_ascii_case(name))
+    {
+        return None;
+    }
+    let state = &configuration.state;
     let selected_workspace = state
         .selected_monitor
         .and_then(|monitor| state.monitors.get(monitor.0))
@@ -2468,6 +2481,77 @@ fn apply_workspace_windows_deferred(
 #[cfg(test)]
 mod parity_tests {
     use super::*;
+
+    #[test]
+    fn always_excluded_processes_override_all_routing_modes() {
+        let mut configuration = Configuration::default();
+        configuration
+            .always_exclude_processes
+            .push("OktaVerify.exe".into());
+        let workspace =
+            configuration.workspace_register("test", "1", false, crate::layout::Layout::default());
+        configuration.state.workspaces[workspace.0]
+            .filter_data
+            .process_image_names
+            .push(".exe".into());
+        let monitor = configuration.state.monitor_register(Monitor {
+            id: 0,
+            top: 0,
+            bottom: 1080,
+            x_offset: 0,
+            height: 1080,
+            width: 1920,
+            workspace: Some(workspace),
+            is_hidden: false,
+            selected: true,
+            gap_width: 0,
+        });
+        configuration.state.selected_monitor = Some(monitor);
+        let mut client = Client {
+            data: crate::model::ClientData::default(),
+            is_visible: true,
+            workspace,
+        };
+        for mode in [
+            WindowRoutingMode::FilteredAndRoutedToWorkspace,
+            WindowRoutingMode::FilteredCurrentWorkspace,
+            WindowRoutingMode::NotFilteredCurrentWorkspace,
+            WindowRoutingMode::FilteredRoutedNonFilteredCurrentWorkspace,
+        ] {
+            configuration.state.current_window_routing_mode = mode;
+            for name in [
+                "OktaVerify.exe",
+                r"C:\Program Files\Okta\OKTAVERIFY.EXE",
+                "C:/Okta/oktaverify.exe",
+            ] {
+                client.data.process_image_name = name.into();
+                assert_eq!(
+                    window_manager_find_client_workspace_using_filters(&configuration, &client),
+                    None
+                );
+            }
+            for name in [
+                "other.exe",
+                "NotOktaVerify.exe",
+                "OktaVerify.exe.helper.exe",
+            ] {
+                client.data.process_image_name = name.into();
+                assert_eq!(
+                    window_manager_find_client_workspace_using_filters(&configuration, &client),
+                    Some(workspace)
+                );
+            }
+            client.data.process_image_name = "OktaVerify.exe".into();
+            configuration.always_exclude_processes.clear();
+            assert_eq!(
+                window_manager_find_client_workspace_using_filters(&configuration, &client),
+                Some(workspace)
+            );
+            configuration
+                .always_exclude_processes
+                .push("OktaVerify.exe".into());
+        }
+    }
 
     #[test]
     fn unchanged_visible_window_is_not_moved_again() {

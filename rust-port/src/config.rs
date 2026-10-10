@@ -75,6 +75,9 @@ pub struct Configuration {
     pub drag_drop_float_modifier: i32,
     pub bar_right_padding: i32,
     pub prevent_float_processes: Vec<String>,
+    /// Executable basenames excluded from workspace management in every routing mode.
+    /// Matches are exact and ASCII case-insensitive, including full process paths.
+    pub always_exclude_processes: Vec<String>,
     pub cloak_to_hide_all: bool,
     /// Maximum visible picker results (clamped to 1..=100).
     pub picker_result_rows: usize,
@@ -107,6 +110,7 @@ impl Default for Configuration {
             drag_drop_float_modifier: crate::commands::LALT,
             bar_right_padding: 10,
             prevent_float_processes: Vec::new(),
+            always_exclude_processes: Vec::new(),
             cloak_to_hide_all: false,
             picker_result_rows: 7,
             picker_preview_rows: 14,
