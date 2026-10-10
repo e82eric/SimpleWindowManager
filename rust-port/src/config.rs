@@ -82,6 +82,8 @@ pub struct Configuration {
     pub picker_preview_rows: usize,
     /// Bat syntax theme for file previews; None uses bat's own settings.
     pub file_preview_bat_theme: Option<String>,
+    /// Host-owned routing for filesystem/program previews. Runs on the NFM worker.
+    pub file_preview_resolver: crate::file_preview::FilePreviewResolver,
 }
 
 impl Default for Configuration {
@@ -109,6 +111,7 @@ impl Default for Configuration {
             picker_result_rows: 7,
             picker_preview_rows: 14,
             file_preview_bat_theme: Some("gruvbox-dark".into()),
+            file_preview_resolver: crate::file_preview::resolver(Default::default()),
         }
     }
 }

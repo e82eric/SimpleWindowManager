@@ -99,6 +99,19 @@ impl WindowMenuHost {
         preview_rows: usize,
         completed: impl Fn(u64, Outcome) + Send + Sync + 'static,
     ) -> Result<Self, String> {
+        Self::start_with_preview_resolver(
+            result_rows,
+            preview_rows,
+            crate::file_preview::resolver(Default::default()),
+            completed,
+        )
+    }
+    pub fn start_with_preview_resolver(
+        result_rows: usize,
+        preview_rows: usize,
+        file_preview_resolver: crate::file_preview::FilePreviewResolver,
+        completed: impl Fn(u64, Outcome) + Send + Sync + 'static,
+    ) -> Result<Self, String> {
         let result_rows = result_rows.clamp(1, 100);
         let preview_rows = preview_rows.clamp(1, 256);
         let (sender, receiver) = mpsc::channel();
@@ -124,6 +137,7 @@ impl WindowMenuHost {
                             awaiting_handoff: false,
                             session: None,
                             appearance: desktop_appearance(),
+                            file_preview_resolver,
                             result_rows,
                             preview_rows,
                             had_focus: false,
@@ -372,6 +386,7 @@ pub(crate) struct WindowMenuApp {
     awaiting_handoff: bool,
     session: Option<u64>,
     appearance: Appearance,
+    file_preview_resolver: crate::file_preview::FilePreviewResolver,
     result_rows: usize,
     preview_rows: usize,
     had_focus: bool,
@@ -410,7 +425,20 @@ impl WindowMenuApp {
         self.opened_frame = Some(ctx.cumulative_frame_nr());
         let preview_visible = options.preview_visible;
         match FileMenu::with_picker(ctx, options, self.result_rows, self.preview_rows, previous) {
-            Ok(menu) => {
+            Ok(mut menu) => {
+                let resolve = self.file_preview_resolver.clone();
+                menu.picker_mut().set_preview_provider(
+                    ctx,
+                    Arc::new(crate::file_preview::ResolvedPreviewProvider::new(
+                        move |selection: &nfm_egui::Selection<nfm_egui::shared::SharedItem>,
+                              cancel| {
+                            let Some(path) = selection.item.downcast_ref::<String>() else {
+                                return Ok(None);
+                            };
+                            resolve(std::path::Path::new(path), cancel)
+                        },
+                    )),
+                );
                 self.active_menu = Some(ActiveMenu::Files {
                     menu,
                     program_elevated,

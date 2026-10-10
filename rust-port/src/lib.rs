@@ -9,6 +9,7 @@ pub mod drop_target;
 mod egui_command_menu;
 mod egui_data_menu;
 mod egui_file_menu;
+pub mod file_preview;
 mod egui_native;
 mod egui_process_menu;
 pub mod egui_window_menu;

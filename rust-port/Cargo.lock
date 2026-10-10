@@ -57,6 +57,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f2032f911046de80f0a198e0901378627c33f59ea0ac00e363d481118bd70a53"
 
 [[package]]
+name = "bincode"
+version = "1.3.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b1f45e9417d87227c7a56d22e471c6206462cba514c7590c09aff4cf6d1ddcad"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "bindgen"
 version = "0.72.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -169,6 +178,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "color_quant"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3d7b894f5411737b7867f4827955924d7c254fc9f4d91a6aad6b097804b1018b"
+
+[[package]]
 name = "crc32fast"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -210,6 +225,12 @@ name = "crossbeam-utils"
 version = "0.8.22"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "61803da095bee82a81bb1a452ecc25d3b2f1416d1897eb86430c6159ef717c17"
+
+[[package]]
+name = "crunchy"
+version = "0.2.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "460fbee9c2c2f33933d720630a6a0bac33ba7053db5344fac858d4b8952d77d5"
 
 [[package]]
 name = "csv"
@@ -353,6 +374,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "fax"
+version = "0.2.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "caf1079563223d5d59d83c85886a56e586cfd5c1a26292e971a0fa266531ac5a"
+
+[[package]]
 name = "fdeflate"
 version = "0.3.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -394,6 +421,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "fnv"
+version = "1.0.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3f9eec918d3f24069decb9af1554cad7c880e2da24a9afd88aca000531ab82c1"
+
+[[package]]
 name = "foldhash"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -430,6 +463,16 @@ dependencies = [
  "futures-task",
  "pin-project-lite",
  "slab",
+]
+
+[[package]]
+name = "gif"
+version = "0.14.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ee8cfcc411d9adbbaba82fb72661cc1bcca13e8bba98b364e62b2dba8f960159"
+dependencies = [
+ "color_quant",
+ "weezl",
 ]
 
 [[package]]
@@ -476,6 +519,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "half"
+version = "2.7.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6ea2d84b969582b4b1864a92dc5d27cd2b77b622a8d79306834f1be5ba20d84b"
+dependencies = [
+ "cfg-if",
+ "crunchy",
+ "zerocopy",
+]
+
+[[package]]
 name = "harfrust"
 version = "0.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -510,9 +564,25 @@ checksum = "85ab80394333c02fe689eaf900ab500fbd0c2213da414687ebf995a65d5a6104"
 dependencies = [
  "bytemuck",
  "byteorder-lite",
+ "color_quant",
+ "gif",
+ "image-webp",
  "moxcms",
  "num-traits",
  "png",
+ "tiff",
+ "zune-core",
+ "zune-jpeg",
+]
+
+[[package]]
+name = "image-webp"
+version = "0.2.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "525e9ff3e1a4be2fbea1fdf0e98686a6d98b4d8f937e1bf7402245af1909e8c3"
+dependencies = [
+ "byteorder-lite",
+ "quick-error",
 ]
 
 [[package]]
@@ -656,7 +726,7 @@ dependencies = [
 [[package]]
 name = "nfm-egui"
 version = "0.1.0"
-source = "git+https://github.com/e82eric/npicker?rev=de012392133660e8678c54afadefaadf1ec4c1b3#de012392133660e8678c54afadefaadf1ec4c1b3"
+source = "git+https://github.com/e82eric/npicker?rev=9f98b448717cf24fe58c21f531a3245cb7a97127#9f98b448717cf24fe58c21f531a3245cb7a97127"
 dependencies = [
  "crossbeam-channel",
  "egui",
@@ -673,7 +743,7 @@ dependencies = [
 [[package]]
 name = "nfm-file-system-egui"
 version = "0.1.0"
-source = "git+https://github.com/e82eric/npicker?rev=de012392133660e8678c54afadefaadf1ec4c1b3#de012392133660e8678c54afadefaadf1ec4c1b3"
+source = "git+https://github.com/e82eric/npicker?rev=9f98b448717cf24fe58c21f531a3245cb7a97127#9f98b448717cf24fe58c21f531a3245cb7a97127"
 dependencies = [
  "nfm-egui",
  "nfm-preview",
@@ -684,7 +754,7 @@ dependencies = [
 [[package]]
 name = "nfm-picker-sources"
 version = "0.1.0"
-source = "git+https://github.com/e82eric/npicker?rev=de012392133660e8678c54afadefaadf1ec4c1b3#de012392133660e8678c54afadefaadf1ec4c1b3"
+source = "git+https://github.com/e82eric/npicker?rev=9f98b448717cf24fe58c21f531a3245cb7a97127#9f98b448717cf24fe58c21f531a3245cb7a97127"
 dependencies = [
  "chrono",
  "csv",
@@ -697,7 +767,7 @@ dependencies = [
 [[package]]
 name = "nfm-preview"
 version = "0.1.0"
-source = "git+https://github.com/e82eric/npicker?rev=de012392133660e8678c54afadefaadf1ec4c1b3#de012392133660e8678c54afadefaadf1ec4c1b3"
+source = "git+https://github.com/e82eric/npicker?rev=9f98b448717cf24fe58c21f531a3245cb7a97127#9f98b448717cf24fe58c21f531a3245cb7a97127"
 dependencies = [
  "crossbeam-channel",
  "image",
@@ -709,12 +779,34 @@ dependencies = [
 [[package]]
 name = "nfm-preview-command"
 version = "0.1.0"
-source = "git+https://github.com/e82eric/npicker?rev=de012392133660e8678c54afadefaadf1ec4c1b3#de012392133660e8678c54afadefaadf1ec4c1b3"
+source = "git+https://github.com/e82eric/npicker?rev=9f98b448717cf24fe58c21f531a3245cb7a97127#9f98b448717cf24fe58c21f531a3245cb7a97127"
+
+[[package]]
+name = "nfm-preview-file"
+version = "0.1.0"
+source = "git+https://github.com/e82eric/npicker?rev=9f98b448717cf24fe58c21f531a3245cb7a97127#9f98b448717cf24fe58c21f531a3245cb7a97127"
+dependencies = [
+ "image",
+ "nfm-egui",
+ "nfm-preview-command",
+ "nfm-preview-text",
+]
+
+[[package]]
+name = "nfm-preview-text"
+version = "0.1.0"
+source = "git+https://github.com/e82eric/npicker?rev=9f98b448717cf24fe58c21f531a3245cb7a97127#9f98b448717cf24fe58c21f531a3245cb7a97127"
+dependencies = [
+ "nfm-egui",
+ "two-face",
+ "unicode-segmentation",
+ "unicode-width",
+]
 
 [[package]]
 name = "nfm-preview-vt"
 version = "0.1.0"
-source = "git+https://github.com/e82eric/npicker?rev=de012392133660e8678c54afadefaadf1ec4c1b3#de012392133660e8678c54afadefaadf1ec4c1b3"
+source = "git+https://github.com/e82eric/npicker?rev=9f98b448717cf24fe58c21f531a3245cb7a97127#9f98b448717cf24fe58c21f531a3245cb7a97127"
 dependencies = [
  "cc",
 ]
@@ -722,7 +814,7 @@ dependencies = [
 [[package]]
 name = "nfm-process-egui"
 version = "0.1.0"
-source = "git+https://github.com/e82eric/npicker?rev=de012392133660e8678c54afadefaadf1ec4c1b3#de012392133660e8678c54afadefaadf1ec4c1b3"
+source = "git+https://github.com/e82eric/npicker?rev=9f98b448717cf24fe58c21f531a3245cb7a97127#9f98b448717cf24fe58c21f531a3245cb7a97127"
 dependencies = [
  "nfm-egui",
  "nfm-win32",
@@ -732,7 +824,7 @@ dependencies = [
 [[package]]
 name = "nfm-win32"
 version = "0.1.0"
-source = "git+https://github.com/e82eric/npicker?rev=de012392133660e8678c54afadefaadf1ec4c1b3#de012392133660e8678c54afadefaadf1ec4c1b3"
+source = "git+https://github.com/e82eric/npicker?rev=9f98b448717cf24fe58c21f531a3245cb7a97127#9f98b448717cf24fe58c21f531a3245cb7a97127"
 dependencies = [
  "anyhow",
  "csv",
@@ -745,7 +837,7 @@ dependencies = [
 [[package]]
 name = "nfm-window-egui"
 version = "0.1.0"
-source = "git+https://github.com/e82eric/npicker?rev=de012392133660e8678c54afadefaadf1ec4c1b3#de012392133660e8678c54afadefaadf1ec4c1b3"
+source = "git+https://github.com/e82eric/npicker?rev=9f98b448717cf24fe58c21f531a3245cb7a97127#9f98b448717cf24fe58c21f531a3245cb7a97127"
 dependencies = [
  "nfm-egui",
  "nfm-win32",
@@ -756,7 +848,7 @@ dependencies = [
 [[package]]
 name = "nfm_file_system"
 version = "0.1.0"
-source = "git+https://github.com/e82eric/npicker?rev=de012392133660e8678c54afadefaadf1ec4c1b3#de012392133660e8678c54afadefaadf1ec4c1b3"
+source = "git+https://github.com/e82eric/npicker?rev=9f98b448717cf24fe58c21f531a3245cb7a97127#9f98b448717cf24fe58c21f531a3245cb7a97127"
 dependencies = [
  "crossbeam-channel",
  "hashbrown",
@@ -767,7 +859,7 @@ dependencies = [
 [[package]]
 name = "nfm_search_core"
 version = "0.1.0"
-source = "git+https://github.com/e82eric/npicker?rev=de012392133660e8678c54afadefaadf1ec4c1b3#de012392133660e8678c54afadefaadf1ec4c1b3"
+source = "git+https://github.com/e82eric/npicker?rev=9f98b448717cf24fe58c21f531a3245cb7a97127#9f98b448717cf24fe58c21f531a3245cb7a97127"
 dependencies = [
  "crossbeam-channel",
  "memchr",
@@ -819,6 +911,28 @@ name = "once_cell"
 version = "1.21.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9f7c3e4beb33f85d45ae3e3a1792185706c8e16d043238c593331cc7cd313b50"
+
+[[package]]
+name = "onig"
+version = "6.5.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0cc3cbf698f9438986c11a880c90a6d04b9de27575afd28bbf45b154b6c709e2"
+dependencies = [
+ "bitflags",
+ "libc",
+ "once_cell",
+ "onig_sys",
+]
+
+[[package]]
+name = "onig_sys"
+version = "69.9.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1e68317604e77e53b85896388e1a803c1d21b74c899ec9e5e1112db90735edd7"
+dependencies = [
+ "cc",
+ "pkg-config",
+]
 
 [[package]]
 name = "parking_lot"
@@ -926,6 +1040,12 @@ name = "pxfm"
 version = "0.1.30"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d55d956fa96f5ec02be2e13af0e20391a5aa83d6a074e3ad368959d0fab299ea"
+
+[[package]]
+name = "quick-error"
+version = "2.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a993555f31e5a609f617c12db6250dedcac1b0a85076912c436e6fc9b2c8e6a3"
 
 [[package]]
 name = "quote"
@@ -1037,6 +1157,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9774ba4a74de5f7b1c1451ed6cd5285a32eddb5cccb8cc655a4e50009e06477f"
 
 [[package]]
+name = "same-file"
+version = "1.0.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "93fc1dc3aaa9bfed95e02e6eadabb4baf7e3078b0bd1b4d7b6b0b68378900502"
+dependencies = [
+ "winapi-util",
+]
+
+[[package]]
 name = "scopeguard"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1137,6 +1266,7 @@ dependencies = [
  "nfm-file-system-egui",
  "nfm-picker-sources",
  "nfm-preview",
+ "nfm-preview-file",
  "nfm-process-egui",
  "nfm-win32",
  "nfm-window-egui",
@@ -1238,6 +1368,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "syntect"
+version = "5.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "656b45c05d95a5704399aeef6bd0ddec7b2b3531b7c9e900abbf7c4d2190c925"
+dependencies = [
+ "bincode",
+ "flate2",
+ "fnv",
+ "once_cell",
+ "onig",
+ "regex-syntax",
+ "serde",
+ "serde_derive",
+ "thiserror",
+ "walkdir",
+]
+
+[[package]]
 name = "tar"
 version = "0.4.46"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1275,6 +1423,20 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1ad99c4c6d32803332c548b1af0540b357b3f5fc0be8f6c6bfe8b2e6ae784070"
 dependencies = [
  "cfg-if",
+]
+
+[[package]]
+name = "tiff"
+version = "0.11.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b63feaf3343d35b6ca4d50483f94843803b0f51634937cc2ec519fc32232bc52"
+dependencies = [
+ "fax",
+ "flate2",
+ "half",
+ "quick-error",
+ "weezl",
+ "zune-jpeg",
 ]
 
 [[package]]
@@ -1430,6 +1592,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "two-face"
+version = "0.5.2+bat-0.26.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "915be7adc2ff6f4338acbf71f3eda0a146f46003b992a1669c674308610efdac"
+dependencies = [
+ "serde",
+ "serde_derive",
+ "syntect",
+]
+
+[[package]]
 name = "unicode-general-category"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1499,6 +1672,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
+name = "walkdir"
+version = "2.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "29790946404f91d9c5d06f9874efddea1dc06c5efe94541a7d6863108e3a5e4b"
+dependencies = [
+ "same-file",
+ "winapi-util",
+]
+
+[[package]]
 name = "wasm-bindgen"
 version = "0.2.129"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1551,6 +1734,21 @@ checksum = "88261b9deccee56594c11a3460c462c41f58d148598fe70ad77070126a68aba4"
 dependencies = [
  "js-sys",
  "wasm-bindgen",
+]
+
+[[package]]
+name = "weezl"
+version = "0.1.12"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a28ac98ddc8b9274cb41bb4d9d4d5c425b6020c50c46f25559911905610b4a88"
+
+[[package]]
+name = "winapi-util"
+version = "0.1.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
+dependencies = [
+ "windows-sys",
 ]
 
 [[package]]
@@ -1713,3 +1911,18 @@ name = "zmij"
 version = "1.0.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "29666d0abbfad1e3dc4dcf6144730dd3a3ab225bbbdac83319345b1b44ccfc1b"
+
+[[package]]
+name = "zune-core"
+version = "0.5.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d56377fd46368984a170bc5aac5567e52ca5da874caa60bea39fcbca78fb658b"
+
+[[package]]
+name = "zune-jpeg"
+version = "0.5.15"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "27bc9d5b815bc103f142aa054f561d9187d191692ec7c2d1e2b4737f8dbd7296"
+dependencies = [
+ "zune-core",
+]

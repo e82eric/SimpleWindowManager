@@ -372,9 +372,10 @@ fn start_egui_window_host(
     configuration: &Configuration,
 ) -> Result<crate::egui_window_menu::WindowMenuHost, String> {
     use crate::egui_window_menu::{Outcome, WindowMenuHost};
-    WindowMenuHost::start_with_rows(
+    WindowMenuHost::start_with_preview_resolver(
         configuration.picker_result_rows,
         configuration.picker_preview_rows,
+        configuration.file_preview_resolver.clone(),
         |session, outcome| {
             if let Outcome::MenuRequested(name) = outcome {
                 post(Command::MenuRequested { session, name });

@@ -7,16 +7,19 @@ pub fn configure(configuration: &mut Configuration) {
     // Override these to change picker sizes; available screen space may reduce them.
     configuration.picker_result_rows = 7;
     configuration.picker_preview_rows = 14;
-    configuration.file_preview_bat_theme = Some("gruvbox-dark".into());
+    // Routing, tool paths, and video frame position belong to this Rust config.
+    configuration.file_preview_resolver =
+        crate::file_preview::resolver(crate::file_preview::MediaPreviewSettings {
+            ffmpeg: "ffmpeg.exe".into(),
+            ffprobe: "ffprobe.exe".into(),
+            video_position: 0.25,
+            ..Default::default()
+        });
     use crate::commands::{LALT, LSHIFT, LWIN};
     use windows_sys::Win32::UI::Input::KeyboardAndMouse::*;
 
     let modifiers = LALT;
-    configuration.configuration_register_default_text_style(
-        "JetBrainsMonoNL NFP Regular",
-        12,
-        13,
-    );
+    configuration.configuration_register_default_text_style("JetBrainsMonoNL NFP Regular", 12, 13);
     configuration.keybindings_register_defaults_with_modifiers(modifiers, 0);
     configuration.state.current_window_routing_mode =
         WindowRoutingMode::FilteredRoutedNonFilteredCurrentWorkspace;
@@ -34,7 +37,7 @@ pub fn configure(configuration: &mut Configuration) {
 
     let terminal = configuration.workspace_register("Terminal", "\u{f120}", true, Layout::Deck);
     for filter in ["WindowsTerminal.exe", "wezterm-gui.exe"] {
-        configuration.workspace_register_processimagename_contains_filter(terminal,filter);
+        configuration.workspace_register_processimagename_contains_filter(terminal, filter);
     }
 
     let ide = configuration.workspace_register("Rider", "\u{eb0f}", true, Layout::Monocle);
