@@ -143,6 +143,8 @@ impl WindowMenuHost {
                             had_focus: false,
                             quitting: false,
                             opened_frame: None,
+                            presentation: None,
+                            full_pane: false,
                         }
                     },
                     move || {
@@ -283,6 +285,31 @@ impl Drop for WindowMenuHost {
     }
 }
 
+// Native pixels: the supplied monitor bounds already exclude the SWM bar.
+fn picker_window_bounds(
+    bounds: ScreenBounds,
+    height_points: f32,
+    scale: f32,
+    full_pane: bool,
+) -> ScreenBounds {
+    if full_pane {
+        return bounds;
+    }
+    let monitor_margin = (80.0 * scale).round() as i32;
+    let width = ((PICKER_WIDTH * scale).round() as i32)
+        .min(bounds.width.saturating_sub(monitor_margin))
+        .max(1);
+    let height = ((height_points * scale).ceil() as i32)
+        .min(bounds.height.saturating_sub(monitor_margin))
+        .max(1);
+    ScreenBounds {
+        left: bounds.left + (bounds.width - width) / 2,
+        top: bounds.top + (bounds.height - height) / 2,
+        width,
+        height,
+    }
+}
+
 /// Exactly one workflow owns the retained picker at a time.
 enum ActiveMenu {
     Windows(WindowPicker<SharedSource>),
@@ -298,6 +325,17 @@ enum ActiveMenu {
     Processes(crate::egui_process_menu::ProcessMenu),
 }
 impl ActiveMenu {
+    fn picker(&self) -> &SharedPicker {
+        match self {
+            Self::Windows(menu) => menu.picker(),
+            Self::Commands { picker, .. } | Self::Data(picker) => picker,
+            Self::Files { menu, .. } => menu.picker(),
+            Self::Processes(menu) => menu.picker(),
+        }
+    }
+    fn full_pane(&self) -> bool {
+        self.picker().effective_position(nfm_egui::Position::Center) == nfm_egui::Position::FullPane
+    }
     fn show(
         &mut self,
         ctx: &egui::Context,
@@ -392,6 +430,8 @@ pub(crate) struct WindowMenuApp {
     had_focus: bool,
     quitting: bool,
     opened_frame: Option<u64>,
+    presentation: Option<(ScreenBounds, f32)>,
+    full_pane: bool,
 }
 impl WindowMenuApp {
     fn take_picker(&mut self) -> Option<SharedPicker> {
@@ -399,6 +439,8 @@ impl WindowMenuApp {
     }
     fn clear_content(&mut self) {
         self.active_menu = None;
+        self.presentation = None;
+        self.full_pane = false;
         self.session = None;
         self.had_focus = false;
         self.opened_frame = None;
@@ -494,27 +536,21 @@ impl WindowMenuApp {
                 + 15.0,
         );
     }
-    fn present(&self, ctx: &egui::Context, bounds: ScreenBounds, height_points: f32) {
+    fn present(&mut self, ctx: &egui::Context, bounds: ScreenBounds, height_points: f32) {
+        self.presentation = Some((bounds, height_points));
+        self.full_pane = self.active_menu.as_ref().is_some_and(ActiveMenu::full_pane);
         let visible = unsafe { IsWindowVisible(self.hwnd as _) != 0 };
         unsafe {
             let scale =
                 windows_sys::Win32::UI::HiDpi::GetDpiForWindow(self.hwnd as _) as f32 / 96.0;
-            let width = (PICKER_WIDTH * scale).round() as i32;
-            let height = (height_points * scale).ceil() as i32;
-            let monitor_margin = (80.0 * scale).round() as i32;
-            let width = width
-                .min(bounds.width.saturating_sub(monitor_margin))
-                .max(1);
-            let height = height
-                .min(bounds.height.saturating_sub(monitor_margin))
-                .max(1);
+            let window = picker_window_bounds(bounds, height_points, scale, self.full_pane);
             SetWindowPos(
                 self.hwnd as _,
                 HWND_TOPMOST,
-                bounds.left + (bounds.width - width) / 2,
-                bounds.top + (bounds.height - height) / 2,
-                width,
-                height,
+                window.left,
+                window.top,
+                window.width,
+                window.height,
                 SWP_NOACTIVATE,
             );
         }
@@ -681,7 +717,14 @@ impl WindowMenuApp {
         };
         let mut placement = Placement::new(ctx.content_rect());
         placement.margin = PICKER_MARGIN;
-        match menu.show(ctx, placement, &self.appearance, self.awaiting_handoff) {
+        let outcome = menu.show(ctx, placement, &self.appearance, self.awaiting_handoff);
+        let full_pane = menu.full_pane();
+        if full_pane != self.full_pane {
+            if let Some((bounds, height)) = self.presentation {
+                self.present(ctx, bounds, height);
+            }
+        }
+        match outcome {
             Some(Outcome::MenuRequested(name)) => {
                 self.awaiting_handoff = true;
                 if let Some(session) = self.session {
@@ -697,5 +740,51 @@ impl WindowMenuApp {
     }
     pub(crate) fn awaiting_handoff(&self) -> bool {
         self.awaiting_handoff
+    }
+}
+
+#[cfg(test)]
+mod full_pane_geometry_tests {
+    use super::*;
+    fn dimensions(bounds: ScreenBounds) -> [i32; 4] {
+        [bounds.left, bounds.top, bounds.width, bounds.height]
+    }
+    #[test]
+    fn full_pane_uses_monitor_pixels_without_rescaling_or_covering_bar() {
+        let monitor = ScreenBounds {
+            left: -2560,
+            top: 45,
+            width: 2560,
+            height: 1395,
+        };
+        for scale in [1.0, 1.5, 2.0] {
+            assert_eq!(
+                dimensions(picker_window_bounds(monitor, 500.0, scale, true)),
+                [-2560, 45, 2560, 1395]
+            );
+        }
+    }
+    #[test]
+    fn popup_restores_centered_dpi_scaled_size_and_stays_inside_monitor() {
+        let monitor = ScreenBounds {
+            left: -2560,
+            top: 45,
+            width: 2560,
+            height: 1395,
+        };
+        assert_eq!(
+            dimensions(picker_window_bounds(monitor, 500.0, 1.5, false)),
+            [-2480, 367, 2400, 750]
+        );
+        let small = ScreenBounds {
+            left: 0,
+            top: 29,
+            width: 800,
+            height: 571,
+        };
+        assert_eq!(
+            dimensions(picker_window_bounds(small, 500.0, 1.0, false)),
+            [40, 69, 720, 491]
+        );
     }
 }

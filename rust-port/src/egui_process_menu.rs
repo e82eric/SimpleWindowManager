@@ -20,6 +20,9 @@ impl ProcessMenu {
             previous,
         ))
     }
+    pub(crate) fn picker(&self) -> &SharedPicker {
+        self.0.picker()
+    }
     pub(crate) fn into_picker(self) -> SharedPicker {
         self.0.into_picker()
     }
