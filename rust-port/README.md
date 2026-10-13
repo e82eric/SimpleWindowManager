@@ -111,17 +111,21 @@ Use the PowerShell wrapper to print the resolved path and effective
 configuration as normal output before building:
 
 ```powershell
-.\rust-port\build.ps1 -GhosttyRoot C:\src\ghostty2
+.\rust-port\build.ps1
 ```
 
-ANSI previews require the standalone Ghostty VT library. In the Ghostty checkout,
-build it once with `zig build -Demit-lib-vt -Doptimize=ReleaseFast
--Dvt-features=-kitty-graphics --prefix zig-out/nfm-vt` (as one command).
-The shared VT preview build currently disables Kitty graphics.
-The wrapper currently defaults to `C:\src\ghostty2`; pass `-GhosttyRoot` to
-override it. Direct Cargo builds use `GHOSTTY_ROOT` instead.
-Explicit `NFM_GHOSTTY_VT_INCLUDE_DIR` and
-`NFM_GHOSTTY_VT_LIB_DIR` override the derived paths.
+ANSI previews require a separately built standalone Ghostty VT static library.
+Build a compatible Ghostty checkout with:
+
+```powershell
+zig build -Demit-lib-vt -Doptimize=ReleaseFast -Dvt-features=-kitty-graphics --prefix zig-out/nfm-vt
+```
+
+Pass `-GhosttyRoot <checkout>` to the wrapper or set `GHOSTTY_ROOT`.
+Alternatively, set both `NFM_GHOSTTY_VT_INCLUDE_DIR` and
+`NFM_GHOSTTY_VT_LIB_DIR` to matching headers and libraries.
+`NFM_GHOSTTY_VT_LIB_NAME` defaults to `ghostty-vt-static`.
+The wrapper requires these paths before invoking Cargo.
 
 File previews default to bat's `gruvbox-dark` theme. Set
 `configuration.file_preview_bat_theme = Some("other-theme".into())` in your Rust

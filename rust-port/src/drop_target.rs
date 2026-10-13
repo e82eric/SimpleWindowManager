@@ -151,15 +151,19 @@ pub fn create() -> crate::platform_error::PlatformResult<DropTargetWindow> {
     })
 }
 
-pub fn show(window: &DropTargetWindow, rect: crate::Rect, insert_after: isize, should_paint: bool) {
+pub fn show(window: &DropTargetWindow, rect: crate::Rect, dragged_hwnd: isize, should_paint: bool) {
     use windows_sys::Win32::UI::WindowsAndMessaging::*;
+    if let Err(error) = raise_dragged_window(dragged_hwnd) {
+        error.report();
+        return;
+    }
     SHOULD_PAINT.store(should_paint, std::sync::atomic::Ordering::Relaxed);
     unsafe {
         if SetWindowPos(
             window.hwnd as _,
-            // Follow the dragged window's border when present; otherwise follow
-            // the dragged window. Both callers use the same stacking policy.
-            insert_after as _,
+            // The stationary border may still be behind another application.
+            // Anchor to the raised drag window so the preview covers the target.
+            dragged_hwnd as _,
             rect.left,
             rect.top,
             rect.right - rect.left,
@@ -172,11 +176,141 @@ pub fn show(window: &DropTargetWindow, rect: crate::Rect, insert_after: isize, s
     }
 }
 
+fn raise_dragged_window(hwnd: isize) -> crate::platform_error::PlatformResult<()> {
+    use windows_sys::Win32::UI::WindowsAndMessaging::*;
+    unsafe {
+        let previous = GetWindow(hwnd as _, GW_HWNDPREV);
+        let topmost = GetWindowLongW(hwnd as _, GWL_EXSTYLE) as u32 & WS_EX_TOPMOST != 0;
+        // Already first in its group: avoid redundant positioning and events.
+        if previous.is_null()
+            || (!topmost && GetWindowLongW(previous, GWL_EXSTYLE) as u32 & WS_EX_TOPMOST != 0)
+        {
+            return Ok(());
+        }
+        crate::platform_error::check_bool(
+            SetWindowPos(
+                hwnd as _,
+                HWND_TOP,
+                0,
+                0,
+                0,
+                0,
+                SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE | SWP_NOOWNERZORDER,
+            ),
+            "SetWindowPos(raise dragged window)",
+        )
+    }
+}
+
 pub fn hide(window: &DropTargetWindow) {
     unsafe {
         windows_sys::Win32::UI::WindowsAndMessaging::ShowWindow(
             window.hwnd as _,
             windows_sys::Win32::UI::WindowsAndMessaging::SW_HIDE,
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use windows_sys::Win32::UI::WindowsAndMessaging::*;
+
+    struct TestWindow(isize);
+
+    impl TestWindow {
+        fn new() -> Self {
+            let class: Vec<u16> = "STATIC\0".encode_utf16().collect();
+            let hwnd = unsafe {
+                CreateWindowExW(
+                    WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
+                    class.as_ptr(),
+                    std::ptr::null(),
+                    WS_POPUP,
+                    0,
+                    0,
+                    0,
+                    0,
+                    std::ptr::null_mut(),
+                    std::ptr::null_mut(),
+                    std::ptr::null_mut(),
+                    std::ptr::null(),
+                )
+            };
+            assert!(!hwnd.is_null(), "CreateWindowExW(test window)");
+            Self(hwnd as isize)
+        }
+
+        fn put_after(&self, other: isize) {
+            assert_ne!(
+                unsafe {
+                    SetWindowPos(
+                        self.0 as _,
+                        other as _,
+                        0,
+                        0,
+                        0,
+                        0,
+                        SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE,
+                    )
+                },
+                0
+            );
+        }
+
+        fn is_above(&self, other: &Self) -> bool {
+            let mut next = unsafe { GetWindow(self.0 as _, GW_HWNDNEXT) };
+            while !next.is_null() {
+                if next as isize == other.0 {
+                    return true;
+                }
+                next = unsafe { GetWindow(next, GW_HWNDNEXT) };
+            }
+            false
+        }
+    }
+
+    impl Drop for TestWindow {
+        fn drop(&mut self) {
+            unsafe {
+                DestroyWindow(self.0 as _);
+            }
+        }
+    }
+
+    #[test]
+    fn repeated_drag_keeps_window_and_preview_above_target_with_a_stale_border() {
+        // Zero-size windows exercise Win32 stacking without visible test UI.
+        let dragged = TestWindow::new();
+        let target = TestWindow::new();
+        let border = TestWindow::new();
+        let preview = TestWindow::new();
+        let overlay = DropTargetWindow { hwnd: preview.0 };
+        for _ in 0..2 {
+            // A layout swap can leave the border and next drag below the target.
+            target.put_after(HWND_TOP as isize);
+            border.put_after(target.0);
+            dragged.put_after(border.0);
+            assert!(target.is_above(&dragged));
+            show(
+                &overlay,
+                crate::Rect::from_xywh(0, 0, 0, 0),
+                dragged.0,
+                true,
+            );
+            assert!(dragged.is_above(&preview));
+            assert!(preview.is_above(&target));
+            assert_eq!(
+                unsafe { GetWindowLongW(dragged.0 as _, GWL_EXSTYLE) } as u32 & WS_EX_TOPMOST,
+                0
+            );
+
+            // The subsequent stationary-border update must preserve that order.
+            border.put_after(dragged.0);
+            assert!(dragged.is_above(&border));
+            assert!(border.is_above(&preview));
+            assert!(preview.is_above(&target));
+            hide(&overlay);
+        }
     }
 }

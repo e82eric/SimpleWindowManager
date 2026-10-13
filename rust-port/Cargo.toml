@@ -7,16 +7,16 @@ publish = false
 [dependencies]
 csv = "1"
 crossbeam-channel = "0.5"
-nfm-picker-sources = { git = "https://github.com/e82eric/npicker", rev = "585548b6dac10e399457a3fc72aa0c5782a3ddae" }
-nfm-window-egui = { git = "https://github.com/e82eric/npicker", rev = "585548b6dac10e399457a3fc72aa0c5782a3ddae" }
-nfm-process-egui = { git = "https://github.com/e82eric/npicker", rev = "585548b6dac10e399457a3fc72aa0c5782a3ddae" }
-nfm-file-system-egui = { git = "https://github.com/e82eric/npicker", rev = "585548b6dac10e399457a3fc72aa0c5782a3ddae" }
-nfm_file_system = { git = "https://github.com/e82eric/npicker", rev = "585548b6dac10e399457a3fc72aa0c5782a3ddae" }
-nfm-egui = { git = "https://github.com/e82eric/npicker", rev = "585548b6dac10e399457a3fc72aa0c5782a3ddae", features = ["opengl"] }
-nfm_search_core = { git = "https://github.com/e82eric/npicker", rev = "585548b6dac10e399457a3fc72aa0c5782a3ddae" }
-nfm-win32 = { git = "https://github.com/e82eric/npicker", rev = "585548b6dac10e399457a3fc72aa0c5782a3ddae" }
-nfm-preview-file = { git = "https://github.com/e82eric/npicker", rev = "585548b6dac10e399457a3fc72aa0c5782a3ddae" }
-nfm-preview = { git = "https://github.com/e82eric/npicker", rev = "585548b6dac10e399457a3fc72aa0c5782a3ddae", features = ["egui"] }
+nfm-picker-sources = { git = "https://github.com/e82eric/npicker", rev = "514e9d9acc7ca0c3aa207a42aad7b4588f691af2" }
+nfm-window-egui = { git = "https://github.com/e82eric/npicker", rev = "514e9d9acc7ca0c3aa207a42aad7b4588f691af2" }
+nfm-process-egui = { git = "https://github.com/e82eric/npicker", rev = "514e9d9acc7ca0c3aa207a42aad7b4588f691af2" }
+nfm-file-system-egui = { git = "https://github.com/e82eric/npicker", rev = "514e9d9acc7ca0c3aa207a42aad7b4588f691af2" }
+nfm_file_system = { git = "https://github.com/e82eric/npicker", rev = "514e9d9acc7ca0c3aa207a42aad7b4588f691af2" }
+nfm-egui = { git = "https://github.com/e82eric/npicker", rev = "514e9d9acc7ca0c3aa207a42aad7b4588f691af2", features = ["opengl"] }
+nfm_search_core = { git = "https://github.com/e82eric/npicker", rev = "514e9d9acc7ca0c3aa207a42aad7b4588f691af2" }
+nfm-win32 = { git = "https://github.com/e82eric/npicker", rev = "514e9d9acc7ca0c3aa207a42aad7b4588f691af2" }
+nfm-preview-file = { git = "https://github.com/e82eric/npicker", rev = "514e9d9acc7ca0c3aa207a42aad7b4588f691af2" }
+nfm-preview = { git = "https://github.com/e82eric/npicker", rev = "514e9d9acc7ca0c3aa207a42aad7b4588f691af2", features = ["egui"] }
 serde_json = "1"
 tracing = { version = "0.1", features = ["attributes"] }
 tracing-appender = "0.2"

@@ -964,8 +964,21 @@ impl Runtime {
             .and_then(|w| self.configuration.state.workspaces[w.0].selected)
             .and_then(|c| self.configuration.state.clients[c.0].as_ref());
         if let Some(client) = selected.filter(|c| c.data.hwnd == hwnd) {
-            self.border_frame
-                .set(visible_frame_rect(hwnd).map(|actual| (hwnd, client.data.rect, actual)));
+            let frame = visible_frame_rect(hwnd).map(|actual| {
+                let previous = match self.border_frame.get() {
+                    Some((owner, layout, frame)) if owner == hwnd && layout == client.data.rect => {
+                        frame
+                    }
+                    _ => client.data.rect,
+                };
+                let frame = border_frame_after_location_change(
+                    previous,
+                    actual,
+                    left_mouse_button_down() && !left_shift_down(),
+                );
+                (hwnd, client.data.rect, frame)
+            });
+            self.border_frame.set(frame);
         }
     }
 
@@ -1191,10 +1204,9 @@ impl Runtime {
         self.drag_drop_state.drop_target_monitor = Some(monitor);
         if self.drag_drop_state.in_progress {
             if let Some(overlay) = &self.drop_target_window {
-                let anchor = self.drop_preview_insert_after(hwnd);
                 if let Some(target) = target {
                     if let Some(client) = self.configuration.state.clients[target.0].as_ref() {
-                        crate::drop_target::show(overlay, client.data.rect, anchor, true);
+                        crate::drop_target::show(overlay, client.data.rect, hwnd, true);
                     }
                 } else {
                     let item = &self.configuration.state.monitors[monitor.0];
@@ -1207,7 +1219,7 @@ impl Runtime {
                             item.width - gap * 2,
                             item.bottom - item.top - gap * 2,
                         ),
-                        anchor,
+                        hwnd,
                         crate::ui::menu_visible(),
                     );
                 }
@@ -1215,22 +1227,6 @@ impl Runtime {
         } else if let Some(overlay) = &self.drop_target_window {
             crate::drop_target::hide(overlay);
         }
-    }
-
-    fn drop_preview_insert_after(&self, hwnd: isize) -> isize {
-        use windows_sys::Win32::UI::WindowsAndMessaging::{
-            GW_HWNDNEXT, GetWindow, IsWindowVisible,
-        };
-        if let Some(border) = &self.border_window {
-            if unsafe {
-                IsWindowVisible(border.hwnd as _) != 0
-                    && GetWindow(hwnd as _, GW_HWNDNEXT) == border.hwnd as _
-            } {
-                return border.hwnd;
-            }
-            return border.hwnd;
-        }
-        hwnd
     }
 
     pub fn cancel_input_drag(&mut self) {
@@ -1249,7 +1245,12 @@ impl Runtime {
             self.cancel_input_drag();
             return Ok(());
         }
-        self.drag_drop_try_handle_left_mouse_up(x, y).map(|_| ())
+        self.border_frame.set(None);
+        let result = self.drag_drop_try_handle_left_mouse_up(x, y).map(|_| ());
+        // Refresh even when the release path only applies a resize or has no
+        // drop target. Layout changes invalidate the cached frame as usual.
+        self.border_window_update();
+        result
     }
 
     pub fn drag_drop_try_handle_left_mouse_up(&mut self, x: i32, y: i32) -> PlatformResult<bool> {
@@ -2477,9 +2478,51 @@ fn apply_workspace_windows_deferred(
     Ok(())
 }
 
+// A translated frame belongs to a mouse drag: retain the pre-drag border.
+// A changed size belongs to a resize and must still update the outline.
+fn border_frame_after_location_change(previous: Rect, actual: Rect, mouse_dragging: bool) -> Rect {
+    if mouse_dragging
+        && previous.right - previous.left == actual.right - actual.left
+        && previous.bottom - previous.top == actual.bottom - actual.top
+    {
+        previous
+    } else {
+        actual
+    }
+}
+
 #[cfg(test)]
 mod parity_tests {
     use super::*;
+
+    #[test]
+    fn border_stays_at_the_original_frame_during_a_mouse_drag() {
+        let original = Rect::from_xywh(10, 20, 300, 400);
+        let dragged = Rect::from_xywh(200, 150, 300, 400);
+        assert_eq!(
+            border_frame_after_location_change(original, dragged, true),
+            original
+        );
+        assert_eq!(
+            border_frame_after_location_change(original, dragged, false),
+            dragged
+        );
+    }
+
+    #[test]
+    fn border_follows_resizing_during_a_mouse_gesture() {
+        let original = Rect::from_xywh(10, 20, 300, 400);
+        for resized in [
+            Rect::from_xywh(10, 20, 350, 400),
+            Rect::from_xywh(-40, 20, 350, 400),
+            Rect::from_xywh(10, -30, 300, 450),
+        ] {
+            assert_eq!(
+                border_frame_after_location_change(original, resized, true),
+                resized
+            );
+        }
+    }
 
     #[test]
     fn always_excluded_processes_override_all_routing_modes() {
