@@ -36,6 +36,7 @@ pub enum Action {
     ShowProcesses,
     ShowServices,
     ShowFileSystem,
+    ShowPicker(usize),
     ShowCommands,
     ShowFloatLogs,
     ShowClientLogs,

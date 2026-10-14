@@ -1,48 +1,10 @@
-//! SWM filesystem presentation using NFM's shared picker.
-use nfm_egui::{PickerConfig, egui, shared::SharedPicker};
-use nfm_file_system::FileSystemPickerOptions;
-pub(crate) use nfm_file_system_egui::FileEvent;
-use nfm_file_system_egui::FilePicker;
-type SharedFiles = FilePicker<nfm_egui::shared::SharedSource>;
-pub(crate) struct FileMenu(SharedFiles);
-impl std::ops::Deref for FileMenu {
-    type Target = SharedFiles;
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-impl std::ops::DerefMut for FileMenu {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
-    }
-}
-impl FileMenu {
-    pub(crate) fn into_picker(self) -> SharedPicker {
-        self.0.into_picker()
-    }
-    pub(crate) fn with_picker(
-        ctx: &egui::Context,
-        options: FileSystemPickerOptions,
-        result_rows: usize,
-        preview_rows: usize,
-        previous: Option<SharedPicker>,
-    ) -> Result<Self, String> {
-        SharedFiles::with_shared_picker(
-            ctx,
-            options,
-            PickerConfig {
-                result_rows,
-                preview_rows,
-                ..Default::default()
-            },
-            previous,
-        )
-        .map(Self)
-    }
-}
+//! Tests for NFM filesystem picker integration with SWM.
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use nfm_egui::{PickerConfig, egui, shared::SharedSource};
+    use nfm_file_system::FileSystemPickerOptions;
+    use nfm_file_system_egui::{FileEvent, FilePicker};
+    type FileMenu = FilePicker<SharedSource>;
     use nfm_egui::{Appearance, Placement};
     use std::{
         fs,
@@ -120,7 +82,17 @@ mod tests {
             preview_visible: false,
             ..Default::default()
         };
-        let mut menu = FileMenu::with_picker(&ctx, options.clone(), 7, 14, None).unwrap();
+        let mut menu = FileMenu::with_shared_picker(
+            &ctx,
+            options.clone(),
+            PickerConfig {
+                result_rows: 7,
+                preview_rows: 14,
+                ..Default::default()
+            },
+            None,
+        )
+        .unwrap();
         select(&ctx, &mut menu, &child);
         assert_eq!(
             draw(
@@ -135,7 +107,17 @@ mod tests {
         draw(&ctx, &mut menu, Some((egui::Key::U, egui::Modifiers::CTRL)));
         assert_eq!(Path::new(&menu.options().roots[0]), root);
         let picker = menu.into_picker();
-        let mut menu = FileMenu::with_picker(&ctx, options, 7, 14, Some(picker)).unwrap();
+        let mut menu = FileMenu::with_shared_picker(
+            &ctx,
+            options.clone(),
+            PickerConfig {
+                result_rows: 7,
+                preview_rows: 14,
+                ..Default::default()
+            },
+            Some(picker),
+        )
+        .unwrap();
         assert!(menu.picker().selection().is_none());
         select(&ctx, &mut menu, &file);
         assert_eq!(
@@ -146,7 +128,64 @@ mod tests {
             ),
             Some(FileEvent::Selected(file.to_string_lossy().into_owned()))
         );
+        let solution = child.join("solution.SLN");
+        let outside = root.join("outside.sln");
+        fs::write(&solution, "solution").unwrap();
+        fs::write(&outside, "outside").unwrap();
+        let picker = menu.into_picker();
+        let mut menu = FileMenu::with_shared_picker(
+            &ctx,
+            FileSystemPickerOptions {
+                roots: vec![child.to_string_lossy().into_owned()],
+                files_only: true,
+                search_string: Some(".sln$ ".into()),
+                ..Default::default()
+            },
+            PickerConfig {
+                result_rows: 7,
+                preview_rows: 14,
+                ..Default::default()
+            },
+            Some(picker),
+        )
+        .unwrap();
+        assert!(menu.picker().selection().is_none());
+        menu.picker_mut().set_presentation(7, 14, false);
+        select(&ctx, &mut menu, &solution);
+        assert_eq!(
+            draw(
+                &ctx,
+                &mut menu,
+                Some((egui::Key::Enter, egui::Modifiers::NONE))
+            ),
+            Some(FileEvent::Selected(solution.to_string_lossy().into_owned()))
+        );
+        let picker = menu.into_picker();
+        let mut menu = FileMenu::with_shared_picker(
+            &ctx,
+            options,
+            PickerConfig {
+                result_rows: 7,
+                preview_rows: 14,
+                ..Default::default()
+            },
+            Some(picker),
+        )
+        .unwrap();
+        assert!(menu.picker().selection().is_none());
+        select(&ctx, &mut menu, &child);
+        draw(
+            &ctx,
+            &mut menu,
+            Some((egui::Key::Enter, egui::Modifiers::NONE)),
+        );
+        assert_eq!(Path::new(&menu.options().roots[0]), child);
+        draw(&ctx, &mut menu, None);
+        draw(&ctx, &mut menu, Some((egui::Key::U, egui::Modifiers::CTRL)));
+        assert_eq!(Path::new(&menu.options().roots[0]), root);
         drop(menu);
+        fs::remove_file(solution).unwrap();
+        fs::remove_file(outside).unwrap();
         fs::remove_file(file).unwrap();
         fs::remove_dir(child).unwrap();
         fs::remove_dir(root).unwrap();

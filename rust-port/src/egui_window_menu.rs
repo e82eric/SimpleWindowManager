@@ -1,8 +1,8 @@
 //! SimpleWindowManager owns this native tool window, event loop and OpenGL renderer.
 //! NFM supplies only enumeration, search and the embedded picker control.
-use crate::egui_file_menu::{FileEvent, FileMenu};
 use nfm_egui::shared::{self, SharedPicker, SharedSource};
 use nfm_egui::{Appearance, PickerConfig, PickerEvent, Placement, egui};
+use nfm_file_system_egui::{FileEvent, FilePicker};
 use nfm_picker_sources::structured::StructuredPickerItem;
 use nfm_window_egui::{WindowEvent, WindowPicker};
 use std::sync::{Arc, Mutex, mpsc};
@@ -41,10 +41,23 @@ pub struct ScreenBounds {
     pub height: i32,
 }
 
+#[derive(Clone, Copy, Debug)]
+pub enum FileAcceptance {
+    Open,
+    Launch {
+        elevated: bool,
+    },
+    Callback {
+        on_accept: crate::picker::PickerCallback,
+    },
+}
+
 pub enum Outcome {
     Selected(isize),
-    FileSelected(String),
-    ProgramSelected { path: String, elevated: bool },
+    FileSelected {
+        path: String,
+        acceptance: FileAcceptance,
+    },
     CommandSelected(String),
     MenuRequested(String),
     Cancelled,
@@ -72,8 +85,8 @@ enum Command {
     ShowFiles {
         session: u64,
         bounds: ScreenBounds,
-        options: nfm_file_system::FileSystemPickerOptions,
-        program_elevated: Option<bool>,
+        source: nfm_file_system::FileSystemPickerOptions,
+        acceptance: FileAcceptance,
     },
     Show {
         session: u64,
@@ -91,6 +104,24 @@ pub struct WindowMenuHost {
     last_session: Arc<Mutex<Option<u64>>>,
 }
 impl WindowMenuHost {
+    pub fn show_picker(
+        &self,
+        session: u64,
+        bounds: ScreenBounds,
+        config: crate::picker::PickerConfig,
+    ) -> Result<(), String> {
+        config.validate()?;
+        let crate::picker::PickerSource::Files(source) = config.source;
+        *self.last_session.lock().unwrap() = Some(session);
+        self.send(Command::ShowFiles {
+            session,
+            bounds,
+            source,
+            acceptance: FileAcceptance::Callback {
+                on_accept: config.on_accept,
+            },
+        })
+    }
     pub fn start(completed: impl Fn(u64, Outcome) + Send + Sync + 'static) -> Result<Self, String> {
         Self::start_with_rows(RESULT_ROWS, PREVIEW_ROWS, completed)
     }
@@ -196,8 +227,8 @@ impl WindowMenuHost {
         self.send(Command::ShowFiles {
             session,
             bounds,
-            options,
-            program_elevated: None,
+            source: options,
+            acceptance: FileAcceptance::Open,
         })
     }
     pub fn show_programs(
@@ -220,7 +251,7 @@ impl WindowMenuHost {
         self.send(Command::ShowFiles {
             session,
             bounds,
-            options: nfm_file_system::FileSystemPickerOptions {
+            source: nfm_file_system::FileSystemPickerOptions {
                 roots: directories,
                 bat_theme,
                 max_depth: 5,
@@ -228,7 +259,7 @@ impl WindowMenuHost {
                 preview_visible: false,
                 ..Default::default()
             },
-            program_elevated: Some(elevated),
+            acceptance: FileAcceptance::Launch { elevated },
         })
     }
     pub fn focus(&self) {
@@ -319,8 +350,8 @@ enum ActiveMenu {
     },
     Data(SharedPicker),
     Files {
-        menu: FileMenu,
-        program_elevated: Option<bool>,
+        menu: FilePicker<SharedSource>,
+        acceptance: FileAcceptance,
     },
     Processes(crate::egui_process_menu::ProcessMenu),
 }
@@ -392,13 +423,10 @@ impl ActiveMenu {
             Self::Processes(menu) => menu
                 .show(ctx, placement, appearance)
                 .then_some(Outcome::Cancelled),
-            Self::Files {
-                menu,
-                program_elevated,
-            } => match menu.show(ctx, placement, appearance) {
-                Ok(Some(FileEvent::Selected(path))) => Some(match *program_elevated {
-                    Some(elevated) => Outcome::ProgramSelected { path, elevated },
-                    None => Outcome::FileSelected(path),
+            Self::Files { menu, acceptance } => match menu.show(ctx, placement, appearance) {
+                Ok(Some(FileEvent::Selected(path))) => Some(Outcome::FileSelected {
+                    path,
+                    acceptance: *acceptance,
                 }),
                 Ok(Some(FileEvent::Cancelled)) => Some(Outcome::Cancelled),
                 Ok(None) => None,
@@ -458,15 +486,24 @@ impl WindowMenuApp {
         ctx: &egui::Context,
         session: u64,
         bounds: ScreenBounds,
-        options: nfm_file_system::FileSystemPickerOptions,
-        program_elevated: Option<bool>,
+        source: nfm_file_system::FileSystemPickerOptions,
+        acceptance: FileAcceptance,
     ) {
         let previous = self.take_picker();
         self.clear_content();
         self.session = Some(session);
         self.opened_frame = Some(ctx.cumulative_frame_nr());
-        let preview_visible = options.preview_visible;
-        match FileMenu::with_picker(ctx, options, self.result_rows, self.preview_rows, previous) {
+        let preview_visible = source.preview_visible;
+        match FilePicker::with_shared_picker(
+            ctx,
+            source,
+            PickerConfig {
+                result_rows: self.result_rows,
+                preview_rows: self.preview_rows,
+                ..Default::default()
+            },
+            previous,
+        ) {
             Ok(mut menu) => {
                 let resolve = self.file_preview_resolver.clone();
                 menu.picker_mut().set_preview_provider(
@@ -481,10 +518,7 @@ impl WindowMenuApp {
                         },
                     )),
                 );
-                self.active_menu = Some(ActiveMenu::Files {
-                    menu,
-                    program_elevated,
-                });
+                self.active_menu = Some(ActiveMenu::Files { menu, acceptance });
             }
             Err(error) => {
                 self.finish(ctx, Outcome::Failed(error));
@@ -679,10 +713,10 @@ impl WindowMenuApp {
                 Command::ShowFiles {
                     session,
                     bounds,
-                    options,
-                    program_elevated,
+                    source,
+                    acceptance,
                 } => {
-                    self.show_files(ctx, session, bounds, options, program_elevated);
+                    self.show_files(ctx, session, bounds, source, acceptance);
                 }
                 Command::Show { session, bounds } => self.show(ctx, session, bounds),
                 Command::Hide => self.hide(ctx),

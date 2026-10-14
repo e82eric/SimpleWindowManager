@@ -32,10 +32,18 @@ pub struct Snapshot {
 pub enum Command {
     Action(Action),
     Workspace(usize, usize),
-    Release { i: i32, j: i32, gesture: u64 },
+    Release {
+        i: i32,
+        j: i32,
+        gesture: u64,
+    },
     MenuClosed,
     Window(isize),
     Program(String, bool),
+    PickerSelected {
+        on_accept: crate::picker::PickerCallback,
+        selection: crate::picker::PickerSelection,
+    },
 }
 pub fn send(command: Command) -> bool {
     let queued = QueuedCommand {
@@ -124,6 +132,16 @@ pub fn drain(receiver: &Receiver<QueuedCommand>, runtime: &mut Runtime) {
             }
             Command::Program(value, elevated) => {
                 runtime.menu_program_selected(&value, elevated);
+                Ok(())
+            }
+            Command::PickerSelected {
+                on_accept,
+                selection,
+            } => {
+                runtime.menu_closed();
+                if let Err(error) = crate::picker::accept(on_accept, selection) {
+                    crate::error_log::report("picker callback failed", error.to_string());
+                }
                 Ok(())
             }
         };

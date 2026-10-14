@@ -311,13 +311,19 @@ impl WindowManagerState {
             return false;
         };
         list.remove(position);
-        workspace.selected = if list.is_empty() {
-            None
-        } else if position == 0 {
-            Some(list[0])
-        } else {
-            Some(list[position - 1])
-        };
+        // Minimized clients never own the workspace selection. Removing one
+        // must not replace the selection with another minimized client (or
+        // clear it when the minimized list becomes empty).
+        if workspace
+            .selected
+            .is_none_or(|selected| !workspace.clients.contains(&selected))
+        {
+            workspace.selected = workspace
+                .clients
+                .get(position.saturating_sub(1))
+                .or_else(|| workspace.clients.first())
+                .copied();
+        }
         true
     }
 
@@ -1029,6 +1035,30 @@ mod tests {
         let (state, workspace, clients) = state_with_clients(3);
         assert_eq!(state.workspaces[workspace.0].clients, clients);
         assert_eq!(state.workspaces[workspace.0].selected, Some(clients[0]));
+    }
+
+    #[test]
+    fn removing_minimized_clients_preserves_active_selection() {
+        let (mut state, workspace, clients) = state_with_clients(4);
+        state.client_move_from_unminimized_to_minimized(clients[2]);
+        state.client_move_from_unminimized_to_minimized(clients[3]);
+        state.workspaces[workspace.0].selected = Some(clients[1]);
+        assert!(state.workspace_remove_client(clients[2]));
+        assert_eq!(state.workspaces[workspace.0].selected, Some(clients[1]));
+        assert!(state.workspace_remove_client(clients[3]));
+        assert_eq!(state.workspaces[workspace.0].selected, Some(clients[1]));
+    }
+
+    #[test]
+    fn removing_active_clients_preserves_or_replaces_selection() {
+        let (mut state, workspace, clients) = state_with_clients(3);
+        state.workspaces[workspace.0].selected = Some(clients[1]);
+        assert!(state.workspace_remove_client(clients[2]));
+        assert_eq!(state.workspaces[workspace.0].selected, Some(clients[1]));
+        assert!(state.workspace_remove_client(clients[1]));
+        assert_eq!(state.workspaces[workspace.0].selected, Some(clients[0]));
+        assert!(state.workspace_remove_client(clients[0]));
+        assert_eq!(state.workspaces[workspace.0].selected, None);
     }
 
     #[test]

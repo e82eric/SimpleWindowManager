@@ -169,8 +169,7 @@ fn main() {
     match outcome {
         Outcome::Selected(selected) => assert_eq!(selected, item.hwnd),
         Outcome::CommandSelected(_) => panic!("unexpected command selection"),
-        Outcome::FileSelected(_) => panic!("unexpected file selection"),
-        Outcome::ProgramSelected { .. } => panic!("unexpected program selection"),
+        Outcome::FileSelected { .. } => panic!("unexpected file selection"),
         Outcome::Failed(error) => panic!("menu failed: {error}"),
         Outcome::Cancelled => panic!("menu cancelled instead of accepting"),
         Outcome::MenuRequested(_) => panic!("unexpected menu handoff"),
@@ -239,7 +238,9 @@ fn main() {
     key(hwnd, 0x0D);
     let (session, outcome) = receive.recv_timeout(Duration::from_secs(5)).unwrap();
     assert_eq!(session, 6);
-    assert!(matches!(outcome, Outcome::FileSelected(path) if std::path::Path::new(&path) == file));
+    assert!(
+        matches!(outcome, Outcome::FileSelected { path, acceptance: simple_window_manager_rs::egui_window_menu::FileAcceptance::Open } if std::path::Path::new(&path) == file)
+    );
     wait_until(|| unsafe { IsWindowVisible(hwnd) == 0 });
     std::fs::remove_file(file).unwrap();
     let program = root.join("unique-egui-program.cmd");
@@ -270,7 +271,7 @@ fn main() {
         let (received_session, outcome) = receive.recv_timeout(Duration::from_secs(5)).unwrap();
         assert_eq!(received_session, session);
         assert!(
-            matches!(outcome, Outcome::ProgramSelected {path, elevated: received_elevated} if std::path::Path::new(&path) == program && received_elevated == elevated)
+            matches!(outcome, Outcome::FileSelected {path, acceptance: simple_window_manager_rs::egui_window_menu::FileAcceptance::Launch { elevated: received_elevated }} if std::path::Path::new(&path) == program && received_elevated == elevated)
         );
         wait_until(|| unsafe { IsWindowVisible(hwnd) == 0 });
     }

@@ -57,10 +57,21 @@ thread_local! { static UI:RefCell<Option<Ui>>=const { RefCell::new(None) }; }
 pub enum Command {
     Action(Action),
     Named(String),
-    MenuRequested { session: u64, name: String },
-    Closed { session: u64, restore_focus: bool },
+    MenuRequested {
+        session: u64,
+        name: String,
+    },
+    Closed {
+        session: u64,
+        restore_focus: bool,
+    },
     Window(isize),
     Program(String, bool),
+    FileSelected {
+        session: u64,
+        path: String,
+        acceptance: crate::egui_window_menu::FileAcceptance,
+    },
     Focus,
     Hide,
     Quit,
@@ -92,6 +103,7 @@ pub fn is_menu(action: Action) -> bool {
             | Action::ShowProcesses
             | Action::ShowServices
             | Action::ShowFileSystem
+            | Action::ShowPicker(_)
             | Action::ShowCommands
             | Action::ShowFloatLogs
             | Action::ShowClientLogs
@@ -158,6 +170,7 @@ impl Ui {
             ShowProcesses => self.run_process_menu(),
             ShowServices => self.run_services_menu(),
             ShowFileSystem => self.run_file_system_menu(),
+            ShowPicker(id) => self.run_picker(id),
             ShowCommands => self.run_commands_menu(),
             ShowFloatLogs => self.run_float_logs_menu(),
             ShowClientLogs => self.run_client_logs_menu(),
@@ -275,6 +288,22 @@ impl Ui {
             }
         }
     }
+    fn run_picker(&mut self, id: usize) {
+        let Some(host) = self.egui_windows.as_ref() else {
+            return;
+        };
+        let Some(bounds) = picker_bounds(&self.configuration) else {
+            return;
+        };
+        let Some(config) = self.configuration.pickers.get(id).cloned() else {
+            crate::error_log::report("picker failed", "unknown picker ID");
+            return;
+        };
+        match host.show_picker(self.menu_session, bounds, config) {
+            Ok(()) => self.menu_visible = true,
+            Err(error) => crate::error_log::report("picker failed", error),
+        }
+    }
     pub fn run_commands_menu(&mut self) {
         let Some(host) = self.egui_windows.as_ref() else {
             return;
@@ -346,16 +375,21 @@ fn start_egui_window_host(
         configuration.picker_preview_rows,
         configuration.file_preview_resolver.clone(),
         |session, outcome| {
+            if let Outcome::FileSelected { path, acceptance } = &outcome {
+                post(Command::FileSelected {
+                    session,
+                    path: path.clone(),
+                    acceptance: *acceptance,
+                });
+                return;
+            }
             if let Outcome::MenuRequested(name) = outcome {
                 post(Command::MenuRequested { session, name });
                 return;
             }
             let selected = match outcome {
                 Outcome::Selected(hwnd) => Some(Command::Window(hwnd)),
-                Outcome::FileSelected(path) => Some(Command::Program(path, false)),
-                Outcome::ProgramSelected { path, elevated } => {
-                    Some(Command::Program(path, elevated))
-                }
+                Outcome::FileSelected { .. } => unreachable!(),
                 Outcome::CommandSelected(name) => Some(Command::Named(name)),
                 Outcome::MenuRequested(_) => unreachable!(),
                 Outcome::Cancelled => None,
@@ -488,6 +522,32 @@ pub fn pump(receiver: &Receiver<Command>) {
                 Command::Program(value, elevated) => {
                     crate::worker::send(crate::worker::Command::Program(value, elevated));
                 }
+                Command::FileSelected {
+                    session,
+                    path,
+                    acceptance,
+                } => {
+                    if session != ui.menu_session || !ui.menu_visible {
+                        continue;
+                    }
+                    ui.menu_closed(false);
+                    use crate::egui_window_menu::FileAcceptance;
+                    let command = match acceptance {
+                        FileAcceptance::Open => crate::worker::Command::Program(path, false),
+                        FileAcceptance::Launch { elevated } => {
+                            crate::worker::Command::Program(path, elevated)
+                        }
+                        FileAcceptance::Callback { on_accept } => {
+                            crate::worker::Command::PickerSelected {
+                                on_accept,
+                                selection: crate::picker::PickerSelection::File(path.into()),
+                            }
+                        }
+                    };
+                    if !crate::worker::send(command) {
+                        crate::error_log::report("file selection failed", "worker queue is full");
+                    }
+                }
                 Command::Focus => {
                     if ui.menu_visible {
                         if let Some(menu) = &ui.egui_windows {
@@ -584,6 +644,15 @@ mod picker_monitor_tests {
     fn bounds(configuration: &Configuration) -> Option<[i32; 4]> {
         picker_bounds(configuration)
             .map(|bounds| [bounds.left, bounds.top, bounds.width, bounds.height])
+    }
+
+    #[test]
+    fn primary_monitor_setting_controls_default_picker_and_falls_back() {
+        let mut configuration = configuration();
+        configuration.primary_monitor = 1;
+        assert_eq!(bounds(&configuration), Some([0, 50, 2560, 1390]));
+        configuration.primary_monitor = 99;
+        assert_eq!(bounds(&configuration), Some([-1920, 29, 1920, 1051]));
     }
 
     #[test]

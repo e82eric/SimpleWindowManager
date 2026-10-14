@@ -19,6 +19,7 @@ mod input;
 pub mod layout;
 pub mod list_windows;
 pub mod model;
+pub mod picker;
 pub mod platform;
 pub mod platform_error;
 pub mod process;

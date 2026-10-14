@@ -60,8 +60,14 @@ impl Runtime {
                 configuration.state.workspaces[index].monitor = Some(monitor_id);
             }
         }
-        configuration.state.selected_monitor = Some(MonitorId(0));
-        configuration.state.monitors[0].selected = true;
+        let primary = configuration.primary_monitor;
+        let primary = if primary < display_monitor_count {
+            primary
+        } else {
+            0
+        };
+        configuration.state.selected_monitor = Some(MonitorId(primary));
+        configuration.state.monitors[primary].selected = true;
 
         for window in snapshot.windows {
             window_manager_try_add_window(&mut configuration, window, true);
@@ -340,6 +346,7 @@ impl Runtime {
             | ShowProcesses
             | ShowServices
             | ShowFileSystem
+            | ShowPicker(_)
             | ShowCommands
             | ShowFloatLogs
             | ShowClientLogs
@@ -455,12 +462,36 @@ impl Runtime {
         if crate::ui::menu_visible() {
             return;
         }
+        if workspace_is_hidden(&self.configuration.state, workspace) {
+            return;
+        }
+        let item = &self.configuration.state.workspaces[workspace.0];
+        let can_focus = |id: crate::model::ClientId| {
+            item.clients.contains(&id)
+                && self.configuration.state.clients[id.0]
+                    .as_ref()
+                    .is_some_and(|client| !client.data.is_minimized && is_window(client.data.hwnd))
+        };
+        let selected = item
+            .selected
+            .filter(|id| can_focus(*id))
+            .or_else(|| item.clients.iter().copied().find(|id| can_focus(*id)));
+        if selected != item.selected {
+            self.configuration.state.workspaces[workspace.0].selected = selected;
+            // Deck and monocle layouts must reveal the replacement before
+            // attempting to activate it.
+            if let Err(error) = self.apply_workspace(workspace) {
+                error.report();
+                return;
+            }
+        }
         if let Some(client) = self.configuration.state.workspaces[workspace.0].selected {
             if let Some(client) = self.configuration.state.clients[client.0].as_ref() {
                 if foreground_window() != client.data.hwnd {
                     nudge_set_foreground_window(client.data.hwnd);
                 }
-                self.is_foreground_window_same_as_selected = true;
+                self.is_foreground_window_same_as_selected =
+                    foreground_window() == client.data.hwnd;
                 return;
             }
         }
@@ -795,7 +826,8 @@ impl Runtime {
             .configuration
             .state
             .monitors
-            .get(1)
+            .get(self.configuration.secondary_monitor)
+            .filter(|monitor| !monitor.is_hidden)
             .and_then(|monitor| monitor.workspace)
         else {
             return Ok(());

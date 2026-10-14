@@ -175,6 +175,7 @@ pub(crate) fn binding_name(binding: &crate::commands::KeyBinding) -> String {
         ShowProcesses => "ProcessListMenu".into(),
         ShowServices => "ServiceListMenu".into(),
         ShowFileSystem => "FileSystemMenu".into(),
+        ShowPicker(id) => format!("Picker[{id}]"),
         ShowCommands => "ListKeyBindings".into(),
         ShowFloatLogs => "FloatLogsMenu".into(),
         ShowClientLogs => "ClientLogsMenu".into(),
@@ -225,6 +226,12 @@ fn command_description(runtime: &crate::ui::Ui, action: crate::commands::Action)
             if elevated { "elevated" } else { "not elevated" }
         ),
         Launch(command) => command.into(),
+        ShowPicker(id) => runtime
+            .configuration
+            .pickers
+            .get(id)
+            .map(|picker| picker.name.clone())
+            .unwrap_or_default(),
         ToggleDebugOutput => format!(
             "OutputDebugString logging is {}",
             if crate::error_log::debug_output_enabled() {
@@ -547,6 +554,16 @@ pub(crate) fn show_configuration_state_menu(runtime: &mut crate::ui::Ui) {
         configuration.float_uwp_windows
     );
     scalar!("Configuration", bar_height, configuration.bar_height);
+    scalar!(
+        "Configuration",
+        primary_monitor,
+        configuration.primary_monitor
+    );
+    scalar!(
+        "Configuration",
+        secondary_monitor,
+        configuration.secondary_monitor
+    );
     scalar!(
         "Configuration",
         picker_monitor,

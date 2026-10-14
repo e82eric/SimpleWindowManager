@@ -113,12 +113,12 @@ pub fn configure(configuration: &mut Configuration) {
         configuration.keybinding_create(KeyBinding {
             modifiers,
             key: VK_F1 as u32 + index as u32,
-            action: Action::MoveWorkspaceToMonitor(index, 1),
+            action: Action::MoveWorkspaceToMonitor(index, configuration.secondary_monitor),
         });
         configuration.keybinding_create(KeyBinding {
             modifiers: 0,
             key: VK_F13 as u32 + index as u32,
-            action: Action::MoveWorkspaceToMonitor(index, 1),
+            action: Action::MoveWorkspaceToMonitor(index, configuration.secondary_monitor),
         });
     }
     configuration.keybinding_create(KeyBinding {

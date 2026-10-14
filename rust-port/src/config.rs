@@ -58,6 +58,8 @@ pub struct CommandEntry {
 /// Monitor used to center all SWM pickers.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum PickerMonitor {
+    /// Follow Configuration.primary_monitor, with the first visible monitor as fallback.
+    Primary,
     /// Zero-based index in SWM's monitor list, rather than a Windows display number.
     Fixed(usize),
     /// Follow SWM's focused monitor each time a picker opens.
@@ -66,12 +68,16 @@ pub enum PickerMonitor {
 
 impl Default for PickerMonitor {
     fn default() -> Self {
-        Self::Fixed(0)
+        Self::Primary
     }
 }
 
 #[derive(Clone)]
 pub struct Configuration {
+    /// Zero-based SWM monitor index used as the primary monitor. Not a Windows display number.
+    pub primary_monitor: usize,
+    /// Zero-based SWM monitor index targeted by secondary-monitor actions.
+    pub secondary_monitor: usize,
     pub state: WindowManagerState,
     pub always_redraw: bool,
     /// Mirrors whether the C `useOldMoveLogicFunc` function pointer is configured.
@@ -86,6 +92,7 @@ pub struct Configuration {
     pub text_style: Option<TextStyle>,
     pub bar_segments: Vec<BarSegmentConfiguration>,
     pub program_launchers: Vec<ProgramLauncherMenu>,
+    pub pickers: Vec<crate::picker::PickerConfig>,
     pub float_window_movement: i32,
     pub drag_drop_float_modifier: i32,
     pub bar_right_padding: i32,
@@ -112,6 +119,8 @@ impl Default for Configuration {
         state.current_window_routing_mode =
             WindowRoutingMode::FilteredRoutedNonFilteredCurrentWorkspace;
         Self {
+            primary_monitor: 0,
+            secondary_monitor: 1,
             state,
             always_redraw: false,
             use_old_move_logic_configured: false,
@@ -123,6 +132,7 @@ impl Default for Configuration {
             text_style: None,
             bar_segments: Vec::new(),
             program_launchers: Vec::new(),
+            pickers: Vec::new(),
             float_window_movement: 75,
             drag_drop_float_modifier: crate::commands::LALT,
             bar_right_padding: 10,
@@ -139,9 +149,16 @@ impl Default for Configuration {
 }
 
 impl Configuration {
+    /// Register a named picker; use its ID with Action::ShowPicker.
+    pub fn register_picker(&mut self, picker: crate::picker::PickerConfig) -> usize {
+        let id = self.pickers.len();
+        self.pickers.push(picker);
+        id
+    }
     pub(crate) fn selected_picker_monitor(&self) -> Option<&crate::Monitor> {
         let monitors = &self.state.monitors;
         let index = match self.picker_monitor {
+            PickerMonitor::Primary => Some(self.primary_monitor),
             PickerMonitor::Fixed(index) => Some(index),
             PickerMonitor::Focused => self.state.selected_monitor.map(|monitor| monitor.0),
         };

@@ -240,6 +240,48 @@ ratio and fit the preview area. Completed previews are cached during scrolling;
 replacement previews retain the previous display until ready.
 The native smoke example also checks filesystem typing and exact file selection
 with previews enabled, without capturing the desktop.
+## Registered pickers
+
+Register a named picker in your Rust configuration and bind its ID to a command
+or keybinding. Its source describes what to list; its callback receives a typed
+selection. Files are currently the supported source:
+
+```rust
+use simple_window_manager_rs::{
+    commands::Action,
+    picker::{PickerConfig, PickerSelection, PickerSource},
+};
+use std::io;
+
+fn open_selection(selection: PickerSelection) -> io::Result<()> {
+    let PickerSelection::File(path) = selection;
+    std::process::Command::new(r"C:\Tools\Rider\bin\rider64.exe")
+        .arg(path)
+        .spawn()?;
+    Ok(())
+}
+
+// Inside configure(configuration):
+let solutions = configuration.register_picker(PickerConfig {
+    name: "Open solution in Rider".into(),
+    source: PickerSource::Files(nfm_file_system::FileSystemPickerOptions {
+        roots: vec![r"C:\src".into(), r"G:\src".into()],
+        files_only: true,
+        search_string: Some(".sln$ ".into()),
+        ..Default::default()
+    }),
+    on_accept: open_selection,
+});
+configuration.command_create("RiderSolutions", Action::ShowPicker(solutions));
+```
+
+Roots must be existing directories. Registered pickers use NFM's existing
+filesystem picker, including directory navigation, previews, and cancellation.
+`search_string` sets the editable initial query; it is not an enforced extension
+restriction. NFM owns scanning and search without a separate SWM filtering source.
+Callbacks run on SWM's worker after the menu closes;
+spawn separate work for lengthy tasks. Returned errors appear in SWM's error log.
+
 ## egui programs menu
 
 Both `ShowPrograms(false)` and `ShowPrograms(true)` use the persistent egui host.
@@ -287,6 +329,22 @@ SWM handles native hosting, presentation, and selection outcomes.
 
 ### Picker monitor
 
+SWM's monitor roles are configured with zero-based indices (defaults: primary 0,
+secondary 1):
+
+```rust
+configuration.primary_monitor = 1;
+configuration.secondary_monitor = 0;
+```
+
+Primary controls initial monitor selection and default picker placement. Secondary
+is used by the default `MoveWorkspaceToMonitor(workspace, configuration.secondary_monitor)` bindings and
+`MoveSecondaryFocusedToMain`. Secondary actions do nothing when the target is
+missing or hidden. `MoveWorkspaceToMonitor(workspace, monitor)` still targets an
+explicit index. These roles do not change Windows' primary display.
+Set the monitor roles before registering bindings, since each workspace-move
+binding captures its destination index when created.
+
 All pickers (windows, processes, programs, files, commands, services, and data/log
 menus) share `Configuration.picker_monitor`. In your Rust configuration:
 
@@ -297,6 +355,6 @@ configuration.picker_monitor = PickerMonitor::Fixed(1); // Second SWM monitor
 // configuration.picker_monitor = PickerMonitor::Focused;
 ```
 
-The default is `Fixed(0)`. Indices refer to SWM's zero-based monitor list, not
+The default is `Primary`, which follows `Configuration.primary_monitor`. Indices refer to SWM's zero-based monitor list, not
 Windows display numbers. Hidden, missing, or unusable targets fall back to the
 first visible monitor. Rebuild and restart SWM after changing the Rust config.
