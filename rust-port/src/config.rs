@@ -41,12 +41,6 @@ pub struct BarSegmentConfiguration {
     pub value: BarSegmentValue,
 }
 
-#[derive(Clone, Debug, Default)]
-pub struct ProgramLauncherMenu {
-    pub directories: Vec<String>,
-    pub is_elevated: bool,
-}
-
 #[derive(Clone, Debug)]
 pub struct CommandEntry {
     pub name: String,
@@ -91,8 +85,8 @@ pub struct Configuration {
     pub commands: Vec<CommandEntry>,
     pub text_style: Option<TextStyle>,
     pub bar_segments: Vec<BarSegmentConfiguration>,
-    pub program_launchers: Vec<ProgramLauncherMenu>,
-    pub pickers: Vec<crate::picker::PickerConfig>,
+    /// Every registered picker, for listing; bindings refer to pickers directly.
+    pub pickers: Vec<&'static crate::picker::PickerConfig>,
     pub float_window_movement: i32,
     pub drag_drop_float_modifier: i32,
     pub bar_right_padding: i32,
@@ -131,8 +125,7 @@ impl Default for Configuration {
             commands: Vec::new(),
             text_style: None,
             bar_segments: Vec::new(),
-            program_launchers: Vec::new(),
-            pickers: Vec::new(),
+            pickers: crate::builtin_pickers::defaults(),
             float_window_movement: 75,
             drag_drop_float_modifier: crate::commands::LALT,
             bar_right_padding: 10,
@@ -149,11 +142,15 @@ impl Default for Configuration {
 }
 
 impl Configuration {
-    /// Register a named picker; use its ID with Action::ShowPicker.
-    pub fn register_picker(&mut self, picker: crate::picker::PickerConfig) -> usize {
-        let id = self.pickers.len();
+    /// Register a picker for the life of the process; open the returned picker with
+    /// `Action::ShowPicker`.
+    pub fn register_picker(
+        &mut self,
+        picker: crate::picker::PickerConfig,
+    ) -> &'static crate::picker::PickerConfig {
+        let picker = Box::leak(Box::new(picker));
         self.pickers.push(picker);
-        id
+        picker
     }
     pub(crate) fn selected_picker_monitor(&self) -> Option<&crate::Monitor> {
         let monitors = &self.state.monitors;
@@ -236,8 +233,14 @@ impl Configuration {
             "swap_selected_monitor_to_tile_layout_reversed",
             Action::SetTileReversed,
         );
-        self.command_create("ErrorLogsMenu", Action::ShowErrorLogs);
-        self.command_create("ConfigurationStateMenu", Action::ShowConfigurationState);
+        self.command_create(
+            "ErrorLogsMenu",
+            Action::ShowPicker(&crate::builtin_pickers::ERROR_LOGS),
+        );
+        self.command_create(
+            "ConfigurationStateMenu",
+            Action::ShowPicker(&crate::builtin_pickers::CONFIGURATION_STATE),
+        );
         self.command_create("ToggleDebugOutput", Action::ToggleDebugOutput);
     }
 
@@ -326,20 +329,5 @@ impl Configuration {
             variable_is_icon: is_icon,
             value,
         });
-    }
-
-    pub fn register_program_launcher_menu(&mut self, is_elevated: bool) -> usize {
-        let id = self.program_launchers.len();
-        self.program_launchers.push(ProgramLauncherMenu {
-            directories: Vec::new(),
-            is_elevated,
-        });
-        id
-    }
-
-    pub fn program_launcher_add_directory(&mut self, menu: usize, directory: &str) {
-        self.program_launchers[menu]
-            .directories
-            .push(directory.into());
     }
 }

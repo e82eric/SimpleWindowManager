@@ -1,4 +1,4 @@
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug)]
 pub enum Action {
     Quit,
     QuitAndRestore,
@@ -31,17 +31,7 @@ pub enum Action {
     SetTileReversed,
     RedrawFocused,
     MinimizeFocused,
-    ShowWindows,
-    ShowPrograms(bool),
-    ShowProcesses,
-    ShowServices,
-    ShowFileSystem,
-    ShowPicker(usize),
-    ShowCommands,
-    ShowFloatLogs,
-    ShowClientLogs,
-    ShowErrorLogs,
-    ShowConfigurationState,
+    ShowPicker(&'static crate::picker::PickerConfig),
     Launch(&'static str),
     MoveFloat(i32, i32),
     MoveFloatToMonitor(usize),
@@ -52,7 +42,7 @@ pub enum Action {
 /// Sends directly to the action's UI or worker queue on the calling thread.
 /// Returns whether the queue accepted the action.
 pub fn dispatch_action(action: Action) -> bool {
-    if crate::ui::is_menu(action) || action == Action::Quit {
+    if crate::ui::is_menu(action) || matches!(action, Action::Quit) {
         crate::ui::post(crate::ui::Command::Action(action))
     } else {
         crate::worker::send(crate::worker::Command::Action(action))

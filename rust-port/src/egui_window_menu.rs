@@ -1,10 +1,7 @@
 //! SimpleWindowManager owns this native tool window, event loop and OpenGL renderer.
 //! NFM supplies only enumeration, search and the embedded picker control.
-use nfm_egui::shared::{self, SharedPicker, SharedSource};
-use nfm_egui::{Appearance, PickerConfig, PickerEvent, Placement, egui};
-use nfm_file_system_egui::{FileEvent, FilePicker};
-use nfm_picker_sources::structured::StructuredPickerItem;
-use nfm_window_egui::{WindowEvent, WindowPicker};
+use crate::picker::{Outcome, PickerHost, PickerRequest, PickerView};
+use nfm_egui::{Appearance, Placement, egui};
 use std::sync::{Arc, Mutex, mpsc};
 use windows_sys::Win32::UI::WindowsAndMessaging::*;
 
@@ -24,15 +21,6 @@ pub(crate) fn desktop_appearance() -> Appearance {
     appearance
 }
 
-fn desktop_height(ctx: &egui::Context, appearance: &Appearance, result_rows: usize) -> f32 {
-    // Reserve layout overhead for the configured result slots.
-    (result_rows + 1) as f32 * appearance.typography.preview_row_height(ctx)
-        + 56.0
-        + 2.0 * PICKER_MARGIN
-}
-
-pub use crate::egui_data_menu::DataRow;
-
 #[derive(Clone, Copy)]
 pub struct ScreenBounds {
     pub left: i32,
@@ -41,56 +29,12 @@ pub struct ScreenBounds {
     pub height: i32,
 }
 
-#[derive(Clone, Copy, Debug)]
-pub enum FileAcceptance {
-    Open,
-    Launch {
-        elevated: bool,
-    },
-    Callback {
-        on_accept: crate::picker::PickerCallback,
-    },
-}
-
-pub enum Outcome {
-    Selected(isize),
-    FileSelected {
-        path: String,
-        acceptance: FileAcceptance,
-    },
-    CommandSelected(String),
-    MenuRequested(String),
-    Cancelled,
-    Failed(String),
-}
 type Completion = Arc<dyn Fn(u64, Outcome) + Send + Sync>;
 enum Command {
-    ShowData {
-        session: u64,
-        bounds: ScreenBounds,
-        title: String,
-        columns: Vec<String>,
-        rows: Vec<crate::egui_data_menu::DataRow>,
-    },
-    ShowCommands {
-        session: u64,
-        bounds: ScreenBounds,
-        rows: Vec<Vec<String>>,
-        menu_actions: Vec<String>,
-    },
-    ShowProcesses {
-        session: u64,
-        bounds: ScreenBounds,
-    },
-    ShowFiles {
-        session: u64,
-        bounds: ScreenBounds,
-        source: nfm_file_system::FileSystemPickerOptions,
-        acceptance: FileAcceptance,
-    },
     Show {
         session: u64,
         bounds: ScreenBounds,
+        request: Box<dyn PickerRequest>,
     },
     Hide,
     Focus,
@@ -104,24 +48,6 @@ pub struct WindowMenuHost {
     last_session: Arc<Mutex<Option<u64>>>,
 }
 impl WindowMenuHost {
-    pub fn show_picker(
-        &self,
-        session: u64,
-        bounds: ScreenBounds,
-        config: crate::picker::PickerConfig,
-    ) -> Result<(), String> {
-        config.validate()?;
-        let crate::picker::PickerSource::Files(source) = config.source;
-        *self.last_session.lock().unwrap() = Some(session);
-        self.send(Command::ShowFiles {
-            session,
-            bounds,
-            source,
-            acceptance: FileAcceptance::Callback {
-                on_accept: config.on_accept,
-            },
-        })
-    }
     pub fn start(completed: impl Fn(u64, Outcome) + Send + Sync + 'static) -> Result<Self, String> {
         Self::start_with_rows(RESULT_ROWS, PREVIEW_ROWS, completed)
     }
@@ -176,6 +102,7 @@ impl WindowMenuHost {
                             opened_frame: None,
                             presentation: None,
                             full_pane: false,
+                            preview_visible: false,
                         }
                     },
                     move || {
@@ -209,105 +136,25 @@ impl WindowMenuHost {
         }
         Ok(())
     }
-    pub fn show(&self, session: u64, bounds: ScreenBounds) -> Result<(), String> {
+    pub fn show_request(
+        &self,
+        session: u64,
+        bounds: ScreenBounds,
+        request: Box<dyn PickerRequest>,
+    ) -> Result<(), String> {
         *self.last_session.lock().unwrap() = Some(session);
-        self.send(Command::Show { session, bounds })
+        self.send(Command::Show {
+            session,
+            bounds,
+            request,
+        })
     }
     pub fn hide(&self) {
         *self.last_session.lock().unwrap() = None;
         let _ = self.send(Command::Hide);
     }
-    pub fn show_file_system(
-        &self,
-        session: u64,
-        bounds: ScreenBounds,
-        options: nfm_file_system::FileSystemPickerOptions,
-    ) -> Result<(), String> {
-        *self.last_session.lock().unwrap() = Some(session);
-        self.send(Command::ShowFiles {
-            session,
-            bounds,
-            source: options,
-            acceptance: FileAcceptance::Open,
-        })
-    }
-    pub fn show_programs(
-        &self,
-        session: u64,
-        bounds: ScreenBounds,
-        mut directories: Vec<String>,
-        elevated: bool,
-        bat_theme: Option<String>,
-    ) -> Result<(), String> {
-        if directories.is_empty() {
-            directories.push(
-                std::env::current_dir()
-                    .map_err(|error| error.to_string())?
-                    .to_string_lossy()
-                    .into_owned(),
-            );
-        }
-        *self.last_session.lock().unwrap() = Some(session);
-        self.send(Command::ShowFiles {
-            session,
-            bounds,
-            source: nfm_file_system::FileSystemPickerOptions {
-                roots: directories,
-                bat_theme,
-                max_depth: 5,
-                files_only: true,
-                preview_visible: false,
-                ..Default::default()
-            },
-            acceptance: FileAcceptance::Launch { elevated },
-        })
-    }
     pub fn focus(&self) {
         let _ = self.send(Command::Focus);
-    }
-    pub fn show_commands(
-        &self,
-        session: u64,
-        bounds: ScreenBounds,
-        rows: Vec<Vec<String>>,
-    ) -> Result<(), String> {
-        self.show_commands_with_menu_actions(session, bounds, rows, Vec::new())
-    }
-    pub fn show_commands_with_menu_actions(
-        &self,
-        session: u64,
-        bounds: ScreenBounds,
-        rows: Vec<Vec<String>>,
-        menu_actions: Vec<String>,
-    ) -> Result<(), String> {
-        *self.last_session.lock().unwrap() = Some(session);
-        self.send(Command::ShowCommands {
-            session,
-            bounds,
-            rows,
-            menu_actions,
-        })
-    }
-    pub fn show_data(
-        &self,
-        session: u64,
-        bounds: ScreenBounds,
-        title: String,
-        columns: Vec<String>,
-        rows: Vec<DataRow>,
-    ) -> Result<(), String> {
-        *self.last_session.lock().unwrap() = Some(session);
-        self.send(Command::ShowData {
-            session,
-            bounds,
-            title,
-            columns,
-            rows,
-        })
-    }
-    pub fn show_processes(&self, session: u64, bounds: ScreenBounds) -> Result<(), String> {
-        *self.last_session.lock().unwrap() = Some(session);
-        self.send(Command::ShowProcesses { session, bounds })
     }
 }
 impl Drop for WindowMenuHost {
@@ -341,114 +188,15 @@ fn picker_window_bounds(
     }
 }
 
-/// Exactly one workflow owns the retained picker at a time.
-enum ActiveMenu {
-    Windows(WindowPicker<SharedSource>),
-    Commands {
-        picker: SharedPicker,
-        menu_actions: Vec<String>,
-    },
-    Data(SharedPicker),
-    Files {
-        menu: FilePicker<SharedSource>,
-        acceptance: FileAcceptance,
-    },
-    Processes(crate::egui_process_menu::ProcessMenu),
-}
-impl ActiveMenu {
-    fn picker(&self) -> &SharedPicker {
-        match self {
-            Self::Windows(menu) => menu.picker(),
-            Self::Commands { picker, .. } | Self::Data(picker) => picker,
-            Self::Files { menu, .. } => menu.picker(),
-            Self::Processes(menu) => menu.picker(),
-        }
-    }
-    fn full_pane(&self) -> bool {
-        self.picker().effective_position(nfm_egui::Position::Center) == nfm_egui::Position::FullPane
-    }
-    fn show(
-        &mut self,
-        ctx: &egui::Context,
-        placement: Placement,
-        appearance: &Appearance,
-        awaiting_handoff: bool,
-    ) -> Option<Outcome> {
-        match self {
-            Self::Windows(menu) => menu
-                .show(ctx, placement, appearance)
-                .map(|event| match event {
-                    WindowEvent::Selected(hwnd) => Outcome::Selected(hwnd),
-                    WindowEvent::Cancelled => Outcome::Cancelled,
-                }),
-            Self::Commands { .. } | Self::Data(_) => {
-                let (picker, menu_actions) = match self {
-                    Self::Commands {
-                        picker,
-                        menu_actions,
-                    } => (picker, Some(menu_actions.as_slice())),
-                    Self::Data(picker) => (picker, None),
-                    _ => unreachable!(),
-                };
-                let is_commands = menu_actions.is_some();
-                let output =
-                    picker.show(ctx, placement, appearance, is_commands && awaiting_handoff);
-                match output.event {
-                    Some(PickerEvent::Accepted(selection)) if is_commands => {
-                        let name = selection
-                            .item
-                            .downcast_ref::<StructuredPickerItem>()?
-                            .fields
-                            .get("Name")?
-                            .clone();
-                        Some(
-                            if menu_actions.is_some_and(|actions| actions.contains(&name)) {
-                                Outcome::MenuRequested(name)
-                            } else {
-                                Outcome::CommandSelected(name)
-                            },
-                        )
-                    }
-                    Some(PickerEvent::Accepted(_)) | Some(PickerEvent::Cancelled) => {
-                        Some(Outcome::Cancelled)
-                    }
-                    Some(PickerEvent::CopyRequested(selection)) => {
-                        ctx.copy_text(selection.text);
-                        picker.notify_copied(ctx);
-                        None
-                    }
-                    Some(PickerEvent::CustomAction { .. }) | None => None,
-                }
-            }
-            Self::Processes(menu) => menu
-                .show(ctx, placement, appearance)
-                .then_some(Outcome::Cancelled),
-            Self::Files { menu, acceptance } => match menu.show(ctx, placement, appearance) {
-                Ok(Some(FileEvent::Selected(path))) => Some(Outcome::FileSelected {
-                    path,
-                    acceptance: *acceptance,
-                }),
-                Ok(Some(FileEvent::Cancelled)) => Some(Outcome::Cancelled),
-                Ok(None) => None,
-                Err(error) => Some(Outcome::Failed(error)),
-            },
-        }
-    }
-    fn into_picker(self) -> SharedPicker {
-        match self {
-            Self::Commands { picker, .. } | Self::Data(picker) => picker,
-            Self::Windows(menu) => menu.into_picker(),
-            Self::Files { menu, .. } => menu.into_picker(),
-            Self::Processes(menu) => menu.into_picker(),
-        }
-    }
+fn full_pane(menu: &dyn PickerView) -> bool {
+    menu.picker().effective_position(nfm_egui::Position::Center) == nfm_egui::Position::FullPane
 }
 
 pub(crate) struct WindowMenuApp {
     receiver: mpsc::Receiver<Command>,
     completed: Completion,
     hwnd: isize,
-    active_menu: Option<ActiveMenu>,
+    active_menu: Option<Box<dyn PickerView>>,
     awaiting_handoff: bool,
     session: Option<u64>,
     appearance: Appearance,
@@ -458,17 +206,16 @@ pub(crate) struct WindowMenuApp {
     had_focus: bool,
     quitting: bool,
     opened_frame: Option<u64>,
-    presentation: Option<(ScreenBounds, f32)>,
+    presentation: Option<ScreenBounds>,
     full_pane: bool,
+    preview_visible: bool,
 }
 impl WindowMenuApp {
-    fn take_picker(&mut self) -> Option<SharedPicker> {
-        self.active_menu.take().map(ActiveMenu::into_picker)
-    }
     fn clear_content(&mut self) {
         self.active_menu = None;
         self.presentation = None;
         self.full_pane = false;
+        self.preview_visible = false;
         self.session = None;
         self.had_focus = false;
         self.opened_frame = None;
@@ -481,58 +228,6 @@ impl WindowMenuApp {
             ShowWindow(self.hwnd as _, SW_HIDE);
         }
     }
-    fn show_files(
-        &mut self,
-        ctx: &egui::Context,
-        session: u64,
-        bounds: ScreenBounds,
-        source: nfm_file_system::FileSystemPickerOptions,
-        acceptance: FileAcceptance,
-    ) {
-        let previous = self.take_picker();
-        self.clear_content();
-        self.session = Some(session);
-        self.opened_frame = Some(ctx.cumulative_frame_nr());
-        let preview_visible = source.preview_visible;
-        match FilePicker::with_shared_picker(
-            ctx,
-            source,
-            PickerConfig {
-                result_rows: self.result_rows,
-                preview_rows: self.preview_rows,
-                ..Default::default()
-            },
-            previous,
-        ) {
-            Ok(mut menu) => {
-                let resolve = self.file_preview_resolver.clone();
-                menu.picker_mut().set_preview_provider(
-                    ctx,
-                    Arc::new(crate::file_preview::ResolvedPreviewProvider::new(
-                        move |selection: &nfm_egui::Selection<nfm_egui::shared::SharedItem>,
-                              cancel| {
-                            let Some(path) = selection.item.downcast_ref::<String>() else {
-                                return Ok(None);
-                            };
-                            resolve(std::path::Path::new(path), cancel)
-                        },
-                    )),
-                );
-                self.active_menu = Some(ActiveMenu::Files { menu, acceptance });
-            }
-            Err(error) => {
-                self.finish(ctx, Outcome::Failed(error));
-                return;
-            }
-        }
-        let height = desktop_height(ctx, &self.appearance, self.result_rows)
-            + if preview_visible {
-                self.preview_rows as f32 * self.appearance.typography.preview_row_height(ctx) + 15.0
-            } else {
-                0.0
-            };
-        self.present(ctx, bounds, height);
-    }
     fn finish(&mut self, ctx: &egui::Context, outcome: Outcome) {
         let session = self.session;
         self.hide(ctx);
@@ -540,39 +235,30 @@ impl WindowMenuApp {
             (self.completed)(session, outcome);
         }
     }
-    fn show(&mut self, ctx: &egui::Context, session: u64, bounds: ScreenBounds) {
-        let previous = self.take_picker();
-        self.clear_content();
-        self.session = Some(session);
-        self.opened_frame = Some(ctx.cumulative_frame_nr());
-        match WindowPicker::with_shared_picker(
-            ctx,
-            self.hwnd,
-            PickerConfig {
-                result_rows: self.result_rows,
-                preview_rows: self.preview_rows,
-                preview_visible: true,
-                ..Default::default()
-            },
-            previous,
-        ) {
-            Ok(menu) => self.active_menu = Some(ActiveMenu::Windows(menu)),
-            Err(error) => {
-                self.finish(ctx, Outcome::Failed(error));
-                return;
-            }
+    /// Window height in points: the configured result rows, the view's header row
+    /// and, while it is visible, the preview pane.
+    fn height(&self, ctx: &egui::Context, menu: &dyn PickerView) -> f32 {
+        let row = self.appearance.typography.preview_row_height(ctx);
+        let mut rows = self.result_rows + 1;
+        if menu.has_header() {
+            rows += 1;
         }
-        self.present(
-            ctx,
-            bounds,
-            desktop_height(ctx, &self.appearance, self.result_rows)
-                + self.preview_rows as f32 * self.appearance.typography.preview_row_height(ctx)
-                + 15.0,
-        );
+        let preview = if menu.picker().preview_visible() {
+            self.preview_rows as f32 * row + 15.0
+        } else {
+            0.0
+        };
+        rows as f32 * row + 56.0 + 2.0 * PICKER_MARGIN + preview
     }
-    fn present(&mut self, ctx: &egui::Context, bounds: ScreenBounds, height_points: f32) {
-        self.presentation = Some((bounds, height_points));
-        self.full_pane = self.active_menu.as_ref().is_some_and(ActiveMenu::full_pane);
+    /// Size the window for the active picker; called again when its layout changes.
+    fn present(&mut self, ctx: &egui::Context, bounds: ScreenBounds) {
+        let Some(menu) = &self.active_menu else {
+            return;
+        };
+        let height_points = self.height(ctx, menu.as_ref());
+        self.presentation = Some(bounds);
+        self.full_pane = full_pane(menu.as_ref());
+        self.preview_visible = menu.picker().preview_visible();
         let visible = unsafe { IsWindowVisible(self.hwnd as _) != 0 };
         unsafe {
             let scale =
@@ -613,112 +299,30 @@ impl WindowMenuApp {
         // Native wake messages process commands even while the window is hidden.
         while let Ok(command) = self.receiver.try_recv() {
             match command {
-                Command::ShowCommands {
+                Command::Show {
                     session,
                     bounds,
-                    rows,
-                    menu_actions,
+                    request,
                 } => {
-                    let previous = self.take_picker();
                     self.clear_content();
                     self.session = Some(session);
                     self.opened_frame = Some(ctx.cumulative_frame_nr());
-                    let source = match crate::egui_command_menu::source(rows) {
-                        Ok(source) => source,
-                        Err(error) => {
-                            self.finish(ctx, Outcome::Failed(error));
-                            continue;
-                        }
+                    let host = PickerHost {
+                        ctx,
+                        hwnd: self.hwnd,
+                        appearance: &self.appearance,
+                        result_rows: self.result_rows,
+                        preview_rows: self.preview_rows,
+                        file_preview_resolver: &self.file_preview_resolver,
                     };
-                    self.active_menu = Some(ActiveMenu::Commands {
-                        menu_actions,
-                        picker: shared::replace(
-                            ctx,
-                            source,
-                            PickerConfig {
-                                title: "Commands".into(),
-                                result_rows: self.result_rows,
-                                preview_rows: self.preview_rows,
-                                preview_visible: false,
-                                ..Default::default()
-                            },
-                            previous,
-                        ),
-                    });
-                    self.present(
-                        ctx,
-                        bounds,
-                        desktop_height(ctx, &self.appearance, self.result_rows)
-                            + self.appearance.typography.preview_row_height(ctx),
-                    );
-                }
-                Command::ShowData {
-                    session,
-                    bounds,
-                    title,
-                    columns,
-                    rows,
-                } => {
-                    let previous = self.take_picker();
-                    self.clear_content();
-                    self.session = Some(session);
-                    self.opened_frame = Some(ctx.cumulative_frame_nr());
-                    match crate::egui_data_menu::replace_picker(
-                        ctx,
-                        title,
-                        columns,
-                        rows,
-                        self.result_rows,
-                        self.preview_rows,
-                        previous,
-                    ) {
-                        Ok(picker) => self.active_menu = Some(ActiveMenu::Data(picker)),
-                        Err(error) => {
-                            self.finish(ctx, Outcome::Failed(error));
-                            continue;
+                    match request.build(&host) {
+                        Ok(menu) => {
+                            self.active_menu = Some(menu);
+                            self.present(ctx, bounds);
                         }
+                        Err(error) => self.finish(ctx, Outcome::Failed(error)),
                     }
-                    self.present(
-                        ctx,
-                        bounds,
-                        desktop_height(ctx, &self.appearance, self.result_rows)
-                            + self.appearance.typography.preview_row_height(ctx)
-                            + self.preview_rows as f32
-                                * self.appearance.typography.preview_row_height(ctx)
-                            + 15.0,
-                    );
                 }
-                Command::ShowProcesses { session, bounds } => {
-                    let previous = self.take_picker();
-                    self.clear_content();
-                    self.session = Some(session);
-                    self.opened_frame = Some(ctx.cumulative_frame_nr());
-                    let menu = crate::egui_process_menu::ProcessMenu::with_picker(
-                        ctx,
-                        self.result_rows,
-                        self.preview_rows,
-                        previous,
-                    );
-                    self.active_menu = Some(ActiveMenu::Processes(menu));
-                    self.present(
-                        ctx,
-                        bounds,
-                        desktop_height(ctx, &self.appearance, self.result_rows)
-                            + self.appearance.typography.preview_row_height(ctx)
-                            + self.preview_rows as f32
-                                * self.appearance.typography.preview_row_height(ctx)
-                            + 15.0,
-                    );
-                }
-                Command::ShowFiles {
-                    session,
-                    bounds,
-                    source,
-                    acceptance,
-                } => {
-                    self.show_files(ctx, session, bounds, source, acceptance);
-                }
-                Command::Show { session, bounds } => self.show(ctx, session, bounds),
                 Command::Hide => self.hide(ctx),
                 Command::Focus if self.session.is_some() => {
                     ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
@@ -752,17 +356,20 @@ impl WindowMenuApp {
         let mut placement = Placement::new(ctx.content_rect());
         placement.margin = PICKER_MARGIN;
         let outcome = menu.show(ctx, placement, &self.appearance, self.awaiting_handoff);
-        let full_pane = menu.full_pane();
-        if full_pane != self.full_pane {
-            if let Some((bounds, height)) = self.presentation {
-                self.present(ctx, bounds, height);
+        // Ctrl+P and full-pane toggles change the window's size.
+        if full_pane(menu.as_ref()) != self.full_pane
+            || menu.picker().preview_visible() != self.preview_visible
+        {
+            if let Some(bounds) = self.presentation {
+                self.present(ctx, bounds);
             }
         }
         match outcome {
-            Some(Outcome::MenuRequested(name)) => {
+            // Keep the window for the next picker; see `awaiting_handoff`.
+            Some(Outcome::Action(action)) if crate::ui::is_menu(action) => {
                 self.awaiting_handoff = true;
                 if let Some(session) = self.session {
-                    (self.completed)(session, Outcome::MenuRequested(name));
+                    (self.completed)(session, Outcome::Action(action));
                 }
             }
             Some(outcome) => self.finish(ctx, outcome),

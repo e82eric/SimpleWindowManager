@@ -1,12 +1,12 @@
 //! Read-only structured menus share the owned egui host.
+use crate::picker::{Outcome, PickerHost, PickerRequest, PickerSource, PickerView};
 use nfm_egui::shared::{self, SharedItem, SharedPicker};
-use nfm_egui::{PickerConfig, Preview, egui};
+use nfm_egui::{Appearance, PickerConfig, PickerEvent, Placement, Preview, egui};
 use nfm_picker_sources::structured::StructuredPickerItem;
 pub use nfm_picker_sources::structured::StructuredSourceRow as DataRow;
 use nfm_picker_sources::structured::structured_source_with_previews;
 use std::sync::Arc;
 
-#[cfg(test)]
 pub(crate) fn picker(
     ctx: &egui::Context,
     title: String,
@@ -14,18 +14,6 @@ pub(crate) fn picker(
     rows: Vec<DataRow>,
     result_rows: usize,
     preview_rows: usize,
-) -> Result<SharedPicker, String> {
-    replace_picker(ctx, title, columns, rows, result_rows, preview_rows, None)
-}
-
-pub(crate) fn replace_picker(
-    ctx: &egui::Context,
-    title: String,
-    columns: Vec<String>,
-    rows: Vec<DataRow>,
-    result_rows: usize,
-    preview_rows: usize,
-    previous: Option<SharedPicker>,
 ) -> Result<SharedPicker, String> {
     let preview_visible = rows.iter().any(|row| row.preview.is_some());
     let source = structured_source_with_previews(columns, rows)?;
@@ -39,7 +27,7 @@ pub(crate) fn replace_picker(
             preview_visible,
             ..Default::default()
         },
-        previous,
+        None,
     );
     picker.set_preview_provider(
         ctx,
@@ -63,6 +51,70 @@ pub(crate) fn replace_picker(
     Ok(picker)
 }
 
+/// Read-only rows built from the configuration each time the picker opens.
+#[derive(Clone, Copy, Debug)]
+pub struct Data(pub fn(&crate::Configuration) -> DataTable);
+#[derive(Clone, Debug, Default)]
+pub struct DataTable {
+    pub title: String,
+    pub columns: Vec<String>,
+    pub rows: Vec<DataRow>,
+}
+impl PickerSource for Data {
+    fn request(&self, configuration: &crate::Configuration) -> Box<dyn PickerRequest> {
+        Box::new((self.0)(configuration))
+    }
+}
+impl PickerRequest for DataTable {
+    fn build(self: Box<Self>, host: &PickerHost<'_>) -> Result<Box<dyn PickerView>, String> {
+        let table = *self;
+        Ok(Box::new(DataView(picker(
+            host.ctx,
+            table.title,
+            table.columns,
+            table.rows,
+            host.result_rows,
+            host.preview_rows,
+        )?)))
+    }
+}
+struct DataView(SharedPicker);
+impl PickerView for DataView {
+    fn picker(&self) -> &SharedPicker {
+        &self.0
+    }
+    fn has_header(&self) -> bool {
+        true
+    }
+    fn show(
+        &mut self,
+        ctx: &egui::Context,
+        placement: Placement,
+        appearance: &Appearance,
+        _: bool,
+    ) -> Option<Outcome> {
+        let event = self.0.show(ctx, placement, appearance, false).event;
+        copy_or_close(ctx, &mut self.0, event)
+    }
+}
+
+/// Read-only handling: accept or cancel closes; copy requests copy the row.
+pub(crate) fn copy_or_close(
+    ctx: &egui::Context,
+    picker: &mut SharedPicker,
+    event: Option<PickerEvent<SharedItem>>,
+) -> Option<Outcome> {
+    match event {
+        Some(PickerEvent::Accepted(_)) | Some(PickerEvent::Cancelled) => Some(Outcome::Cancelled),
+        Some(PickerEvent::CopyRequested(selection)) => {
+            ctx.copy_text(selection.text);
+            picker.notify_copied(ctx);
+            None
+        }
+        Some(PickerEvent::CustomAction { .. }) | None => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -76,81 +128,6 @@ mod tests {
             .snapshot()
             .unwrap())
     }
-    #[test]
-    fn replacing_an_accepted_picker_resets_query_and_rejects_stale_selection() {
-        let ctx = egui::Context::default();
-        let mut old = picker(
-            &ctx,
-            "Commands".into(),
-            vec!["Name".into()],
-            vec![DataRow {
-                cells: vec!["next_menu".into()],
-                preview: None,
-            }],
-            7,
-            14,
-        )
-        .unwrap();
-        old.set_query("next_menu");
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-        while old.selection().is_none() {
-            ctx.run_ui(egui::RawInput::default(), |ui| {
-                old.show(
-                    ui.ctx(),
-                    nfm_egui::Placement::new(ui.ctx().content_rect()),
-                    &nfm_egui::Appearance::default(),
-                    false,
-                );
-            })
-            .drop_without_applying_deltas();
-            assert!(std::time::Instant::now() < deadline);
-            std::thread::sleep(std::time::Duration::from_millis(5));
-        }
-        old.close();
-        let mut next = replace_picker(
-            &ctx,
-            "Details".into(),
-            vec!["Message".into()],
-            vec![DataRow {
-                cells: vec!["replacement".into()],
-                preview: None,
-            }],
-            7,
-            14,
-            Some(old),
-        )
-        .unwrap();
-        assert!(!next.is_closed());
-        assert_eq!(next.query(), "");
-        assert!(
-            next.selection().is_none(),
-            "the old command must not be actionable"
-        );
-        while next.selection().is_none() {
-            ctx.run_ui(egui::RawInput::default(), |ui| {
-                next.show(
-                    ui.ctx(),
-                    nfm_egui::Placement::new(ui.ctx().content_rect()),
-                    &nfm_egui::Appearance::default(),
-                    false,
-                );
-            })
-            .drop_without_applying_deltas();
-            assert!(std::time::Instant::now() < deadline);
-            std::thread::sleep(std::time::Duration::from_millis(5));
-        }
-        assert_eq!(
-            next.selection()
-                .unwrap()
-                .item
-                .downcast_ref::<StructuredPickerItem>()
-                .unwrap()
-                .fields["Message"],
-            "replacement"
-        );
-        assert!(!next.preview_visible());
-    }
-
     #[test]
     fn structured_filter_renders_matching_detail() {
         let ctx = egui::Context::default();

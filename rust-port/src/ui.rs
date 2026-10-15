@@ -8,7 +8,7 @@ use std::{
     cell::RefCell,
     sync::{
         OnceLock,
-        atomic::{AtomicBool, AtomicU32, Ordering},
+        atomic::{AtomicU32, AtomicU64, Ordering},
         mpsc::{self, Receiver, SyncSender},
     },
 };
@@ -49,29 +49,33 @@ impl KeyState {
         *suppressed
     }
 }
-static MENU_VISIBLE: AtomicBool = AtomicBool::new(false);
+/// Session of the visible picker, or 0 while hidden. The UI opens sessions; the
+/// picker host closes them, before running what the picker accepted.
+static VISIBLE_MENU: AtomicU64 = AtomicU64::new(0);
 pub fn menu_visible() -> bool {
-    MENU_VISIBLE.load(Ordering::Acquire)
+    VISIBLE_MENU.load(Ordering::Acquire) != 0
+}
+pub(crate) fn menu_is_visible(session: u64) -> bool {
+    VISIBLE_MENU.load(Ordering::Acquire) == session
+}
+/// Close `session`; false if a newer picker has replaced it.
+pub(crate) fn close_menu(session: u64) -> bool {
+    VISIBLE_MENU
+        .compare_exchange(session, 0, Ordering::AcqRel, Ordering::Acquire)
+        .is_ok()
+}
+/// Run an action from any thread: pickers and quit on the UI thread, the rest on
+/// the worker.
+pub fn dispatch(action: Action) -> bool {
+    if is_menu(action) || matches!(action, Action::Quit) {
+        post(Command::Action(action))
+    } else {
+        crate::worker::send(crate::worker::Command::Action(action))
+    }
 }
 thread_local! { static UI:RefCell<Option<Ui>>=const { RefCell::new(None) }; }
 pub enum Command {
     Action(Action),
-    Named(String),
-    MenuRequested {
-        session: u64,
-        name: String,
-    },
-    Closed {
-        session: u64,
-        restore_focus: bool,
-    },
-    Window(isize),
-    Program(String, bool),
-    FileSelected {
-        session: u64,
-        path: String,
-        acceptance: crate::egui_window_menu::FileAcceptance,
-    },
     Focus,
     Hide,
     Quit,
@@ -96,20 +100,7 @@ pub fn binding(key: u32, modifiers: i32) -> Option<Action> {
         .map(|b| b.action)
 }
 pub fn is_menu(action: Action) -> bool {
-    matches!(
-        action,
-        Action::ShowWindows
-            | Action::ShowPrograms(_)
-            | Action::ShowProcesses
-            | Action::ShowServices
-            | Action::ShowFileSystem
-            | Action::ShowPicker(_)
-            | Action::ShowCommands
-            | Action::ShowFloatLogs
-            | Action::ShowClientLogs
-            | Action::ShowErrorLogs
-            | Action::ShowConfigurationState
-    )
+    matches!(action, Action::ShowPicker(_))
 }
 fn picker_bounds(configuration: &Configuration) -> Option<crate::egui_window_menu::ScreenBounds> {
     let monitor = configuration.selected_picker_monitor()?;
@@ -124,7 +115,6 @@ fn picker_bounds(configuration: &Configuration) -> Option<crate::egui_window_men
 pub struct Ui {
     pub(crate) menu_session: u64,
     pub configuration: std::sync::Arc<Configuration>,
-    pub menu_visible: bool,
     egui_windows: Option<crate::egui_window_menu::WindowMenuHost>,
     bars: Vec<crate::bar::BarWindow>,
     snapshot: Option<std::sync::Arc<crate::worker::Snapshot>>,
@@ -132,12 +122,8 @@ pub struct Ui {
 impl Ui {
     pub fn execute(&mut self, action: Action) -> PlatformResult<()> {
         use Action::*;
-        if is_menu(action) {
-            self.request_menu(action);
-            self.publish_menu_visibility();
-            return Ok(());
-        }
         match action {
+            ShowPicker(picker) => self.show_picker(picker),
             Quit => unsafe {
                 PostQuitMessage(0);
             },
@@ -147,265 +133,49 @@ impl Ui {
         }
         Ok(())
     }
-    fn publish_menu_visibility(&self) {
-        MENU_VISIBLE.store(self.menu_visible, Ordering::Release);
+    fn show_picker(&mut self, picker: &crate::picker::PickerConfig) {
+        self.menu_session = self.menu_session.wrapping_add(1).max(1);
+        // Visible before the host can close it.
+        VISIBLE_MENU.store(self.menu_session, Ordering::Release);
+        if !self.send_picker(picker) {
+            // A menu without an available source must not leave a closed picker visible.
+            self.hide();
+        }
     }
-    fn request_menu(&mut self, action: Action) {
-        self.start_menu(action);
-        // A menu without an available source must not leave a closed picker visible.
-        if !self.menu_visible {
-            if let Some(menu) = &self.egui_windows {
-                menu.hide();
+    fn send_picker(&self, picker: &crate::picker::PickerConfig) -> bool {
+        let Some(host) = self.egui_windows.as_ref() else {
+            return false;
+        };
+        let Some(bounds) = picker_bounds(&self.configuration) else {
+            return false;
+        };
+        let request = picker.source.request(&self.configuration);
+        match host.show_request(self.menu_session, bounds, request) {
+            Ok(()) => true,
+            Err(error) => {
+                crate::error_log::report("picker failed", error);
+                false
             }
-            crate::worker::send(crate::worker::Command::MenuClosed);
         }
-    }
-    fn start_menu(&mut self, action: Action) {
-        use Action::*;
-        self.menu_session = self.menu_session.wrapping_add(1);
-        self.menu_visible = false;
-        match action {
-            ShowWindows => self.run_new_windows_menu(),
-            ShowPrograms(elevated) => self.run_program_launcher_menu(elevated),
-            ShowProcesses => self.run_process_menu(),
-            ShowServices => self.run_services_menu(),
-            ShowFileSystem => self.run_file_system_menu(),
-            ShowPicker(id) => self.run_picker(id),
-            ShowCommands => self.run_commands_menu(),
-            ShowFloatLogs => self.run_float_logs_menu(),
-            ShowClientLogs => self.run_client_logs_menu(),
-            ShowErrorLogs => self.run_error_logs_menu(),
-            ShowConfigurationState => self.run_configuration_state_menu(),
-            _ => unreachable!("start_menu only accepts menu actions"),
-        }
-    }
-    fn menu_closed(&mut self, restore_focus: bool) {
-        self.menu_visible = false;
-        if restore_focus {
-            crate::worker::send(crate::worker::Command::MenuClosed);
-        }
-        self.publish_menu_visibility();
     }
     fn hide(&mut self) {
         if let Some(menu) = &self.egui_windows {
             menu.hide();
         }
-        self.menu_session = self.menu_session.wrapping_add(1);
-        self.menu_visible = false;
-        self.publish_menu_visibility();
+        self.menu_session = self.menu_session.wrapping_add(1).max(1);
+        VISIBLE_MENU.store(0, Ordering::Release);
         crate::worker::send(crate::worker::Command::MenuClosed);
-    }
-    fn run_new_windows_menu(&mut self) {
-        let Some(host) = self.egui_windows.as_ref() else {
-            return;
-        };
-        let Some(bounds) = picker_bounds(&self.configuration) else {
-            return;
-        };
-        match host.show(self.menu_session, bounds) {
-            Ok(()) => {
-                self.menu_visible = true;
-            }
-            Err(error) => {
-                crate::error_log::report("failed to show egui window picker", error);
-                self.egui_windows = None;
-            }
-        }
-    }
-    fn run_program_launcher_menu(&mut self, elevated: bool) {
-        let Some(definition) = self
-            .configuration
-            .program_launchers
-            .iter()
-            .find(|menu| menu.is_elevated == elevated)
-        else {
-            return;
-        };
-        let directories = definition.directories.clone();
-        let Some(host) = self.egui_windows.as_ref() else {
-            return;
-        };
-        let Some(bounds) = picker_bounds(&self.configuration) else {
-            return;
-        };
-        match host.show_programs(
-            self.menu_session,
-            bounds,
-            directories,
-            elevated,
-            self.configuration.file_preview_bat_theme.clone(),
-        ) {
-            Ok(()) => {
-                self.menu_visible = true;
-            }
-            Err(error) => {
-                crate::error_log::report("failed to show egui program picker", error);
-                self.egui_windows = None;
-            }
-        }
-    }
-    fn run_process_menu(&mut self) {
-        let Some(host) = self.egui_windows.as_ref() else {
-            return;
-        };
-        let Some(bounds) = picker_bounds(&self.configuration) else {
-            return;
-        };
-        match host.show_processes(self.menu_session, bounds) {
-            Ok(()) => {
-                self.menu_visible = true;
-            }
-            Err(error) => {
-                crate::error_log::report("failed to show egui process picker", error);
-                self.egui_windows = None;
-            }
-        }
-    }
-    fn run_services_menu(&mut self) {
-        crate::platform::show_services_menu(self);
-    }
-
-    fn run_file_system_menu(&mut self) {
-        let Some(host) = self.egui_windows.as_ref() else {
-            return;
-        };
-        let Some(bounds) = picker_bounds(&self.configuration) else {
-            return;
-        };
-        let options = nfm_file_system::FileSystemPickerOptions {
-            bat_theme: self.configuration.file_preview_bat_theme.clone(),
-            max_depth: 5,
-            preview_visible: true,
-            ..Default::default()
-        };
-        match host.show_file_system(self.menu_session, bounds, options) {
-            Ok(()) => {
-                self.menu_visible = true;
-            }
-            Err(error) => {
-                crate::error_log::report("failed to show egui file picker", error);
-                self.egui_windows = None;
-            }
-        }
-    }
-    fn run_picker(&mut self, id: usize) {
-        let Some(host) = self.egui_windows.as_ref() else {
-            return;
-        };
-        let Some(bounds) = picker_bounds(&self.configuration) else {
-            return;
-        };
-        let Some(config) = self.configuration.pickers.get(id).cloned() else {
-            crate::error_log::report("picker failed", "unknown picker ID");
-            return;
-        };
-        match host.show_picker(self.menu_session, bounds, config) {
-            Ok(()) => self.menu_visible = true,
-            Err(error) => crate::error_log::report("picker failed", error),
-        }
-    }
-    pub fn run_commands_menu(&mut self) {
-        let Some(host) = self.egui_windows.as_ref() else {
-            return;
-        };
-        let Some(bounds) = picker_bounds(&self.configuration) else {
-            return;
-        };
-        match host.show_commands_with_menu_actions(
-            self.menu_session,
-            bounds,
-            crate::platform::command_menu_rows(self),
-            self.configuration
-                .commands
-                .iter()
-                .filter(|command| is_menu(command.action))
-                .map(|command| command.name.clone())
-                .collect(),
-        ) {
-            Ok(()) => {
-                self.menu_visible = true;
-            }
-            Err(error) => {
-                crate::error_log::report("failed to show egui commands picker", error);
-                self.egui_windows = None;
-            }
-        }
-    }
-    pub(crate) fn show_data_menu(
-        &mut self,
-        title: &str,
-        columns: Vec<String>,
-        rows: Vec<crate::egui_data_menu::DataRow>,
-    ) {
-        let Some(host) = self.egui_windows.as_ref() else {
-            return;
-        };
-        let Some(bounds) = picker_bounds(&self.configuration) else {
-            return;
-        };
-        match host.show_data(self.menu_session, bounds, title.into(), columns, rows) {
-            Ok(()) => self.menu_visible = true,
-            Err(error) => {
-                crate::error_log::report("failed to show egui data picker", error);
-                self.egui_windows = None;
-            }
-        }
-    }
-    fn run_float_logs_menu(&mut self) {
-        crate::platform::show_float_logs_menu(self);
-    }
-    fn run_client_logs_menu(&mut self) {
-        crate::platform::show_client_logs_menu(self);
-    }
-
-    fn run_error_logs_menu(&mut self) {
-        crate::platform::show_error_logs_menu(self);
-    }
-
-    fn run_configuration_state_menu(&mut self) {
-        crate::platform::show_configuration_state_menu(self);
     }
 }
 fn start_egui_window_host(
     configuration: &Configuration,
 ) -> Result<crate::egui_window_menu::WindowMenuHost, String> {
-    use crate::egui_window_menu::{Outcome, WindowMenuHost};
+    use crate::egui_window_menu::WindowMenuHost;
     WindowMenuHost::start_with_preview_resolver(
         configuration.picker_result_rows,
         configuration.picker_preview_rows,
         configuration.file_preview_resolver.clone(),
-        |session, outcome| {
-            if let Outcome::FileSelected { path, acceptance } = &outcome {
-                post(Command::FileSelected {
-                    session,
-                    path: path.clone(),
-                    acceptance: *acceptance,
-                });
-                return;
-            }
-            if let Outcome::MenuRequested(name) = outcome {
-                post(Command::MenuRequested { session, name });
-                return;
-            }
-            let selected = match outcome {
-                Outcome::Selected(hwnd) => Some(Command::Window(hwnd)),
-                Outcome::FileSelected { .. } => unreachable!(),
-                Outcome::CommandSelected(name) => Some(Command::Named(name)),
-                Outcome::MenuRequested(_) => unreachable!(),
-                Outcome::Cancelled => None,
-                Outcome::Failed(error) => {
-                    crate::error_log::report("egui picker failed", error);
-                    None
-                }
-            };
-            post(Command::Closed {
-                session,
-                restore_focus: selected.is_none(),
-            });
-            if let Some(command) = selected {
-                post(command);
-            }
-        },
+        crate::picker::complete,
     )
 }
 
@@ -442,7 +212,6 @@ pub fn initialize(
             menu_session: 0,
             configuration: std::sync::Arc::new(configuration),
             egui_windows,
-            menu_visible: false,
             bars,
             snapshot: None,
         };
@@ -471,85 +240,14 @@ pub fn pump(receiver: &Receiver<Command>) {
             let Ok(command) = receiver.try_recv() else {
                 break;
             };
-            if let Command::Closed { session, .. } = &command
-                && (*session != ui.menu_session || !ui.menu_visible)
-            {
-                continue;
-            }
             match command {
-                Command::MenuRequested { session, name } => {
-                    if session != ui.menu_session || !ui.menu_visible {
-                        continue;
-                    }
-                    let action = ui
-                        .configuration
-                        .commands
-                        .iter()
-                        .find(|command| command.name == name)
-                        .map(|command| command.action);
-                    if let Some(action) = action.filter(|action| is_menu(*action)) {
-                        if let Err(error) = ui.execute(action) {
-                            error.report();
-                        }
-                    } else {
-                        ui.hide();
-                    }
-                }
                 Command::Action(action) => {
                     if let Err(error) = ui.execute(action) {
                         error.report();
                     }
                 }
-                Command::Named(name) => {
-                    let action = ui
-                        .configuration
-                        .commands
-                        .iter()
-                        .find(|c| c.name == name)
-                        .map(|c| c.action);
-                    if let Some(action) = action {
-                        if let Err(error) = ui.execute(action) {
-                            error.report();
-                        }
-                    }
-                }
-                Command::Closed { restore_focus, .. } => {
-                    ui.menu_closed(restore_focus);
-                }
-                Command::Window(hwnd) => {
-                    crate::worker::send(crate::worker::Command::Window(hwnd));
-                }
-                Command::Program(value, elevated) => {
-                    crate::worker::send(crate::worker::Command::Program(value, elevated));
-                }
-                Command::FileSelected {
-                    session,
-                    path,
-                    acceptance,
-                } => {
-                    if session != ui.menu_session || !ui.menu_visible {
-                        continue;
-                    }
-                    ui.menu_closed(false);
-                    use crate::egui_window_menu::FileAcceptance;
-                    let command = match acceptance {
-                        FileAcceptance::Open => crate::worker::Command::Program(path, false),
-                        FileAcceptance::Launch { elevated } => {
-                            crate::worker::Command::Program(path, elevated)
-                        }
-                        FileAcceptance::Callback { on_accept } => {
-                            crate::worker::Command::PickerSelected {
-                                on_accept,
-                                selection: crate::picker::PickerSelection::File(path.into()),
-                            }
-                        }
-                    };
-                    if !crate::worker::send(command) {
-                        crate::error_log::report("file selection failed", "worker queue is full");
-                    }
-                }
                 Command::Focus => {
-                    if ui.menu_visible {
+                    if menu_visible() {
                         if let Some(menu) = &ui.egui_windows {
                             menu.focus();
                         }
@@ -598,9 +296,16 @@ mod tests {
         // A fresh press is passed through when its command cannot be queued.
         assert!(!keys.event(65, false, || worker_tx.try_send(Action::SelectLeft).is_ok()));
         assert!(!keys.event(65, true, || panic!("key up must not submit work")));
-        assert!(keys.event(66, false, || ui_tx.try_send(Action::ShowCommands).is_ok()));
-        assert_eq!(ui_rx.try_recv().unwrap(), Action::ShowCommands);
-        assert_eq!(worker_rx.try_recv().unwrap(), Action::SelectLeft);
+        assert!(keys.event(66, false, || {
+            ui_tx
+                .try_send(Action::ShowPicker(&crate::builtin_pickers::COMMANDS))
+                .is_ok()
+        }));
+        assert!(matches!(
+            ui_rx.try_recv().unwrap(),
+            Action::ShowPicker(picker) if std::ptr::eq(picker, &crate::builtin_pickers::COMMANDS)
+        ));
+        assert!(matches!(worker_rx.try_recv().unwrap(), Action::SelectLeft));
         assert!(worker_rx.try_recv().is_err());
     }
 }

@@ -1,11 +1,61 @@
 //! Exercises the actual OpenGL host without starting a second window manager.
-use simple_window_manager_rs::egui_window_menu::{Outcome, ScreenBounds, WindowMenuHost};
+use simple_window_manager_rs::builtin_pickers::{
+    CommandList, DataRow, DataTable, FileAction, Files, Processes, Windows,
+};
+use simple_window_manager_rs::commands::Action;
+use simple_window_manager_rs::egui_window_menu::{ScreenBounds, WindowMenuHost};
+use simple_window_manager_rs::picker::{Outcome, PickerConfig, PickerRequest};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::{
     sync::mpsc,
     time::{Duration, Instant},
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::*;
+fn files(
+    options: nfm_file_system::FileSystemPickerOptions,
+    action: FileAction,
+) -> Box<dyn PickerRequest> {
+    Box::new(Files { options, action })
+}
+fn leak(name: &str) -> &'static str {
+    Box::leak(name.to_owned().into_boxed_str())
+}
+/// Rows named in `menu_actions` open a picker; others launch their own name, so
+/// accepting a row identifies it.
+fn commands(rows: Vec<Vec<String>>, menu_actions: Vec<String>) -> Box<dyn PickerRequest> {
+    Box::new(CommandList {
+        rows: rows
+            .into_iter()
+            .map(|row| {
+                let name = leak(&row[0]);
+                let action = if menu_actions.iter().any(|menu| menu == name) {
+                    Action::ShowPicker(Box::leak(Box::new(PickerConfig::new(name, Windows))))
+                } else {
+                    Action::Launch(name)
+                };
+                (row, action)
+            })
+            .collect(),
+    })
+}
+fn data(title: String, columns: Vec<String>, rows: Vec<DataRow>) -> Box<dyn PickerRequest> {
+    Box::new(DataTable {
+        title,
+        columns,
+        rows,
+    })
+}
+/// The launched path and elevation of a file picker's accept call.
+fn launched(outcome: Outcome) -> Option<(std::path::PathBuf, bool)> {
+    let Outcome::Runtime(call) = outcome else {
+        return None;
+    };
+    let path = call.label().strip_prefix("launch ")?;
+    Some(match path.strip_suffix(" elevated") {
+        Some(path) => (path.into(), true),
+        None => (path.into(), false),
+    })
+}
 static WATCHED_WINDOW: AtomicUsize = AtomicUsize::new(0);
 static HIDE_EVENTS: AtomicUsize = AtomicUsize::new(0);
 unsafe extern "system" fn visibility_event(
@@ -98,7 +148,7 @@ fn main() {
         width: unsafe { GetSystemMetrics(SM_CXSCREEN) },
         height: unsafe { GetSystemMetrics(SM_CYSCREEN) },
     };
-    host.show(1, bounds).unwrap();
+    host.show_request(1, bounds, Box::new(Windows)).unwrap();
     let title: Vec<u16> = "SimpleWindowManager window switcher\0"
         .encode_utf16()
         .collect();
@@ -167,15 +217,15 @@ fn main() {
     let (session, outcome) = receive.recv_timeout(Duration::from_secs(5)).unwrap();
     assert_eq!(session, 1);
     match outcome {
-        Outcome::Selected(selected) => assert_eq!(selected, item.hwnd),
-        Outcome::CommandSelected(_) => panic!("unexpected command selection"),
-        Outcome::FileSelected { .. } => panic!("unexpected file selection"),
+        Outcome::Runtime(call) => {
+            assert_eq!(call.label(), format!("focus window {:#x}", item.hwnd))
+        }
+        Outcome::Action(_) => panic!("unexpected action"),
         Outcome::Failed(error) => panic!("menu failed: {error}"),
         Outcome::Cancelled => panic!("menu cancelled instead of accepting"),
-        Outcome::MenuRequested(_) => panic!("unexpected menu handoff"),
     }
     wait_until(|| unsafe { IsWindowVisible(hwnd) == 0 });
-    host.show(2, bounds).unwrap();
+    host.show_request(2, bounds, Box::new(Windows)).unwrap();
     wait_until(|| unsafe { IsWindowVisible(hwnd) != 0 && GetForegroundWindow() == hwnd });
     std::thread::sleep(Duration::from_millis(300));
     key(hwnd, 0x1B);
@@ -183,7 +233,7 @@ fn main() {
     assert_eq!(session, 2);
     assert!(matches!(outcome, Outcome::Cancelled));
     wait_until(|| unsafe { IsWindowVisible(hwnd) == 0 });
-    host.show(3, bounds).unwrap();
+    host.show_request(3, bounds, Box::new(Windows)).unwrap();
     wait_until(|| unsafe { IsWindowVisible(hwnd) != 0 && GetForegroundWindow() == hwnd });
     host.hide();
     wait_until(|| unsafe { IsWindowVisible(hwnd) == 0 });
@@ -191,7 +241,7 @@ fn main() {
         receive.try_recv().is_err(),
         "superseded menu must not restore focus"
     );
-    host.show(4, bounds).unwrap();
+    host.show_request(4, bounds, Box::new(Windows)).unwrap();
     wait_until(|| unsafe { IsWindowVisible(hwnd) != 0 && GetForegroundWindow() == hwnd });
     if std::env::args().any(|arg| arg == "--pause") {
         std::thread::sleep(Duration::from_secs(10));
@@ -203,7 +253,7 @@ fn main() {
     assert_eq!(session, 4);
     assert!(matches!(outcome, Outcome::Cancelled));
     wait_until(|| unsafe { IsWindowVisible(hwnd) == 0 && IsWindow(hwnd) != 0 });
-    host.show(5, bounds).unwrap();
+    host.show_request(5, bounds, Box::new(Windows)).unwrap();
     wait_until(|| unsafe { IsWindowVisible(hwnd) != 0 && GetForegroundWindow() == hwnd });
     host.hide();
     wait_until(|| unsafe { IsWindowVisible(hwnd) == 0 });
@@ -211,15 +261,18 @@ fn main() {
     std::fs::create_dir_all(&root).unwrap();
     let file = root.join("unique-egui-preview.txt");
     std::fs::write(&file, "native filesystem preview\nsecond line\n").unwrap();
-    host.show_file_system(
+    host.show_request(
         6,
         bounds,
-        nfm_file_system::FileSystemPickerOptions {
-            roots: vec![root.to_string_lossy().into_owned()],
-            max_depth: 5,
-            preview_visible: true,
-            ..Default::default()
-        },
+        files(
+            nfm_file_system::FileSystemPickerOptions {
+                roots: vec![root.to_string_lossy().into_owned()],
+                max_depth: 5,
+                preview_visible: true,
+                ..Default::default()
+            },
+            FileAction::Launch { elevated: false },
+        ),
     )
     .unwrap();
     wait_until(|| unsafe { IsWindowVisible(hwnd) != 0 && GetForegroundWindow() == hwnd });
@@ -238,20 +291,26 @@ fn main() {
     key(hwnd, 0x0D);
     let (session, outcome) = receive.recv_timeout(Duration::from_secs(5)).unwrap();
     assert_eq!(session, 6);
-    assert!(
-        matches!(outcome, Outcome::FileSelected { path, acceptance: simple_window_manager_rs::egui_window_menu::FileAcceptance::Open } if std::path::Path::new(&path) == file)
-    );
+    assert_eq!(launched(outcome), Some((file.clone(), false)));
     wait_until(|| unsafe { IsWindowVisible(hwnd) == 0 });
     std::fs::remove_file(file).unwrap();
     let program = root.join("unique-egui-program.cmd");
     std::fs::write(&program, "@echo test fixture\r\n").unwrap();
     for (session, elevated) in [(7, false), (8, true)] {
-        host.show_programs(
+        host.show_request(
             session,
             bounds,
-            vec![root.to_string_lossy().into_owned()],
-            elevated,
-            Some("gruvbox-dark".into()),
+            files(
+                nfm_file_system::FileSystemPickerOptions {
+                    roots: vec![root.to_string_lossy().into_owned()],
+                    max_depth: 5,
+                    files_only: true,
+                    preview_visible: false,
+                    bat_theme: Some("gruvbox-dark".into()),
+                    ..Default::default()
+                },
+                FileAction::Launch { elevated },
+            ),
         )
         .unwrap();
         wait_until(|| unsafe { IsWindowVisible(hwnd) != 0 && GetForegroundWindow() == hwnd });
@@ -270,14 +329,12 @@ fn main() {
         key(hwnd, 0x0D);
         let (received_session, outcome) = receive.recv_timeout(Duration::from_secs(5)).unwrap();
         assert_eq!(received_session, session);
-        assert!(
-            matches!(outcome, Outcome::FileSelected {path, acceptance: simple_window_manager_rs::egui_window_menu::FileAcceptance::Launch { elevated: received_elevated }} if std::path::Path::new(&path) == program && received_elevated == elevated)
-        );
+        assert_eq!(launched(outcome), Some((program.clone(), elevated)));
         wait_until(|| unsafe { IsWindowVisible(hwnd) == 0 });
     }
     std::fs::remove_file(program).unwrap();
     std::fs::remove_dir(root).unwrap();
-    host.show_processes(9, bounds).unwrap();
+    host.show_request(9, bounds, Box::new(Processes)).unwrap();
     wait_until(|| unsafe { IsWindowVisible(hwnd) != 0 && GetForegroundWindow() == hwnd });
     std::thread::sleep(Duration::from_millis(500));
     for ch in "/".encode_utf16() {
@@ -317,23 +374,26 @@ fn main() {
     assert_eq!(session, 9);
     assert!(matches!(outcome, Outcome::Cancelled));
     wait_until(|| unsafe { IsWindowVisible(hwnd) == 0 });
-    host.show_commands(
+    host.show_request(
         10,
         bounds,
-        vec![
+        commands(
             vec![
-                "fixture_first".into(),
-                "Action".into(),
-                "Ctrl+A".into(),
-                "First fixture".into(),
+                vec![
+                    "fixture_first".into(),
+                    "Action".into(),
+                    "Ctrl+A".into(),
+                    "First fixture".into(),
+                ],
+                vec![
+                    "fixture_selected".into(),
+                    "Action".into(),
+                    "Ctrl+B".into(),
+                    "Selected fixture".into(),
+                ],
             ],
-            vec![
-                "fixture_selected".into(),
-                "Action".into(),
-                "Ctrl+B".into(),
-                "Selected fixture".into(),
-            ],
-        ],
+            Vec::new(),
+        ),
     )
     .unwrap();
     wait_until(|| unsafe { IsWindowVisible(hwnd) != 0 && GetForegroundWindow() == hwnd });
@@ -354,29 +414,32 @@ fn main() {
     let (session, outcome) = receive.recv_timeout(Duration::from_secs(5)).unwrap();
     assert_eq!(session, 10);
     match outcome {
-        Outcome::CommandSelected(name) => assert_eq!(name, "fixture_selected"),
+        Outcome::Action(Action::Launch(name)) => assert_eq!(name, "fixture_selected"),
         Outcome::Cancelled => panic!("commands cancelled"),
         Outcome::Failed(error) => panic!("commands failed: {error}"),
         _ => panic!("unexpected command outcome"),
     };
     wait_until(|| unsafe { IsWindowVisible(hwnd) == 0 });
-    host.show_commands(
+    host.show_request(
         11,
         bounds,
-        vec![
+        commands(
             vec![
-                "fixture_first".into(),
-                "Action".into(),
-                "Ctrl+A".into(),
-                "First fixture".into(),
+                vec![
+                    "fixture_first".into(),
+                    "Action".into(),
+                    "Ctrl+A".into(),
+                    "First fixture".into(),
+                ],
+                vec![
+                    "fixture_selected".into(),
+                    "Action".into(),
+                    "Ctrl+B".into(),
+                    "Selected fixture".into(),
+                ],
             ],
-            vec![
-                "fixture_selected".into(),
-                "Action".into(),
-                "Ctrl+B".into(),
-                "Selected fixture".into(),
-            ],
-        ],
+            Vec::new(),
+        ),
     )
     .unwrap();
     wait_until(|| unsafe { IsWindowVisible(hwnd) != 0 && GetForegroundWindow() == hwnd });
@@ -386,15 +449,18 @@ fn main() {
     assert_eq!(session, 11);
     assert!(matches!(outcome, Outcome::Cancelled));
     wait_until(|| unsafe { IsWindowVisible(hwnd) == 0 });
-    host.show_commands(
+    host.show_request(
         12,
         bounds,
-        vec![vec![
-            "fixture_updated".into(),
-            "Action".into(),
-            "Ctrl+C".into(),
-            "Updated fixture".into(),
-        ]],
+        commands(
+            vec![vec![
+                "fixture_updated".into(),
+                "Action".into(),
+                "Ctrl+C".into(),
+                "Updated fixture".into(),
+            ]],
+            Vec::new(),
+        ),
     )
     .unwrap();
     wait_until(|| unsafe { IsWindowVisible(hwnd) != 0 && GetForegroundWindow() == hwnd });
@@ -402,7 +468,7 @@ fn main() {
     key(hwnd, 0x0D);
     let (session, outcome) = receive.recv_timeout(Duration::from_secs(5)).unwrap();
     assert_eq!(session, 12);
-    assert!(matches!(outcome, Outcome::CommandSelected(name) if name == "fixture_updated"));
+    assert!(matches!(outcome, Outcome::Action(Action::Launch(name)) if name == "fixture_updated"));
     wait_until(|| unsafe { IsWindowVisible(hwnd) == 0 });
     for (index, title) in [
         "Services",
@@ -415,15 +481,17 @@ fn main() {
     .enumerate()
     {
         let session = 20 + index as u64;
-        host.show_data(
+        host.show_request(
             session,
             bounds,
-            title.into(),
-            vec!["Property".into(), "Value".into()],
-            vec![simple_window_manager_rs::egui_window_menu::DataRow {
-                cells: vec!["fixture".into(), title.into()],
-                preview: (index >= 3).then(|| format!("{title}\nMultiline detail preview")),
-            }],
+            data(
+                title.into(),
+                vec!["Property".into(), "Value".into()],
+                vec![DataRow {
+                    cells: vec!["fixture".into(), title.into()],
+                    preview: (index >= 3).then(|| format!("{title}\nMultiline detail preview")),
+                }],
+            ),
         )
         .unwrap();
         wait_until(|| unsafe { IsWindowVisible(hwnd) != 0 && GetForegroundWindow() == hwnd });
@@ -452,16 +520,18 @@ fn main() {
     std::fs::create_dir_all(&handoff_root).unwrap();
     for index in 0..5 {
         let session = 40 + index * 2;
-        host.show_commands_with_menu_actions(
+        host.show_request(
             session,
             bounds,
-            vec![vec![
-                "next_menu".into(),
-                "Menu".into(),
-                "".into(),
-                "Handoff fixture".into(),
-            ]],
-            vec!["next_menu".into()],
+            commands(
+                vec![vec![
+                    "next_menu".into(),
+                    "Menu".into(),
+                    "".into(),
+                    "Handoff fixture".into(),
+                ]],
+                vec!["next_menu".into()],
+            ),
         )
         .unwrap();
         wait_until(|| unsafe { IsWindowVisible(hwnd) != 0 && GetForegroundWindow() == hwnd });
@@ -471,7 +541,9 @@ fn main() {
         key(hwnd, 0x0D);
         let (requested_session, outcome) = receive.recv_timeout(Duration::from_secs(5)).unwrap();
         assert_eq!(requested_session, session);
-        assert!(matches!(outcome, Outcome::MenuRequested(name) if name == "next_menu"));
+        assert!(
+            matches!(outcome, Outcome::Action(Action::ShowPicker(picker)) if picker.name == "next_menu")
+        );
         // Deliberately delay the main-thread handoff. No hide or focus loss is allowed.
         std::thread::sleep(Duration::from_millis(150));
         pump_events();
@@ -480,36 +552,53 @@ fn main() {
         assert_eq!(unsafe { GetForegroundWindow() }, hwnd);
         match index {
             0 => host
-                .show_data(
+                .show_request(
                     session + 1,
                     bounds,
-                    "Details".into(),
-                    vec!["Message".into()],
-                    vec![simple_window_manager_rs::egui_window_menu::DataRow {
-                        cells: vec!["new row".into()],
-                        preview: Some("replacement preview".into()),
-                    }],
+                    data(
+                        "Details".into(),
+                        vec!["Message".into()],
+                        vec![DataRow {
+                            cells: vec!["new row".into()],
+                            preview: Some("replacement preview".into()),
+                        }],
+                    ),
                 )
                 .unwrap(),
-            1 => host.show(session + 1, bounds).unwrap(),
-            2 => host.show_processes(session + 1, bounds).unwrap(),
+            1 => host
+                .show_request(session + 1, bounds, Box::new(Windows))
+                .unwrap(),
+            2 => host
+                .show_request(session + 1, bounds, Box::new(Processes))
+                .unwrap(),
             3 => host
-                .show_file_system(
+                .show_request(
                     session + 1,
                     bounds,
-                    nfm_file_system::FileSystemPickerOptions {
-                        roots: vec![handoff_root.to_string_lossy().into_owned()],
-                        ..Default::default()
-                    },
+                    files(
+                        nfm_file_system::FileSystemPickerOptions {
+                            roots: vec![handoff_root.to_string_lossy().into_owned()],
+                            ..Default::default()
+                        },
+                        FileAction::Launch { elevated: false },
+                    ),
                 )
                 .unwrap(),
             _ => host
-                .show_programs(
+                .show_request(
                     session + 1,
                     bounds,
-                    vec![handoff_root.to_string_lossy().into_owned()],
-                    false,
-                    Some("gruvbox-dark".into()),
+                    files(
+                        nfm_file_system::FileSystemPickerOptions {
+                            roots: vec![handoff_root.to_string_lossy().into_owned()],
+                            max_depth: 5,
+                            files_only: true,
+                            preview_visible: false,
+                            bat_theme: Some("gruvbox-dark".into()),
+                            ..Default::default()
+                        },
+                        FileAction::Launch { elevated: false },
+                    ),
                 )
                 .unwrap(),
         }

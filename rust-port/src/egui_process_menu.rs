@@ -1,14 +1,10 @@
 //! SWM process presentation using NFM's shared picker.
+use crate::picker::{Outcome, PickerHost, PickerRequest, PickerSource, PickerView};
 use nfm_egui::{Appearance, PickerConfig, Placement, egui, shared::SharedPicker};
 use nfm_process_egui::ProcessPicker;
 pub(crate) struct ProcessMenu(ProcessPicker<nfm_egui::shared::SharedSource>);
 impl ProcessMenu {
-    pub(crate) fn with_picker(
-        ctx: &egui::Context,
-        result_rows: usize,
-        preview_rows: usize,
-        previous: Option<SharedPicker>,
-    ) -> Self {
+    pub(crate) fn new(ctx: &egui::Context, result_rows: usize, preview_rows: usize) -> Self {
         Self(ProcessPicker::with_shared_picker(
             ctx,
             PickerConfig {
@@ -17,22 +13,44 @@ impl ProcessMenu {
                 preview_visible: false,
                 ..Default::default()
             },
-            previous,
+            None,
         ))
     }
-    pub(crate) fn picker(&self) -> &SharedPicker {
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct Processes;
+impl PickerSource for Processes {
+    fn request(&self, _: &crate::Configuration) -> Box<dyn PickerRequest> {
+        Box::new(Processes)
+    }
+}
+impl PickerRequest for Processes {
+    fn build(self: Box<Self>, host: &PickerHost<'_>) -> Result<Box<dyn PickerView>, String> {
+        Ok(Box::new(ProcessMenu::new(
+            host.ctx,
+            host.result_rows,
+            host.preview_rows,
+        )))
+    }
+}
+impl PickerView for ProcessMenu {
+    fn picker(&self) -> &SharedPicker {
         self.0.picker()
     }
-    pub(crate) fn into_picker(self) -> SharedPicker {
-        self.0.into_picker()
+    fn has_header(&self) -> bool {
+        true
     }
-    pub(crate) fn show(
+    fn show(
         &mut self,
         ctx: &egui::Context,
         placement: Placement,
         appearance: &Appearance,
-    ) -> bool {
-        self.0.show(ctx, placement, appearance)
+        _: bool,
+    ) -> Option<Outcome> {
+        self.0
+            .show(ctx, placement, appearance)
+            .then_some(Outcome::Cancelled)
     }
 }
 
@@ -46,7 +64,7 @@ mod tests {
         let deadline = Instant::now() + Duration::from_secs(5);
         loop {
             ctx.run_ui(egui::RawInput::default(), |ui| {
-                menu.show(
+                menu.0.show(
                     ui.ctx(),
                     Placement::new(ui.ctx().content_rect()),
                     &Appearance::default(),
@@ -68,14 +86,9 @@ mod tests {
         }
     }
     #[test]
-    fn nfm_process_picker_reuses_swm_control_and_maps_process_items() {
+    fn nfm_process_picker_maps_process_items() {
         let ctx = egui::Context::default();
-        let mut menu = ProcessMenu::with_picker(&ctx, 7, 14, None);
+        let mut menu = ProcessMenu::new(&ctx, 7, 14);
         select_self(&ctx, &mut menu);
-        let picker = menu.into_picker();
-        let mut reopened = ProcessMenu::with_picker(&ctx, 7, 14, Some(picker));
-        assert!(reopened.0.picker().selection().is_none());
-        assert_eq!(reopened.0.picker().query(), "");
-        select_self(&ctx, &mut reopened);
     }
 }

@@ -1,3 +1,4 @@
+use crate::builtin_pickers::{COMMANDS, FILE_SYSTEM, PROCESSES, SERVICES, WINDOWS, program_launcher};
 use crate::commands::{Action, KeyBinding};
 use crate::config::{BarSegmentValue, PickerMonitor};
 use crate::model::WindowRoutingMode;
@@ -61,11 +62,11 @@ pub fn configure(configuration: &mut Configuration) {
     configuration.workspace_register("Desktop", "0", false, Layout::Deck);
 
     for (key, action) in [
-        (VK_SPACE as u32, Action::ShowWindows),
-        (VK_F14 as u32, Action::ShowServices),
-        (VK_F15 as u32, Action::ShowProcesses),
-        (VK_F17 as u32, Action::ShowCommands),
-        (VK_F16 as u32, Action::ShowFileSystem),
+        (VK_SPACE as u32, Action::ShowPicker(&WINDOWS)),
+        (VK_F14 as u32, Action::ShowPicker(&SERVICES)),
+        (VK_F15 as u32, Action::ShowPicker(&PROCESSES)),
+        (VK_F17 as u32, Action::ShowPicker(&COMMANDS)),
+        (VK_F16 as u32, Action::ShowPicker(&FILE_SYSTEM)),
     ] {
         configuration.keybinding_create(KeyBinding {
             modifiers,
@@ -73,31 +74,22 @@ pub fn configure(configuration: &mut Configuration) {
             action,
         });
     }
-    let not_elevated = configuration.register_program_launcher_menu(false);
-    let elevated = configuration.register_program_launcher_menu(true);
-    configuration.keybinding_create(KeyBinding {
-        modifiers,
-        key: b'P' as u32,
-        action: Action::ShowPrograms(false),
-    });
-    configuration.keybinding_create(KeyBinding {
-        modifiers: modifiers | LSHIFT,
-        key: b'P' as u32,
-        action: Action::ShowPrograms(true),
-    });
-    for directory in [
+    let program_directories = [
         "%USERPROFILE%\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\",
         "C:\\ProgramData\\Microsoft\\Windows\\Start Menu\\",
         "%USERPROFILE%\\AppData\\Local\\Microsoft\\WindowsApps\\",
+    ];
+    for (name, extra_modifiers, elevated) in [
+        ("ProgramLauncherMenu_not_elevated", 0, false),
+        ("ProgramLauncherMenu_elevated", LSHIFT, true),
     ] {
-        configuration.program_launcher_add_directory(not_elevated, directory);
-    }
-    for directory in [
-        "%USERPROFILE%\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\",
-        "C:\\ProgramData\\Microsoft\\Windows\\Start Menu\\",
-        "%USERPROFILE%\\AppData\\Local\\Microsoft\\WindowsApps\\",
-    ] {
-        configuration.program_launcher_add_directory(elevated, directory);
+        let launcher =
+            configuration.register_picker(program_launcher(name, &program_directories, elevated));
+        configuration.keybinding_create(KeyBinding {
+            modifiers: modifiers | extra_modifiers,
+            key: b'P' as u32,
+            action: Action::ShowPicker(launcher),
+        });
     }
 
     use BarSegmentValue::*;

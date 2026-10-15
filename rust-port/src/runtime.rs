@@ -341,17 +341,7 @@ impl Runtime {
             return Ok(());
         }
         match action {
-            ShowWindows
-            | ShowPrograms(_)
-            | ShowProcesses
-            | ShowServices
-            | ShowFileSystem
-            | ShowPicker(_)
-            | ShowCommands
-            | ShowFloatLogs
-            | ShowClientLogs
-            | ShowErrorLogs
-            | ShowConfigurationState => unreachable!(),
+            ShowPicker(_) => unreachable!(),
             Quit => platform_exit(),
             QuitAndRestore => {
                 crate::restore::restore_moved_windows_to_screen(false)?;

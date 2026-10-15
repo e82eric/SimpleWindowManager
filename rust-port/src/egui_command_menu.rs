@@ -1,4 +1,9 @@
 //! Build the small in-memory command list synchronously for each opening.
+use crate::commands::Action;
+use crate::picker::{Outcome, PickerHost, PickerRequest, PickerSource, PickerView};
+use nfm_egui::shared::{self, SharedPicker};
+use nfm_egui::{Appearance, PickerEvent, Placement, egui};
+use nfm_picker_sources::structured::StructuredPickerItem;
 use nfm_picker_sources::structured::StructuredStreamingSnapshot;
 use nfm_search_core::snapshot_store::SnapshotStore;
 use std::sync::Arc;
@@ -13,6 +18,80 @@ pub(crate) fn source(rows: Vec<Vec<String>>) -> Result<Arc<CommandSource>, Strin
             .collect(),
         rows,
     )
+}
+
+/// The registered commands; accepting one runs its action.
+#[derive(Clone, Copy, Debug)]
+pub struct Commands;
+/// Rows of Name, Type, KeyBinding and Description, each with the action it runs.
+pub struct CommandList {
+    pub rows: Vec<(Vec<String>, Action)>,
+}
+impl PickerSource for Commands {
+    fn request(&self, configuration: &crate::Configuration) -> Box<dyn PickerRequest> {
+        Box::new(CommandList {
+            rows: crate::platform::command_menu_rows(configuration)
+                .into_iter()
+                .zip(configuration.commands.iter().map(|command| command.action))
+                .collect(),
+        })
+    }
+}
+impl PickerRequest for CommandList {
+    fn build(self: Box<Self>, host: &PickerHost<'_>) -> Result<Box<dyn PickerView>, String> {
+        let (rows, actions) = self
+            .rows
+            .into_iter()
+            .map(|(row, action)| {
+                let name = row.first().cloned().unwrap_or_default();
+                (row, (name, action))
+            })
+            .unzip();
+        let picker = shared::replace(
+            host.ctx,
+            source(rows)?,
+            nfm_egui::PickerConfig {
+                title: "Commands".into(),
+                preview_visible: false,
+                ..host.config()
+            },
+            None,
+        );
+        Ok(Box::new(CommandsView { picker, actions }))
+    }
+}
+struct CommandsView {
+    picker: SharedPicker,
+    actions: Vec<(String, Action)>,
+}
+impl PickerView for CommandsView {
+    fn picker(&self) -> &SharedPicker {
+        &self.picker
+    }
+    fn has_header(&self) -> bool {
+        true
+    }
+    fn show(
+        &mut self,
+        ctx: &egui::Context,
+        placement: Placement,
+        appearance: &Appearance,
+        awaiting_handoff: bool,
+    ) -> Option<Outcome> {
+        match self
+            .picker
+            .show(ctx, placement, appearance, awaiting_handoff)
+            .event
+        {
+            Some(PickerEvent::Accepted(selection)) => {
+                let item = selection.item.downcast_ref::<StructuredPickerItem>()?;
+                let name = item.fields.get("Name")?;
+                let (_, action) = self.actions.iter().find(|(n, _)| n == name)?;
+                Some(Outcome::Action(*action))
+            }
+            event => crate::egui_data_menu::copy_or_close(ctx, &mut self.picker, event),
+        }
+    }
 }
 
 #[cfg(test)]

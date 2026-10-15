@@ -48,7 +48,7 @@ distinguish queued work from time spent executing it.
 
 ## egui window switcher
 
-The existing `ShowWindows` binding now opens `nfm-egui` (the default configuration
+The `ShowPicker(&builtin_pickers::WINDOWS)` binding now opens `nfm-egui` (the default configuration
 uses Alt+Space). SimpleWindowManager creates and owns the Win32 popup, OpenGL
 context and Win32 message loop directly. Windows keyboard, text/IME, pointer and
 clipboard input is translated into egui events; neither eframe nor winit is used. NFM provides window
@@ -205,9 +205,8 @@ Enter closes these read-only menus; Escape, Alt+F4, and focus loss dismiss them.
 Closing restores focus through the same session-checked path as other menus.
 
 Selecting another menu from Commands keeps the native popup visible and focused.
-All menu types reuse the picker's `replace_source` API through an adapter that
-preserves typed payloads and each source's search behavior. Previous rows remain
-visible while the replacement source loads, with stale selections blocked.
+Each opening builds a fresh picker; all menu types share NFM's adapter, which
+preserves typed payloads and each source's search behavior.
 The last complete frame remains visible while the
 main thread resolves the command. Ordinary commands and dismissal still close
 the popup. Replacement resets the query and suppresses the accepting Enter event.
@@ -220,7 +219,7 @@ its source files are not modified or replaced.
 
 ## egui filesystem menu
 
-`ShowFileSystem` uses the same persistent, undecorated OpenGL window as the window
+`ShowPicker(&builtin_pickers::FILE_SYSTEM)` uses the same persistent, undecorated OpenGL window as the window
 switcher. NFM streams filesystem snapshots into the shared egui picker while
 scanning continues. The initial scan retains the existing five-level limit;
 entering a directory searches its subtree. Closing or navigating cancels the old
@@ -242,19 +241,35 @@ The native smoke example also checks filesystem typing and exact file selection
 with previews enabled, without capturing the desktop.
 ## Registered pickers
 
-Register a named picker in your Rust configuration and bind its ID to a command
-or keybinding. Its source describes what to list; its callback receives a typed
-selection. Files are currently the supported source:
+Every menu is a `&'static PickerConfig`: a display name plus a source describing
+what to list. `Action::ShowPicker(picker)` opens it from a keybinding or command.
+The kinds SWM ships and its built-in pickers live in `builtin_pickers`:
+
+| Static | Name | Source |
+| --- | --- | --- |
+| `WINDOWS` | `ListWindowsMenu` | `Windows` |
+| `PROCESSES` | `ProcessListMenu` | `Processes` |
+| `COMMANDS` | `ListKeyBindings` | `Commands` |
+| `FILE_SYSTEM` | `FileSystemMenu` | `Files` (launches the selection) |
+| `SERVICES`, `FLOAT_LOGS`, `CLIENT_LOGS`, `ERROR_LOGS`, `CONFIGURATION_STATE` | `ServiceListMenu`, `FloatLogsMenu`, `ClientLogsMenu`, `ErrorLogsMenu`, `ConfigurationStateMenu` | `Data` |
+
+Bind a built-in with `Action::ShowPicker(&builtin_pickers::WINDOWS)`.
+`register_picker` keeps a picker you define for the life of the process and returns
+the reference to bind; `configuration.pickers` lists every picker. `Files`
+pickers either launch the selection (`FileAction::Launch { elevated }`) or pass its
+path to a callback (`FileAction::Callback`). `Data` pickers take a
+`fn(&Configuration) -> DataTable` that builds read-only rows each time the
+picker opens.
 
 ```rust
 use simple_window_manager_rs::{
+    builtin_pickers::{FileAction, Files},
     commands::Action,
-    picker::{PickerConfig, PickerSelection, PickerSource},
+    picker::PickerConfig,
 };
-use std::io;
+use std::{io, path::PathBuf};
 
-fn open_selection(selection: PickerSelection) -> io::Result<()> {
-    let PickerSelection::File(path) = selection;
+fn open_solution(path: PathBuf) -> io::Result<()> {
     std::process::Command::new(r"C:\Tools\Rider\bin\rider64.exe")
         .arg(path)
         .spawn()?;
@@ -262,20 +277,35 @@ fn open_selection(selection: PickerSelection) -> io::Result<()> {
 }
 
 // Inside configure(configuration):
-let solutions = configuration.register_picker(PickerConfig {
-    name: "Open solution in Rider".into(),
-    source: PickerSource::Files(nfm_file_system::FileSystemPickerOptions {
-        roots: vec![r"C:\src".into(), r"G:\src".into()],
-        files_only: true,
-        search_string: Some(".sln$ ".into()),
-        ..Default::default()
-    }),
-    on_accept: open_selection,
-});
+let solutions = configuration.register_picker(PickerConfig::new(
+    "RiderSolutions",
+    Files {
+        options: nfm_file_system::FileSystemPickerOptions {
+            roots: vec![r"C:\src".into(), r"G:\src".into()],
+            files_only: true,
+            search_string: Some(".sln$ ".into()),
+            ..Default::default()
+        },
+        action: FileAction::Callback(open_solution),
+    },
+));
 configuration.command_create("RiderSolutions", Action::ShowPicker(solutions));
 ```
 
-Roots must be existing directories. Registered pickers use NFM's existing
+New kinds implement the three traits in `picker`: `PickerSource` (runs on the UI
+thread and captures data from the configuration), `PickerRequest` (builds the
+control on the picker thread) and `PickerView` (draws it and returns an
+`Outcome`). The host sizes the window from the view: a header row when
+`has_header` says the source shows one, and the preview pane while NFM reports it
+visible, resizing when Ctrl+P toggles it. An outcome is a cancellation, a
+failure, an `Action` to run as a keybinding would (a `ShowPicker` action swaps
+pickers without closing the window), or a `RuntimeCall`: picker-specific code
+run with the window-manager runtime after the picker closes. A runtime call
+blocks window management while it runs, so slow work belongs on its own thread.
+The host, UI and worker know nothing about individual kinds.
+
+Empty roots use NFM's drive list. A file picker without a `bat_theme` uses
+`file_preview_bat_theme`. File pickers use NFM's existing
 filesystem picker, including directory navigation, previews, and cancellation.
 `search_string` sets the editable initial query; it is not an enforced extension
 restriction. NFM owns scanning and search without a separate SWM filtering source.
@@ -284,17 +314,18 @@ spawn separate work for lengthy tasks. Returned errors appear in SWM's error log
 
 ## egui programs menu
 
-Both `ShowPrograms(false)` and `ShowPrograms(true)` use the persistent egui host.
-Each uses its configured launcher directories, streaming file-only results with
-the existing five-level scan limit. An empty directory list searches the current
-working directory, matching the previous menu. Previews are hidden initially,
+`builtin_pickers::program_launcher(name, directories, elevated)` builds a `Files` picker
+for program launchers; the default configuration registers
+`ProgramLauncherMenu_not_elevated` and `ProgramLauncherMenu_elevated` over the
+Start Menu directories. Each streams file-only results with
+the existing five-level scan limit. Previews are hidden initially,
 keeping the compact desktop layout. Selection preserves the existing normal or
 elevated program action; cancellation restores focus through the menu session.
 The native smoke test verifies the selected path and elevation flag for both
 launchers without executing the selected program.
 ## egui process menu
 
-`ShowProcesses` uses the shared egui host and NFM's typed process snapshots.
+`ShowPicker(&builtin_pickers::PROCESSES)` uses the shared egui host and NFM's typed process snapshots.
 The Name, PID, WorkingSet, PrivateBytes and CPU header follows the structured
 query, with the existing structured filtering and Tab completion. Ctrl+P toggles
 the details preview, initially hidden as in the Skia menu. Ctrl+R refreshes while
@@ -358,3 +389,6 @@ configuration.picker_monitor = PickerMonitor::Fixed(1); // Second SWM monitor
 The default is `Primary`, which follows `Configuration.primary_monitor`. Indices refer to SWM's zero-based monitor list, not
 Windows display numbers. Hidden, missing, or unusable targets fall back to the
 first visible monitor. Rebuild and restart SWM after changing the Rust config.
+
+
+

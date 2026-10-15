@@ -103,9 +103,8 @@ pub(crate) fn schedule_workspace_move_focus_finish() -> bool {
     timer != 0
 }
 
-pub(crate) fn command_menu_rows(runtime: &crate::ui::Ui) -> Vec<Vec<String>> {
-    let rows = runtime
-        .configuration
+pub(crate) fn command_menu_rows(configuration: &crate::Configuration) -> Vec<Vec<String>> {
+    let rows = configuration
         .commands
         .iter()
         .map(|command| {
@@ -113,7 +112,7 @@ pub(crate) fn command_menu_rows(runtime: &crate::ui::Ui) -> Vec<Vec<String>> {
                 command.name.clone(),
                 command_type(command.action).to_owned(),
                 key_binding_text(command.modifiers, command.key),
-                command_description(runtime, command.action),
+                command_description(configuration, command.action),
             ]
         })
         .collect();
@@ -171,18 +170,7 @@ pub(crate) fn binding_name(binding: &crate::commands::KeyBinding) -> String {
         SetTile => "swap_selected_monitor_to_tile_layout".into(),
         SetTileReversed => "swap_selected_monitor_to_tile_layout_reversed".into(),
         RedrawFocused => "redraw_focused_window".into(),
-        ShowWindows => "ListWindowsMenu".into(),
-        ShowProcesses => "ProcessListMenu".into(),
-        ShowServices => "ServiceListMenu".into(),
-        ShowFileSystem => "FileSystemMenu".into(),
-        ShowPicker(id) => format!("Picker[{id}]"),
-        ShowCommands => "ListKeyBindings".into(),
-        ShowFloatLogs => "FloatLogsMenu".into(),
-        ShowClientLogs => "ClientLogsMenu".into(),
-        ShowErrorLogs => "ErrorLogsMenu".into(),
-        ShowConfigurationState => "ConfigurationStateMenu".into(),
-        ShowPrograms(true) => "ProgramLauncherMenu_elevated".into(),
-        ShowPrograms(false) => "ProgramLauncherMenu_not_elevated".into(),
+        ShowPicker(picker) => picker.name.into(),
         Launch(_) => "Shell".into(),
         MoveFloat(1, 0) => "move_focused_window_right".into(),
         MoveFloat(-1, 0) => "move_focused_window_left".into(),
@@ -204,34 +192,26 @@ fn command_type(action: crate::commands::Action) -> &'static str {
             "WorkspaceFunction"
         }
         MoveFloatToMonitor(_) => "MonitorFunction",
-        ShowPrograms(_) => "ProgramLauncherFunction",
         Launch(_) => "Shell",
         _ => "Function",
     }
 }
 
-fn command_description(runtime: &crate::ui::Ui, action: crate::commands::Action) -> String {
+fn command_description(
+    configuration: &crate::Configuration,
+    action: crate::commands::Action,
+) -> String {
     use crate::commands::Action::*;
     match action {
-        SelectWorkspace(i) | MoveToWorkspace(i) | MoveWorkspaceToMonitor(i, _) => runtime
-            .configuration
+        SelectWorkspace(i) | MoveToWorkspace(i) | MoveWorkspaceToMonitor(i, _) => configuration
             .state
             .workspaces
             .get(i)
             .map(|workspace| workspace.name.clone())
             .unwrap_or_default(),
         MoveFloatToMonitor(i) => (i + 1).to_string(),
-        ShowPrograms(elevated) => format!(
-            "ProgramLauncher({})",
-            if elevated { "elevated" } else { "not elevated" }
-        ),
         Launch(command) => command.into(),
-        ShowPicker(id) => runtime
-            .configuration
-            .pickers
-            .get(id)
-            .map(|picker| picker.name.clone())
-            .unwrap_or_default(),
+        ShowPicker(picker) => picker.name.into(),
         ToggleDebugOutput => format!(
             "OutputDebugString logging is {}",
             if crate::error_log::debug_output_enabled() {
@@ -312,9 +292,10 @@ mod key_name_tests {
     }
 }
 
-pub(crate) fn show_float_logs_menu(_runtime: &mut crate::ui::Ui) {
-    let rows: Vec<crate::egui_data_menu::DataRow> = _runtime
-        .configuration
+pub(crate) fn float_logs_table(
+    configuration: &crate::Configuration,
+) -> crate::egui_data_menu::DataTable {
+    let rows: Vec<crate::egui_data_menu::DataRow> = configuration
         .state
         .float_log_buffer
         .iter()
@@ -357,8 +338,7 @@ pub(crate) fn show_float_logs_menu(_runtime: &mut crate::ui::Ui) {
     } else {
         rows
     };
-    show_array_columns(
-        _runtime,
+    array_columns_table(
         rows,
         "Float logs",
         &[
@@ -376,12 +356,13 @@ pub(crate) fn show_float_logs_menu(_runtime: &mut crate::ui::Ui) {
             "Height",
         ],
         &[0, 1, 2, 3, 4, 7],
-    );
+    )
 }
 
-pub(crate) fn show_client_logs_menu(_runtime: &mut crate::ui::Ui) {
-    let rows: Vec<crate::egui_data_menu::DataRow> = _runtime
-        .configuration
+pub(crate) fn client_logs_table(
+    configuration: &crate::Configuration,
+) -> crate::egui_data_menu::DataTable {
+    let rows: Vec<crate::egui_data_menu::DataRow> = configuration
         .state
         .client_log_buffer
         .iter()
@@ -416,8 +397,7 @@ pub(crate) fn show_client_logs_menu(_runtime: &mut crate::ui::Ui) {
     } else {
         rows
     };
-    show_array_columns(
-        _runtime,
+    array_columns_table(
         rows,
         "Client logs",
         &[
@@ -438,10 +418,12 @@ pub(crate) fn show_client_logs_menu(_runtime: &mut crate::ui::Ui) {
             "Height",
         ],
         &[0, 1, 2, 3, 4, 5, 6],
-    );
+    )
 }
 
-pub(crate) fn show_error_logs_menu(runtime: &mut crate::ui::Ui) {
+pub(crate) fn error_logs_table(
+    _configuration: &crate::Configuration,
+) -> crate::egui_data_menu::DataTable {
     let mut rows: Vec<crate::egui_data_menu::DataRow> = crate::error_log::entries()
         .into_iter()
         .rev()
@@ -494,8 +476,7 @@ pub(crate) fn show_error_logs_menu(runtime: &mut crate::ui::Ui) {
             preview: Some(format!("No runtime errors logged\n\nLog file: {log_path}")),
         });
     }
-    show_array_columns(
-        runtime,
+    array_columns_table(
         rows,
         "Error logs",
         &[
@@ -509,11 +490,12 @@ pub(crate) fn show_error_logs_menu(runtime: &mut crate::ui::Ui) {
             "Source",
         ],
         &[0, 1, 2, 3, 4, 5, 6, 7],
-    );
+    )
 }
 
-pub(crate) fn show_configuration_state_menu(runtime: &mut crate::ui::Ui) {
-    let configuration = &runtime.configuration;
+pub(crate) fn configuration_state_table(
+    configuration: &crate::Configuration,
+) -> crate::egui_data_menu::DataTable {
     let state = &configuration.state;
     let mut rows = Vec::new();
     let mut add = |category: &str, property: &str, value: String, details: Option<String>| {
@@ -624,9 +606,9 @@ pub(crate) fn show_configuration_state_menu(runtime: &mut crate::ui::Ui) {
         format!("{:#?}", configuration.bar_segments),
     );
     collection(
-        "program_launchers",
-        configuration.program_launchers.len(),
-        format!("{:#?}", configuration.program_launchers),
+        "pickers",
+        configuration.pickers.len(),
+        format!("{:#?}", configuration.pickers),
     );
     collection(
         "prevent_float_processes",
@@ -692,13 +674,12 @@ pub(crate) fn show_configuration_state_menu(runtime: &mut crate::ui::Ui) {
         Some(format!("{:#?}", state.client_log_buffer)),
     );
 
-    show_array_columns(
-        runtime,
+    array_columns_table(
         rows,
         "Configuration state",
         &["Category", "Property", "Value"],
         &[0, 1, 2],
-    );
+    )
 }
 
 fn format_error_preview(entry: &crate::error_log::ErrorLogEntry) -> String {
@@ -743,13 +724,12 @@ fn format_error_preview(entry: &crate::error_log::ErrorLogEntry) -> String {
     preview
 }
 
-fn show_array_columns(
-    runtime: &mut crate::ui::Ui,
+fn array_columns_table(
     rows: Vec<crate::egui_data_menu::DataRow>,
     title: &str,
     columns: &[&str],
     display: &[i32],
-) {
+) -> crate::egui_data_menu::DataTable {
     let columns = display
         .iter()
         .filter_map(|index| columns.get(*index as usize))
@@ -765,7 +745,11 @@ fn show_array_columns(
             preview: row.preview,
         })
         .collect();
-    runtime.show_data_menu(title, columns, rows);
+    crate::egui_data_menu::DataTable {
+        title: title.into(),
+        columns,
+        rows,
+    }
 }
 
 fn local_log_time(value: std::time::SystemTime) -> String {
@@ -873,7 +857,9 @@ fn format_extended_styles(styles: i32) -> String {
     }
 }
 
-pub(crate) fn show_services_menu(runtime: &mut crate::ui::Ui) {
+pub(crate) fn services_table(
+    _configuration: &crate::Configuration,
+) -> crate::egui_data_menu::DataTable {
     let mut lines = crate::process::list_services().unwrap_or_else(|error| {
         let message = format!("Unable to enumerate services: {error}");
         error.report();
@@ -895,7 +881,11 @@ pub(crate) fn show_services_menu(runtime: &mut crate::ui::Ui) {
             }
         })
         .collect();
-    runtime.show_data_menu("Services", vec!["State".into(), "Service".into()], rows);
+    crate::egui_data_menu::DataTable {
+        title: "Services".into(),
+        columns: vec!["State".into(), "Service".into()],
+        rows,
+    }
 }
 
 pub(crate) fn bar_snapshot(monitor: usize) -> Option<crate::bar::BarSnapshot> {
@@ -906,7 +896,7 @@ pub(crate) fn bar_workspace_clicked(monitor: usize, workspace: usize) {
 }
 pub(crate) fn bar_commands_clicked() {
     crate::ui::post(crate::ui::Command::Action(
-        crate::commands::Action::ShowCommands,
+        crate::commands::Action::ShowPicker(&crate::builtin_pickers::COMMANDS),
     ));
 }
 unsafe extern "system" fn handle_windows_event(
