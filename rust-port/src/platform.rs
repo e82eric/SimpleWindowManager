@@ -178,8 +178,9 @@ pub(crate) fn binding_name(binding: &crate::commands::KeyBinding) -> String {
         MoveFloat(0, -1) => "move_focused_window_up".into(),
         MoveFloat(_, _) => "move_focused_window_down".into(),
         MoveFloatToMonitor(_) => "move_focused_window_to_monitor".into(),
-        MoveWorkspaceToMonitor(i, _) => format!(
-            "move_workspace_to_secondary_monitor_without_focus[{}]",
+        // The monitor is the zero-based SWM index the configuration uses.
+        MoveWorkspaceToMonitor(i, monitor) => format!(
+            "move_workspace_to_monitor_without_focus[{}][monitor {monitor}]",
             i + 1
         ),
         MoveSecondaryFocusedToMain => "move_secondary_monitor_focused_window_to_main".into(),

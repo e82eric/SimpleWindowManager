@@ -171,24 +171,38 @@ fn display_monitor_count() -> usize {
     unsafe { GetSystemMetrics(SM_CMONITORS).max(0) as usize }
 }
 
-// Opens `solution` in the newest Rider under %LOCALAPPDATA%\JetBrains\Installations,
-// as the desktop user rather than SWM's elevated one.
+// Opens `solution` in the most recently installed Rider, from JetBrains Toolbox or
+// the standalone installer, as the desktop user rather than SWM's elevated one.
 // fn open_in_rider(solution: std::path::PathBuf) -> std::io::Result<()> {
 //     use std::io;
 //     use std::path::PathBuf;
-//     let installations = std::env::var_os("LOCALAPPDATA")
-//         .map(|local| PathBuf::from(local).join(r"JetBrains\Installations"))
-//         .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "LOCALAPPDATA is not set"))?;
-//     let rider = std::fs::read_dir(&installations)?
+//     // Toolbox installs under %LOCALAPPDATA%; the standalone installer under
+//     // Program Files, as `JetBrains Rider <version>`.
+//     let roots: Vec<PathBuf> = [
+//         ("LOCALAPPDATA", r"JetBrains\Installations"),
+//         ("LOCALAPPDATA", "Programs"),
+//         ("ProgramFiles", "JetBrains"),
+//     ]
+//     .into_iter()
+//     .filter_map(|(variable, folder)| {
+//         std::env::var_os(variable).map(|base| PathBuf::from(base).join(folder))
+//     })
+//     .collect();
+//     // The most recently installed or updated one; version names differ by installer.
+//     let rider = roots
+//         .iter()
+//         .filter_map(|root| std::fs::read_dir(root).ok())
+//         .flatten()
 //         .filter_map(Result::ok)
-//         .filter(|entry| entry.file_name().to_string_lossy().starts_with("Rider"))
+//         .filter(|entry| entry.file_name().to_string_lossy().contains("Rider"))
 //         .map(|entry| entry.path().join(r"bin\rider64.exe"))
 //         .filter(|exe| exe.is_file())
-//         .max()
+//         .max_by_key(|exe| std::fs::metadata(exe).and_then(|m| m.modified()).ok())
 //         .ok_or_else(|| {
+//             let searched: Vec<_> = roots.iter().map(|root| root.display().to_string()).collect();
 //             io::Error::new(
 //                 io::ErrorKind::NotFound,
-//                 format!("no Rider installation in {}", installations.display()),
+//                 format!("no Rider installation in {}", searched.join(", ")),
 //             )
 //         })?;
 //     crate::process::start_program_as_explorer_user(

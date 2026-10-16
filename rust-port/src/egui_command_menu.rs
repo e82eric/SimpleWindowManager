@@ -3,7 +3,6 @@ use crate::commands::Action;
 use crate::picker::{Outcome, PickerHost, PickerRequest, PickerSource, PickerView};
 use nfm_egui::shared::{self, SharedPicker};
 use nfm_egui::{Appearance, PickerEvent, Placement, egui};
-use nfm_picker_sources::structured::StructuredPickerItem;
 use nfm_picker_sources::structured::StructuredStreamingSnapshot;
 use nfm_search_core::snapshot_store::SnapshotStore;
 use std::sync::Arc;
@@ -39,30 +38,33 @@ impl PickerSource for Commands {
 }
 impl PickerRequest for CommandList {
     fn build(self: Box<Self>, host: &PickerHost<'_>) -> Result<Box<dyn PickerView>, String> {
-        let (rows, actions) = self
-            .rows
-            .into_iter()
-            .map(|(row, action)| {
-                let name = row.first().cloned().unwrap_or_default();
-                (row, (name, action))
-            })
-            .unzip();
+        Ok(Box::new(self.view(host.ctx, host.config())?))
+    }
+}
+impl CommandList {
+    fn view(
+        self,
+        ctx: &egui::Context,
+        config: nfm_egui::PickerConfig,
+    ) -> Result<CommandsView, String> {
+        let (rows, actions) = self.rows.into_iter().unzip();
         let picker = shared::replace(
-            host.ctx,
+            ctx,
             source(rows)?,
             nfm_egui::PickerConfig {
                 title: "Commands".into(),
                 preview_visible: false,
-                ..host.config()
+                ..config
             },
             None,
         );
-        Ok(Box::new(CommandsView { picker, actions }))
+        Ok(CommandsView { picker, actions })
     }
 }
 struct CommandsView {
     picker: SharedPicker,
-    actions: Vec<(String, Action)>,
+    /// Each row's action, in row order.
+    actions: Vec<Action>,
 }
 impl PickerView for CommandsView {
     fn picker(&self) -> &SharedPicker {
@@ -83,12 +85,12 @@ impl PickerView for CommandsView {
             .show(ctx, placement, appearance, awaiting_handoff)
             .event
         {
-            Some(PickerEvent::Accepted(selection)) => {
-                let item = selection.item.downcast_ref::<StructuredPickerItem>()?;
-                let name = item.fields.get("Name")?;
-                let (_, action) = self.actions.iter().find(|(n, _)| n == name)?;
-                Some(Outcome::Action(*action))
-            }
+            // The selection's index is its row's position in the source, so commands
+            // that share a name still run their own action.
+            Some(PickerEvent::Accepted(selection)) => self
+                .actions
+                .get(selection.index)
+                .map(|&action| Outcome::Action(action)),
             event => crate::egui_data_menu::copy_or_close(ctx, &mut self.picker, event),
         }
     }
@@ -122,6 +124,71 @@ mod tests {
             "Updated description"
         );
     }
+    #[test]
+    fn commands_that_share_a_name_run_their_own_action() {
+        let row = |binding: &str| {
+            vec![
+                "move_workspace".into(),
+                "Function".into(),
+                binding.into(),
+                String::new(),
+            ]
+        };
+        let list = CommandList {
+            rows: vec![
+                (row("Win+F1"), Action::MoveWorkspaceToMonitor(0, 1)),
+                (row("Alt+F13"), Action::MoveWorkspaceToMonitor(0, 0)),
+            ],
+        };
+        let ctx = egui::Context::default();
+        let mut view = list.view(&ctx, nfm_egui::PickerConfig::default()).unwrap();
+        let bounds = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0));
+        let mut frame = |events: Vec<egui::Event>| {
+            let mut outcome = None;
+            ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(bounds),
+                    events,
+                    ..Default::default()
+                },
+                |ui| {
+                    outcome = view.show(
+                        ui.ctx(),
+                        Placement::new(bounds),
+                        &Appearance::default(),
+                        false,
+                    )
+                },
+            )
+            .drop_without_applying_deltas();
+            outcome
+        };
+        frame(vec![egui::Event::Text("F13".into())]);
+        // Search runs on a worker; Enter accepts once the matching row is selected.
+        let enter = egui::Event::Key {
+            key: egui::Key::Enter,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        };
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        let outcome = loop {
+            std::thread::sleep(std::time::Duration::from_millis(20));
+            if let Some(outcome) = frame(vec![enter.clone()]) {
+                break outcome;
+            }
+            assert!(std::time::Instant::now() < deadline, "nothing was accepted");
+        };
+        assert!(
+            matches!(
+                outcome,
+                Outcome::Action(Action::MoveWorkspaceToMonitor(0, 0))
+            ),
+            "the first command with that name ran instead"
+        );
+    }
+
     #[test]
     fn malformed_rows_are_rejected_and_empty_lists_are_ready() {
         assert!(source(vec![vec!["invalid".into()]]).is_err());
