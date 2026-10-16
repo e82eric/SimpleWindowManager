@@ -40,6 +40,11 @@ pub trait PickerView {
     /// Whether the source shows a column header row (structured sources do).
     /// NFM only reports it once results arrive, so the window size needs it upfront.
     fn has_header(&self) -> bool;
+    /// Where the picker opens: centered and sized by its rows, or `FullPane` to fill
+    /// its monitor up to the bar. Ctrl+Shift+F switches between the two.
+    fn position(&self) -> nfm_egui::Position {
+        nfm_egui::Position::Center
+    }
     /// Draw one frame. `awaiting_handoff` is set after this picker returned a
     /// `ShowPicker` action, until the next picker replaces it.
     fn show(

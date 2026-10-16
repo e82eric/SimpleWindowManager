@@ -23,6 +23,39 @@ unsafe fn close_service_handle(
     )
 }
 
+/// Whether `pid` is still the process created at `created` (a FILETIME), so a
+/// recorded pid that Windows has since reused does not count.
+pub fn is_running(pid: u32, created: u64) -> bool {
+    use windows_sys::Win32::Foundation::{FILETIME, STILL_ACTIVE};
+    use windows_sys::Win32::System::Threading::{
+        GetExitCodeProcess, GetProcessTimes, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
+    };
+    let process = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) };
+    if process.is_null() {
+        return false;
+    }
+    let mut times = [FILETIME {
+        dwLowDateTime: 0,
+        dwHighDateTime: 0,
+    }; 4];
+    let mut exit_code = 0;
+    let [creation, exit, kernel, user] = &mut times;
+    let running = unsafe {
+        GetProcessTimes(process, creation, exit, kernel, user) != 0
+            && GetExitCodeProcess(process, &mut exit_code) != 0
+    } && exit_code == STILL_ACTIVE as u32
+        && filetime_ticks(*creation) == created;
+    if let Err(error) = unsafe { close_handle(process, "CloseHandle(process)") } {
+        error.report();
+    }
+    running
+}
+
+/// A FILETIME as one count of 100 ns ticks.
+pub(crate) fn filetime_ticks(time: windows_sys::Win32::Foundation::FILETIME) -> u64 {
+    u64::from(time.dwHighDateTime) << 32 | u64::from(time.dwLowDateTime)
+}
+
 pub fn start_app(command: &str) -> PlatformResult<()> {
     use windows_sys::Win32::UI::Shell::ShellExecuteW;
     use windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
@@ -45,7 +78,48 @@ pub fn start_app(command: &str) -> PlatformResult<()> {
     }
 }
 
+/// Open `command` (a file or program) through `start`, as the desktop user.
 pub fn start_as_explorer_user(command: &str) -> PlatformResult<()> {
+    create_as_explorer_user(format!("cmd.exe /c start \"\" \"{command}\""))
+}
+
+/// Run `program` with `args` as the desktop user rather than SWM's elevated user.
+/// Returns once the process has started.
+pub fn start_program_as_explorer_user(program: &str, args: &[&str]) -> PlatformResult<()> {
+    let command_line = std::iter::once(program)
+        .chain(args.iter().copied())
+        .map(quote_argument)
+        .collect::<Vec<_>>()
+        .join(" ");
+    create_as_explorer_user(command_line)
+}
+
+/// Quote one argument for the standard Windows command-line parser.
+fn quote_argument(argument: &str) -> String {
+    let mut quoted = String::from('"');
+    let mut backslashes = 0;
+    // Backslashes are literal unless they precede a quote, so double those runs.
+    for ch in argument.chars() {
+        if ch == '\\' {
+            backslashes += 1;
+            continue;
+        }
+        let escaped = if ch == '"' {
+            backslashes * 2 + 1
+        } else {
+            backslashes
+        };
+        quoted.extend(std::iter::repeat_n('\\', escaped));
+        quoted.push(ch);
+        backslashes = 0;
+    }
+    quoted.extend(std::iter::repeat_n('\\', backslashes * 2));
+    quoted.push('"');
+    quoted
+}
+
+/// Start `command_line` with the shell's token, so it does not inherit SWM's elevation.
+fn create_as_explorer_user(command_line: String) -> PlatformResult<()> {
     use std::mem::{size_of, zeroed};
     use windows_sys::Win32::Security::{
         DuplicateTokenEx, SecurityImpersonation, TOKEN_DUPLICATE, TOKEN_QUERY, TokenPrimary,
@@ -106,10 +180,7 @@ pub fn start_as_explorer_user(command: &str) -> PlatformResult<()> {
     startup.wShowWindow = SW_SHOWNORMAL as u16;
     startup.dwFlags = STARTF_USESHOWWINDOW;
     let mut info: PROCESS_INFORMATION = unsafe { zeroed() };
-    let mut command: Vec<u16> = format!("cmd.exe /c start \"\" \"{command}\"")
-        .encode_utf16()
-        .chain([0])
-        .collect();
+    let mut command: Vec<u16> = command_line.encode_utf16().chain([0]).collect();
     let result = unsafe {
         CreateProcessWithTokenW(
             primary,
@@ -242,5 +313,22 @@ pub fn list_services() -> PlatformResult<Vec<String>> {
             .collect();
         close_service_handle(manager)?;
         Ok(result)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::quote_argument;
+
+    #[test]
+    fn arguments_survive_the_windows_command_line_parser() {
+        assert_eq!(
+            quote_argument(r"C:\src\my app\app.sln"),
+            r#""C:\src\my app\app.sln""#
+        );
+        // A trailing backslash would otherwise escape the closing quote.
+        assert_eq!(quote_argument(r"C:\src\"), r#""C:\src\\""#);
+        assert_eq!(quote_argument(r#"say "hi""#), r#""say \"hi\"""#);
+        assert_eq!(quote_argument(r#"a\"b"#), r#""a\\\"b""#);
     }
 }

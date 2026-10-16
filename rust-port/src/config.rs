@@ -49,6 +49,22 @@ pub struct CommandEntry {
     pub key: Option<u32>,
 }
 
+/// How the bar marks the focused monitor, in addition to its accent workspace
+/// region.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct BarFocusStyle {
+    /// Text on the bars of monitors that aren't focused is a step dimmer; on by
+    /// default.
+    pub dim_unfocused: bool,
+}
+impl Default for BarFocusStyle {
+    fn default() -> Self {
+        Self {
+            dim_unfocused: true,
+        }
+    }
+}
+
 /// Monitor used to center all SWM pickers.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum PickerMonitor {
@@ -90,6 +106,10 @@ pub struct Configuration {
     pub float_window_movement: i32,
     pub drag_drop_float_modifier: i32,
     pub bar_right_padding: i32,
+    /// Bar regions filled by background producers; see `bar_mailbox`.
+    pub bar_mailboxes: Vec<crate::mailbox::BarMailbox>,
+    /// How the bar shows which monitor is focused, besides its workspace region.
+    pub bar_focus: BarFocusStyle,
     pub prevent_float_processes: Vec<String>,
     /// Executable basenames excluded from workspace management in every routing mode.
     /// Matches are exact and ASCII case-insensitive, including full process paths.
@@ -129,6 +149,8 @@ impl Default for Configuration {
             float_window_movement: 75,
             drag_drop_float_modifier: crate::commands::LALT,
             bar_right_padding: 10,
+            bar_mailboxes: Vec::new(),
+            bar_focus: BarFocusStyle::default(),
             prevent_float_processes: Vec::new(),
             always_exclude_processes: Vec::new(),
             cloak_to_hide_all: false,
@@ -142,6 +164,18 @@ impl Default for Configuration {
 }
 
 impl Configuration {
+    /// Add a mailbox to the bar, left of the status segments, and run `producer` on
+    /// its own thread once the bar exists. Mailboxes are shown in the order added.
+    /// `producer` is a function, or a closure holding the producer's settings.
+    pub fn bar_mailbox(
+        &mut self,
+        name: &str,
+        producer: impl Fn(crate::mailbox::MailboxSender) + Send + Sync + 'static,
+    ) -> &mut crate::mailbox::BarMailbox {
+        self.bar_mailboxes
+            .push(crate::mailbox::BarMailbox::new(name, producer));
+        self.bar_mailboxes.last_mut().unwrap()
+    }
     /// Register a picker for the life of the process; open the returned picker with
     /// `Action::ShowPicker`.
     pub fn register_picker(

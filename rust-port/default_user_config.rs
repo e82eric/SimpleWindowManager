@@ -100,6 +100,12 @@ pub fn configure(configuration: &mut Configuration) {
     configuration.configuration_add_bar_segment_with_header(" | ", "RAM:", 3, false, Memory);
     configuration.configuration_add_bar_segment_with_header(" | ", "\u{f028}", 3, false, Volume);
     configuration.configuration_add_bar_segment(" | ", 1, true, Internet);
+    // Count Claude Code sessions left of the segments, with a drop-down listing
+    // them; see "Extensions" in README.md:
+    // crate::extensions::claude::register(
+    //     configuration,
+    //     crate::extensions::claude::ClaudeOptions::default(),
+    // );
 
     for index in 0..9 {
         configuration.keybinding_create(KeyBinding {

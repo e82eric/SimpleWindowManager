@@ -1,4 +1,5 @@
-//! Persistent egui/OpenGL state for the Win32 bars. All access is on the window thread.
+//! Persistent egui/OpenGL state for the Win32 bars and the mailbox drop-down. All
+//! access is on the window thread.
 use super::bar::{BarSnapshot, paint_bar};
 use glow::HasContext;
 use nfm_egui::{
@@ -16,13 +17,13 @@ thread_local! {
     static RENDERERS: RefCell<HashMap<isize, BarRenderer>> = RefCell::new(HashMap::new());
 }
 
-pub(super) fn attach(hwnd: HWND) -> Result<(), String> {
+pub(crate) fn attach(hwnd: HWND) -> Result<(), String> {
     let renderer = BarRenderer::new(hwnd)?;
     RENDERERS.with(|renderers| renderers.borrow_mut().insert(hwnd as isize, renderer));
     Ok(())
 }
 
-pub(super) fn detach(hwnd: HWND) {
+pub(crate) fn detach(hwnd: HWND) {
     let renderer = RENDERERS.with(|renderers| renderers.borrow_mut().remove(&(hwnd as isize)));
     drop(renderer);
 }
@@ -33,6 +34,26 @@ pub(super) fn paint(hwnd: HWND, size: [u32; 2], snapshot: &BarSnapshot) -> Resul
     let result = match renderer.as_mut() {
         Some(renderer) => renderer.paint(size, snapshot, true),
         None => Ok(()), // WM_PAINT can arrive before initialization completes.
+    };
+    if let Some(renderer) = renderer {
+        RENDERERS.with(|renderers| renderers.borrow_mut().insert(hwnd as isize, renderer));
+    }
+    result
+}
+
+/// Paint `hwnd` with `run`, which receives `events` as focused pointer and keyboard
+/// input. Returns whether egui wants another frame right away, such as for hover.
+pub(crate) fn paint_ui(
+    hwnd: HWND,
+    size: [u32; 2],
+    font_name: &str,
+    events: Vec<egui::Event>,
+    run: impl FnMut(&mut egui::Ui),
+) -> Result<bool, String> {
+    let mut renderer = RENDERERS.with(|renderers| renderers.borrow_mut().remove(&(hwnd as isize)));
+    let result = match renderer.as_mut() {
+        Some(renderer) => renderer.render(size, font_name, events, true, run),
+        None => Ok(false),
     };
     if let Some(renderer) = renderer {
         RENDERERS.with(|renderers| renderers.borrow_mut().insert(hwnd as isize, renderer));
@@ -170,16 +191,47 @@ impl BarRenderer {
         snapshot: &BarSnapshot,
         present: bool,
     ) -> Result<(), String> {
+        self.render_frame(
+            size,
+            &snapshot.font_name,
+            Vec::new(),
+            false,
+            present,
+            |ui| paint_bar(ui, size, snapshot),
+        )
+        .map(|_| ())
+    }
+
+    fn render(
+        &mut self,
+        size: [u32; 2],
+        font_name: &str,
+        events: Vec<egui::Event>,
+        focused: bool,
+        run: impl FnMut(&mut egui::Ui),
+    ) -> Result<bool, String> {
+        self.render_frame(size, font_name, events, focused, true, run)
+    }
+
+    fn render_frame(
+        &mut self,
+        size: [u32; 2],
+        font_name: &str,
+        events: Vec<egui::Event>,
+        focused: bool,
+        present: bool,
+        run: impl FnMut(&mut egui::Ui),
+    ) -> Result<bool, String> {
         if size.contains(&0) {
-            return Ok(());
+            return Ok(false);
         }
         let _previous = CurrentContext::capture();
         if unsafe { wglMakeCurrent(self.dc, self.rc) } == 0 {
             return Err(win_error("wglMakeCurrent(bar paint)"));
         }
-        if self.font_name.as_deref() != Some(&snapshot.font_name) {
-            self.ctx.set_fonts(bar_fonts(&snapshot.font_name));
-            self.font_name = Some(snapshot.font_name.clone());
+        if self.font_name.as_deref() != Some(font_name) {
+            self.ctx.set_fonts(bar_fonts(font_name));
+            self.font_name = Some(font_name.to_owned());
         }
         // Existing bar height, layout constants and click hit tests are physical pixels.
         // A one-to-one coordinate system preserves them at every monitor DPI.
@@ -189,13 +241,18 @@ impl BarRenderer {
                 egui::Pos2::ZERO,
                 egui::vec2(size[0] as f32, size[1] as f32),
             )),
-            focused: false,
+            focused,
+            events,
             ..Default::default()
         };
         let viewport = input.viewports.get_mut(&egui::ViewportId::ROOT).unwrap();
         viewport.native_pixels_per_point = Some(1.0);
-        viewport.focused = Some(false);
-        let mut output = self.ctx.run_ui(input, |ui| paint_bar(ui, size, snapshot));
+        viewport.focused = Some(focused);
+        let mut output = self.ctx.run_ui(input, run);
+        let again = output
+            .viewport_output
+            .get(&egui::ViewportId::ROOT)
+            .is_some_and(|viewport| viewport.repaint_delay.is_zero());
         let gl = self.gl.as_ref().unwrap();
         unsafe {
             gl.disable(glow::SCISSOR_TEST);
@@ -214,7 +271,7 @@ impl BarRenderer {
         if present && unsafe { SwapBuffers(self.dc) } == 0 {
             return Err(win_error("SwapBuffers(bar)"));
         }
-        Ok(())
+        Ok(again)
     }
 }
 impl Drop for BarRenderer {
@@ -245,7 +302,7 @@ impl Drop for BarRenderer {
     }
 }
 
-fn bar_fonts(family: &str) -> egui::FontDefinitions {
+pub(crate) fn bar_fonts(family: &str) -> egui::FontDefinitions {
     let mut definitions = egui::FontDefinitions::default();
     let mut faces = Vec::new();
     if let Some(bytes) = windows_font(family) {
@@ -398,12 +455,27 @@ pub(crate) mod tests {
             ],
             workspace_info: "3 windows | Tile".into(),
             focused_window: "PowerShell — SimpleWindowManager".into(),
-            segments: vec![crate::bar::RenderedSegment {
-                separator: None,
-                header: Some(("\u{f028} ".into(), true)),
-                value: "50%  12:34".into(),
-                value_is_icon: false,
-            }],
+            segments: {
+                use crate::bar::{RenderedSegment, Tone};
+                let segment =
+                    |header: Option<(&str, bool)>, value: &str, is_icon, tone| RenderedSegment {
+                        separator: Some((" | ".into(), false)),
+                        header: header.map(|(text, is_icon)| (text.into(), is_icon)),
+                        value: value.into(),
+                        value_is_icon: is_icon,
+                        tone,
+                    };
+                vec![
+                    segment(None, "12:34", false, Tone::Normal),
+                    segment(None, "2026-10-15", false, Tone::Normal),
+                    segment(Some(("CPU:", false)), " 82%", false, Tone::Warning),
+                    segment(Some(("RAM:", false)), "100%", false, Tone::Critical),
+                    segment(Some(("\u{f028} ", true)), "  0%", false, Tone::Off),
+                    segment(None, crate::status::INTERNET_OFFLINE, true, Tone::Critical),
+                ]
+            },
+            focus_style: Default::default(),
+            mailboxes: Vec::new(),
             background_color: 0,
             focus_background_color: 0,
             text_color: 0,
@@ -436,6 +508,82 @@ pub(crate) mod tests {
             assert_eq!(gl.get_error(), glow::NO_ERROR);
             pixels
         }
+    }
+
+    #[test]
+    fn mailboxes_paint_left_of_the_status_and_take_clicks() {
+        use crate::mailbox::{Animation, Icon, MailboxSender, MailboxState, StateStyle};
+        fn producer(_: MailboxSender) {}
+        fn square(painter: &egui::Painter, area: egui::Rect, color: egui::Color32) {
+            painter.rect_filled(area, 0, color);
+        }
+        let mut configuration = crate::Configuration::default();
+        configuration
+            .bar_mailbox("Agents", producer)
+            .header("Agents:")
+            .state(
+                "running",
+                StateStyle::icon(Icon::drawn(square, egui::Color32::RED).animation(
+                    Animation::Scale {
+                        min: 0.5,
+                        max: 1.0,
+                        period: 1.0,
+                    },
+                )),
+            )
+            .state(
+                "waiting",
+                StateStyle::icon(Icon::glyph("●", egui::Color32::RED)),
+            )
+            .state(
+                "done",
+                StateStyle::icon(Icon::glyph("✓", egui::Color32::GREEN)),
+            );
+        let mailbox = configuration.bar_mailboxes.remove(0);
+        let window = TestWindow::new();
+        let mut renderer = BarRenderer::new(window.0).unwrap();
+        let mut snapshot = snapshot();
+        let size = [1600, 29];
+        let counts = |running, waiting, done| {
+            std::sync::Arc::new(MailboxState {
+                counts: vec![
+                    ("running".into(), running),
+                    ("waiting".into(), waiting),
+                    ("done".into(), done),
+                ],
+                entries: Vec::new(),
+            })
+        };
+        let clickable = |monitor| {
+            (0..size[0] as i32)
+                .filter(|&x| crate::bar::mailbox_at_x(monitor, x).is_some())
+                .collect::<Vec<_>>()
+        };
+        snapshot.mailboxes = vec![(mailbox.clone(), counts(2, 1, 3))];
+        renderer.paint(size, &snapshot, false).unwrap();
+        let region = clickable(snapshot.monitor_index);
+        assert!(!region.is_empty(), "no clickable mailbox");
+        assert!(
+            *region.last().unwrap() < 1500,
+            "the mailbox overlaps the status segments: {:?}",
+            (region.first(), region.last())
+        );
+        // A missing glyph would render as a box rather than the state symbol.
+        let font = egui::FontId::new(12.0, egui::FontFamily::Name("bar".into()));
+        for glyph in ['●', '✓'] {
+            assert!(
+                renderer
+                    .ctx
+                    .fonts_mut(|fonts| fonts.has_glyph(&font, glyph)),
+                "bar fonts lack {glyph:?}"
+            );
+        }
+        snapshot.mailboxes = vec![(mailbox, counts(0, 0, 0))];
+        renderer.paint(size, &snapshot, false).unwrap();
+        assert!(
+            clickable(snapshot.monitor_index).is_empty(),
+            "an empty mailbox left a region"
+        );
     }
 
     #[test]
@@ -484,22 +632,34 @@ pub(crate) mod tests {
             "focus outline must render"
         );
         if let Some(path) = std::env::var_os("SWM_BAR_PREVIEW_BMP") {
-            // Positive BMP height uses the same bottom-up row order as OpenGL.
-            let mut bmp = Vec::new();
-            bmp.extend_from_slice(b"BM");
-            bmp.extend_from_slice(&(54u32 + rendered.len() as u32).to_le_bytes());
-            bmp.extend_from_slice(&[0; 4]);
-            bmp.extend_from_slice(&54u32.to_le_bytes());
-            bmp.extend_from_slice(&40u32.to_le_bytes());
-            bmp.extend_from_slice(&(size[0] as i32).to_le_bytes());
-            bmp.extend_from_slice(&(size[1] as i32).to_le_bytes());
-            bmp.extend_from_slice(&1u16.to_le_bytes());
-            bmp.extend_from_slice(&32u16.to_le_bytes());
-            bmp.extend_from_slice(&[0; 24]);
-            for pixel in rendered.chunks_exact(4) {
-                bmp.extend_from_slice(&[pixel[2], pixel[1], pixel[0], 255]);
-            }
-            std::fs::write(path, bmp).unwrap();
+            let write = |path: &std::path::Path, rendered: &[u8]| {
+                // Positive BMP height uses the same bottom-up row order as OpenGL.
+                let mut bmp = Vec::new();
+                bmp.extend_from_slice(b"BM");
+                bmp.extend_from_slice(&(54u32 + rendered.len() as u32).to_le_bytes());
+                bmp.extend_from_slice(&[0; 4]);
+                bmp.extend_from_slice(&54u32.to_le_bytes());
+                bmp.extend_from_slice(&40u32.to_le_bytes());
+                bmp.extend_from_slice(&(size[0] as i32).to_le_bytes());
+                bmp.extend_from_slice(&(size[1] as i32).to_le_bytes());
+                bmp.extend_from_slice(&1u16.to_le_bytes());
+                bmp.extend_from_slice(&32u16.to_le_bytes());
+                bmp.extend_from_slice(&[0; 24]);
+                for pixel in rendered.chunks_exact(4) {
+                    bmp.extend_from_slice(&[pixel[2], pixel[1], pixel[0], 255]);
+                }
+                std::fs::write(path, bmp).unwrap();
+            };
+            let path = std::path::PathBuf::from(path);
+            write(&path, &rendered);
+            // The same bar on a monitor that isn't focused, beside it.
+            let mut unfocused = snapshot.clone();
+            unfocused.selected_monitor = false;
+            second.paint(size, &unfocused, false).unwrap();
+            write(
+                &path.with_extension("unfocused.bmp"),
+                &pixels(&second, size),
+            );
         }
         snapshot.selected_monitor = false;
         snapshot.focused_window = "Long title ".repeat(200);

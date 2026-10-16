@@ -188,6 +188,91 @@ The port intentionally targets Windows with the MSVC Rust toolchain. Its modules
 retain the terminology and control flow of the C implementation while Win32 and
 callback unsafety is isolated in `platform`.
 
+## Bar mailboxes
+
+A mailbox is a bar region filled by a producer that SWM runs on a thread of its
+own. The producer publishes a count per state and a list of entries; the bar
+shows each declared state with a count as its icon and count, and hides the
+mailbox while every count is zero. Clicking it, or a key bound to
+`Action::ShowMailbox(name)`, opens a drop-down listing the entries; Up/Down or
+j/k select one, and clicking it or pressing Enter is sent back to the producer.
+Mailboxes sit left of the status segments, in the order they are added.
+
+A mailbox is declared with a name, a producer and a style per state; declaring a
+state again replaces its style in place:
+
+```rust
+use crate::mailbox::{Animation, Icon, StateStyle};
+use nfm_egui::egui::Color32;
+
+configuration
+    .bar_mailbox("Agents", crate::extensions::claude::producer)
+    .header("Agents:")
+    .state(
+        crate::extensions::claude::WAITING,
+        StateStyle::icon(
+            Icon::glyph("●", Color32::from_rgb(0xfb, 0x49, 0x34))
+                .animation(Animation::Pulse { min: 0.4, period: 1.0 }),
+        ),
+    );
+```
+
+An icon is a glyph from the bar font, or a shape drawn by a function in your
+config: `Icon::drawn(my_shape, color)` with
+`fn my_shape(painter: &egui::Painter, area: egui::Rect, color: egui::Color32)`.
+The bar applies the animation first, so the shape only fills `area` in `color`.
+It runs on the bar thread on every frame while animated, so it must only draw.
+Animations are `Scale` (grow and shrink), `Pulse` (fade) and `Frames` (step
+through glyphs); the bar repaints quickly only while an animated state shows.
+
+A producer of your own is a `fn(MailboxSender)`, or a closure holding its
+settings, that loops: it calls `publish(MailboxState { counts, entries })`, which
+repaints only on a change, and `wait_event(timeout)` for `Opened`, `Closed` and
+`Activated { id, how }`, where `how` is `Click` or `Enter`. SWM keeps only the
+latest publication. To show an entry, a producer passes any `PickerRequest` to
+`show_picker(request)`; `document_picker::DocumentPicker` lists parts
+of a styled document and previews the whole document at the selected part, and
+`markdown_document::DocumentWriter` builds such documents from lines and
+markdown.
+
+## Extensions
+
+Extensions are opt-in features in `src/extensions`, built and tested with SWM
+and registered from the configuration with one call. An extension uses only
+SWM's public API, the same API a configuration has, so one can be copied into a
+configuration and changed there.
+
+`extensions::claude` shows Claude Code sessions in an `Agents` mailbox, read from
+`~/.claude` (or `CLAUDE_CONFIG_DIR`): `running`, `waiting` (for you), and `done`
+(finished a turn, or closed, in the last 2 days; closed sessions come from their
+transcripts in `~/.claude/projects`). Each entry shows the project, the latest
+prompt and the session's last action. On the bar, a running session shows Claude's
+spark growing and shrinking, a waiting one a pulsing red dot, and a finished one a
+check. Opening an entry shows the session in a
+picker: a row per prompt, newest first, and the conversation in the preview with
+Claude's markdown laid out and its code highlighted, centered on the selected
+prompt, with copy mode and quick select.
+
+```rust
+use crate::extensions::claude::{self, ClaudeOptions};
+
+claude::register(configuration, ClaudeOptions::default())
+    // Optional: restyle a state; it keeps its place on the bar.
+    .state(claude::RUNNING, StateStyle::icon(Icon::glyph("*", Color32::GOLD)));
+configuration.keybinding_create(KeyBinding {
+    modifiers,
+    key: VK_OEM_1 as u32,
+    action: Action::ShowMailbox(claude::MAILBOX),
+});
+```
+
+`ClaudeOptions` sets the preview's markdown theme (including the bat theme for
+code), the selected prompt's highlight, the speakers' colors, and `full_pane`, which
+opens the session filling the monitor up to the bar (Ctrl+Shift+F switches back).
+`claude::producer` and `claude::producer_with(options)` are the producer alone,
+for a mailbox declared by hand, and `claude::spark` draws the spark for
+`Icon::drawn` in a style of your own.
+
 ## Implemented surface
 
 The Rust executable includes the native Win32 event and input hooks, live
@@ -269,11 +354,13 @@ use simple_window_manager_rs::{
 };
 use std::{io, path::PathBuf};
 
+// SWM runs elevated; std::process::Command would start Rider elevated too.
 fn open_solution(path: PathBuf) -> io::Result<()> {
-    std::process::Command::new(r"C:\Tools\Rider\bin\rider64.exe")
-        .arg(path)
-        .spawn()?;
-    Ok(())
+    simple_window_manager_rs::process::start_program_as_explorer_user(
+        r"C:\Tools\Rider\bin\rider64.exe",
+        &[&path.to_string_lossy()],
+    )
+    .map_err(io::Error::other)
 }
 
 // Inside configure(configuration):

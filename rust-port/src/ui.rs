@@ -18,6 +18,16 @@ static THREAD: AtomicU32 = AtomicU32::new(0);
 static CHANNEL: OnceLock<SyncSender<Command>> = OnceLock::new();
 static BINDINGS: OnceLock<Vec<KeyBinding>> = OnceLock::new();
 static BAR_HANDLES: OnceLock<Vec<(usize, isize)>> = OnceLock::new();
+/// Repaint the bars and the open mailbox drop-down after a producer published.
+/// May be called from any thread, as InvalidateRect may.
+pub(crate) fn mailbox_changed() {
+    for &(_, hwnd) in BAR_HANDLES.get().into_iter().flatten() {
+        unsafe {
+            windows_sys::Win32::Graphics::Gdi::InvalidateRect(hwnd as _, std::ptr::null(), 0);
+        }
+    }
+    crate::mailbox_popup::invalidate();
+}
 pub fn bar_handle(monitor: usize) -> Option<isize> {
     BAR_HANDLES
         .get()?
@@ -76,6 +86,8 @@ pub fn dispatch(action: Action) -> bool {
 thread_local! { static UI:RefCell<Option<Ui>>=const { RefCell::new(None) }; }
 pub enum Command {
     Action(Action),
+    /// A picker built elsewhere, such as by a mailbox producer.
+    ShowRequest(Box<dyn crate::picker::PickerRequest>),
     Focus,
     Hide,
     Quit,
@@ -100,7 +112,7 @@ pub fn binding(key: u32, modifiers: i32) -> Option<Action> {
         .map(|b| b.action)
 }
 pub fn is_menu(action: Action) -> bool {
-    matches!(action, Action::ShowPicker(_))
+    matches!(action, Action::ShowPicker(_) | Action::ShowMailbox(_))
 }
 fn picker_bounds(configuration: &Configuration) -> Option<crate::egui_window_menu::ScreenBounds> {
     let monitor = configuration.selected_picker_monitor()?;
@@ -124,6 +136,7 @@ impl Ui {
         use Action::*;
         match action {
             ShowPicker(picker) => self.show_picker(picker),
+            ShowMailbox(name) => self.show_mailbox(name),
             Quit => unsafe {
                 PostQuitMessage(0);
             },
@@ -134,22 +147,46 @@ impl Ui {
         Ok(())
     }
     fn show_picker(&mut self, picker: &crate::picker::PickerConfig) {
+        let request = picker.source.request(&self.configuration);
+        self.show_request(request);
+    }
+    fn show_request(&mut self, request: Box<dyn crate::picker::PickerRequest>) {
         self.menu_session = self.menu_session.wrapping_add(1).max(1);
         // Visible before the host can close it.
         VISIBLE_MENU.store(self.menu_session, Ordering::Release);
-        if !self.send_picker(picker) {
+        if !self.send_request(request) {
             // A menu without an available source must not leave a closed picker visible.
             self.hide();
         }
     }
-    fn send_picker(&self, picker: &crate::picker::PickerConfig) -> bool {
+    fn show_mailbox(&self, name: &str) {
+        let configuration = &self.configuration;
+        let Some(index) = configuration
+            .bar_mailboxes
+            .iter()
+            .position(|mailbox| mailbox.name == name)
+        else {
+            crate::error_log::report("show mailbox", format!("no bar mailbox named {name}"));
+            return;
+        };
+        let monitors = &configuration.state.monitors;
+        let Some(monitor) = configuration
+            .selected_picker_monitor()
+            .and_then(|selected| monitors.iter().position(|m| std::ptr::eq(m, selected)))
+        else {
+            return;
+        };
+        if let Some(bar) = self.bars.iter().find(|bar| bar.monitor_index == monitor) {
+            crate::bar::toggle_mailbox(bar.hwnd as _, monitor, index);
+        }
+    }
+    fn send_request(&self, request: Box<dyn crate::picker::PickerRequest>) -> bool {
         let Some(host) = self.egui_windows.as_ref() else {
             return false;
         };
         let Some(bounds) = picker_bounds(&self.configuration) else {
             return false;
         };
-        let request = picker.source.request(&self.configuration);
         match host.show_request(self.menu_session, bounds, request) {
             Ok(()) => true,
             Err(error) => {
@@ -200,6 +237,7 @@ pub fn initialize(
             .map(|bar| (bar.monitor_index, bar.hwnd))
             .collect(),
     );
+    crate::mailbox::start_producers(&configuration.bar_mailboxes);
     // Prepare the native window and GL context before the first shortcut, like
     // other persistent UI resources. The tool window remains hidden until requested.
     let egui_windows = start_egui_window_host(&configuration)
@@ -246,6 +284,7 @@ pub fn pump(receiver: &Receiver<Command>) {
                         error.report();
                     }
                 }
+                Command::ShowRequest(request) => ui.show_request(request),
                 Command::Focus => {
                     if menu_visible() {
                         if let Some(menu) = &ui.egui_windows {
@@ -266,7 +305,13 @@ pub fn pump(receiver: &Receiver<Command>) {
 pub fn bar_snapshot(monitor: usize) -> Option<crate::bar::BarSnapshot> {
     let snapshot = crate::worker::snapshot()?;
     let mut bar = snapshot.bars.get(monitor)?.clone()?;
-    bar.segments = crate::bar::rendered_segments(&snapshot.configuration.bar_segments);
+    bar.segments = crate::bar::cached_segments(&snapshot.configuration.bar_segments);
+    bar.mailboxes = snapshot
+        .configuration
+        .bar_mailboxes
+        .iter()
+        .map(|mailbox| (mailbox.clone(), mailbox.current()))
+        .collect();
     Some(bar)
 }
 pub fn shutdown() {

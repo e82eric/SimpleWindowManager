@@ -1,3 +1,8 @@
+/// The internet segment's glyphs.
+pub const INTERNET_CONNECTED: &str = "\u{ea7a}";
+pub const INTERNET_OFFLINE: &str = "\u{f127}";
+pub const INTERNET_UNKNOWN: &str = "\u{f128}";
+
 mod windows_impl {
     use std::ffi::c_void;
     use std::sync::Mutex;
@@ -190,7 +195,7 @@ mod windows_impl {
 
     pub fn internet_icon() -> String {
         let Some(network) = *NETWORK.lock().unwrap() else {
-            return "\u{f128}".into();
+            return super::INTERNET_UNKNOWN.into();
         };
         unsafe {
             let get_connected: unsafe extern "system" fn(*mut c_void, *mut i16) -> i32 =
@@ -198,11 +203,11 @@ mod windows_impl {
             let mut connected = 0i16;
             let result = get_connected(network as _, &mut connected);
             if !hresult_succeeded("INetworkListManager::get_IsConnectedToInternet", result) {
-                "\u{f128}".into()
+                super::INTERNET_UNKNOWN.into()
             } else if connected != 0 {
-                "\u{ea7a}".into()
+                super::INTERNET_CONNECTED.into()
             } else {
-                "\u{f127}".into()
+                super::INTERNET_OFFLINE.into()
             }
         }
     }

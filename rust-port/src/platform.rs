@@ -171,6 +171,7 @@ pub(crate) fn binding_name(binding: &crate::commands::KeyBinding) -> String {
         SetTileReversed => "swap_selected_monitor_to_tile_layout_reversed".into(),
         RedrawFocused => "redraw_focused_window".into(),
         ShowPicker(picker) => picker.name.into(),
+        ShowMailbox(_) => "show_bar_mailbox".into(),
         Launch(_) => "Shell".into(),
         MoveFloat(1, 0) => "move_focused_window_right".into(),
         MoveFloat(-1, 0) => "move_focused_window_left".into(),

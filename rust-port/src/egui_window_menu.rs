@@ -189,7 +189,7 @@ fn picker_window_bounds(
 }
 
 fn full_pane(menu: &dyn PickerView) -> bool {
-    menu.picker().effective_position(nfm_egui::Position::Center) == nfm_egui::Position::FullPane
+    menu.picker().effective_position(menu.position()) == nfm_egui::Position::FullPane
 }
 
 pub(crate) struct WindowMenuApp {
@@ -355,6 +355,8 @@ impl WindowMenuApp {
         };
         let mut placement = Placement::new(ctx.content_rect());
         placement.margin = PICKER_MARGIN;
+        // Ctrl+Shift+F switches away from the picker's own position.
+        placement.position = menu.position();
         let outcome = menu.show(ctx, placement, &self.appearance, self.awaiting_handoff);
         // Ctrl+P and full-pane toggles change the window's size.
         if full_pane(menu.as_ref()) != self.full_pane

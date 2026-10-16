@@ -341,7 +341,7 @@ impl Runtime {
             return Ok(());
         }
         match action {
-            ShowPicker(_) => unreachable!(),
+            ShowPicker(_) | ShowMailbox(_) => unreachable!(),
             Quit => platform_exit(),
             QuitAndRestore => {
                 crate::restore::restore_moved_windows_to_screen(false)?;
@@ -1109,7 +1109,9 @@ impl Runtime {
                 mode
             ),
             focused_window: format!("{} ({}){}{}", process, pid, indicator, admin),
+            focus_style: self.configuration.bar_focus,
             segments: crate::bar::rendered_segments(&self.configuration.bar_segments),
+            mailboxes: Vec::new(),
             background_color: style.background_color,
             focus_background_color: style.focus_background_color,
             text_color: style.text_color,

@@ -32,6 +32,9 @@ pub enum Action {
     RedrawFocused,
     MinimizeFocused,
     ShowPicker(&'static crate::picker::PickerConfig),
+    /// Opens or closes the drop-down of the bar mailbox with this name, on the
+    /// picker monitor's bar.
+    ShowMailbox(&'static str),
     Launch(&'static str),
     MoveFloat(i32, i32),
     MoveFloatToMonitor(usize),
