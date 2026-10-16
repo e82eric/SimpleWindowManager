@@ -91,6 +91,26 @@ pub fn configure(configuration: &mut Configuration) {
             action: Action::ShowPicker(launcher),
         });
     }
+    // A file picker of your own: Visual Studio solutions under C:\src, opened in the
+    // newest installed Rider (see `open_in_rider` below):
+    // let solutions = configuration.register_picker(crate::picker::PickerConfig::new(
+    //     "RiderSolutions",
+    //     crate::builtin_pickers::Files {
+    //         options: nfm_file_system::FileSystemPickerOptions {
+    //             roots: vec![r"C:\src".into()],
+    //             max_depth: 6,
+    //             files_only: true,
+    //             search_string: Some(".sln$ ".into()),
+    //             ..Default::default()
+    //         },
+    //         action: crate::builtin_pickers::FileAction::Callback(open_in_rider),
+    //     },
+    // ));
+    // configuration.keybinding_create(KeyBinding {
+    //     modifiers,
+    //     key: b'R' as u32,
+    //     action: Action::ShowPicker(solutions),
+    // });
 
     use BarSegmentValue::*;
     configuration.configuration_add_bar_segment(" | ", 5, false, SystemTime);
@@ -150,3 +170,30 @@ fn display_monitor_count() -> usize {
     use windows_sys::Win32::UI::WindowsAndMessaging::{GetSystemMetrics, SM_CMONITORS};
     unsafe { GetSystemMetrics(SM_CMONITORS).max(0) as usize }
 }
+
+// Opens `solution` in the newest Rider under %LOCALAPPDATA%\JetBrains\Installations,
+// as the desktop user rather than SWM's elevated one.
+// fn open_in_rider(solution: std::path::PathBuf) -> std::io::Result<()> {
+//     use std::io;
+//     use std::path::PathBuf;
+//     let installations = std::env::var_os("LOCALAPPDATA")
+//         .map(|local| PathBuf::from(local).join(r"JetBrains\Installations"))
+//         .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "LOCALAPPDATA is not set"))?;
+//     let rider = std::fs::read_dir(&installations)?
+//         .filter_map(Result::ok)
+//         .filter(|entry| entry.file_name().to_string_lossy().starts_with("Rider"))
+//         .map(|entry| entry.path().join(r"bin\rider64.exe"))
+//         .filter(|exe| exe.is_file())
+//         .max()
+//         .ok_or_else(|| {
+//             io::Error::new(
+//                 io::ErrorKind::NotFound,
+//                 format!("no Rider installation in {}", installations.display()),
+//             )
+//         })?;
+//     crate::process::start_program_as_explorer_user(
+//         &rider.to_string_lossy(),
+//         &[&solution.to_string_lossy()],
+//     )
+//     .map_err(io::Error::other)
+// }
