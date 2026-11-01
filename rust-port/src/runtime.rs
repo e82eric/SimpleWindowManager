@@ -212,7 +212,6 @@ impl Runtime {
     #[tracing::instrument(skip(self), fields(hwnd = hwnd as usize))]
     pub fn location_changed(&mut self, hwnd: isize) -> PlatformResult<()> {
         let result = self.location_changed_inner(hwnd);
-        self.reconcile_border_frame(hwnd);
         self.border_window_update();
         result
     }
@@ -438,13 +437,17 @@ impl Runtime {
     fn apply_workspace(&mut self, workspace: WorkspaceId) -> PlatformResult<()> {
         self.border_frame.set(None);
         self.configuration.state.arrange_workspace(workspace);
-        apply_workspace_windows(
+        let result = apply_workspace_windows(
             &mut self.configuration.state,
             workspace,
             self.configuration.always_redraw,
             self.hidden_window_monitor.x_offset,
             self.configuration.use_old_move_logic_configured,
-        )?;
+        );
+        if self.border_window.is_some() {
+            crate::platform::schedule_border_sync();
+        }
+        result?;
         Ok(())
     }
 
@@ -616,6 +619,7 @@ impl Runtime {
         if selected_monitor == current_monitor {
             return Ok(());
         }
+        self.hide_border_for_workspace_change();
         self.configuration.state.monitors[selected_monitor.0].workspace = Some(workspace);
         self.configuration.state.workspaces[workspace.0].monitor = Some(selected_monitor);
         self.configuration.state.monitors[current_monitor.0].workspace = Some(displaced);
@@ -773,6 +777,11 @@ impl Runtime {
             self.menu_hide();
         }
         if source != monitor {
+            if self.configuration.state.selected_monitor == Some(source)
+                || self.configuration.state.selected_monitor == Some(monitor)
+            {
+                self.hide_border_for_workspace_change();
+            }
             self.configuration.state.monitors[monitor.0].workspace = Some(workspace);
             self.configuration.state.workspaces[workspace.0].monitor = Some(monitor);
             self.configuration.state.monitors[source.0].workspace = Some(displaced);
@@ -969,6 +978,7 @@ impl Runtime {
             style.lost_focus_color,
         )?);
         self.border_window_update();
+        crate::platform::schedule_border_sync();
         Ok(())
     }
 
@@ -977,30 +987,10 @@ impl Runtime {
         Ok(())
     }
 
-    fn reconcile_border_frame(&self, hwnd: isize) {
-        let selected = self
-            .configuration
-            .state
-            .selected_monitor
-            .and_then(|m| self.configuration.state.monitors[m.0].workspace)
-            .and_then(|w| self.configuration.state.workspaces[w.0].selected)
-            .and_then(|c| self.configuration.state.clients[c.0].as_ref());
-        if let Some(client) = selected.filter(|c| c.data.hwnd == hwnd) {
-            let frame = visible_frame_rect(hwnd).map(|actual| {
-                let previous = match self.border_frame.get() {
-                    Some((owner, layout, frame)) if owner == hwnd && layout == client.data.rect => {
-                        frame
-                    }
-                    _ => client.data.rect,
-                };
-                let frame = border_frame_after_location_change(
-                    previous,
-                    actual,
-                    left_mouse_button_down() && !left_shift_down(),
-                );
-                (hwnd, client.data.rect, frame)
-            });
-            self.border_frame.set(frame);
+    fn hide_border_for_workspace_change(&self) {
+        self.border_frame.set(None);
+        if let Some(border) = &self.border_window {
+            crate::border::update_border(border, None);
         }
     }
 
@@ -1016,23 +1006,27 @@ impl Runtime {
             .state
             .selected_monitor
             .and_then(|monitor| self.configuration.state.monitors[monitor.0].workspace)
+            .filter(|workspace| !workspace_is_hidden(&self.configuration.state, *workspace))
             .and_then(|workspace| self.configuration.state.workspaces[workspace.0].selected)
             .and_then(|client| self.configuration.state.clients[client.0].as_ref())
             .filter(|client| client.is_visible && !is_iconic(client.data.hwnd))
-            .map(|client| {
+            .and_then(|client| {
                 let expected = client.data.rect;
-                let rect = match self.border_frame.get() {
+                let actual = synchronized_border_frame(client.data.hwnd)?;
+                let dragging = left_mouse_button_down() && !left_shift_down();
+                let previous = match self.border_frame.get() {
                     Some((hwnd, layout, actual))
                         if hwnd == client.data.hwnd && layout == expected =>
                     {
                         actual
                     }
-                    _ => {
-                        self.border_frame.set(None);
-                        expected
-                    }
+                    _ if dragging => expected,
+                    _ => actual,
                 };
-                (client.data.hwnd, rect)
+                let rect = border_frame_after_location_change(previous, actual, dragging);
+                self.border_frame
+                    .set(Some((client.data.hwnd, expected, rect)));
+                Some((client.data.hwnd, rect))
             });
         if target.is_none() {
             self.border_frame.set(None);
@@ -2013,6 +2007,31 @@ fn center_window_on_monitor(hwnd: isize, monitor: &Monitor) {
     }
 }
 
+fn synchronized_border_frame(hwnd: isize) -> Option<Rect> {
+    use windows_sys::Win32::UI::WindowsAndMessaging::IsWindowVisible;
+    if unsafe { IsWindowVisible(hwnd as _) } == 0 {
+        return None;
+    }
+    let outer = window_rect(hwnd).ok()?;
+    let frame = visible_frame_rect(hwnd)?;
+    // DWM can still report the previous workspace's frame after SetWindowPos.
+    // Never cache that frame against the new layout or draw at predicted bounds.
+    if window_rect(hwnd).ok()? != outer {
+        return None;
+    }
+    border_frame_within_window(outer, frame)
+}
+
+fn border_frame_within_window(outer: Rect, frame: Rect) -> Option<Rect> {
+    (frame.right > frame.left
+        && frame.bottom > frame.top
+        && frame.left >= outer.left
+        && frame.top >= outer.top
+        && frame.right <= outer.right
+        && frame.bottom <= outer.bottom)
+        .then_some(frame)
+}
+
 pub(crate) fn visible_frame_rect(hwnd: isize) -> Option<Rect> {
     use windows_sys::Win32::Foundation::RECT;
     use windows_sys::Win32::Graphics::Dwm::{
@@ -2518,6 +2537,145 @@ fn border_frame_after_location_change(previous: Rect, actual: Rect, mouse_draggi
 #[cfg(test)]
 mod parity_tests {
     use super::*;
+
+    #[test]
+    fn stale_dwm_frame_from_another_workspace_is_not_drawn() {
+        let old_frame = Rect::from_xywh(8, 40, 1200, 900);
+        let moved_outer = Rect::from_xywh(3200, 32, 1216, 916);
+        assert_eq!(border_frame_within_window(moved_outer, old_frame), None);
+        let settled_frame = Rect::from_xywh(3208, 40, 1200, 900);
+        assert_eq!(
+            border_frame_within_window(moved_outer, settled_frame),
+            Some(settled_frame)
+        );
+        assert_eq!(
+            border_frame_within_window(moved_outer, Rect::default()),
+            None
+        );
+    }
+
+    #[test]
+    fn border_refresh_uses_the_window_frame_instead_of_a_stale_layout_cache() {
+        use windows_sys::Win32::UI::WindowsAndMessaging::*;
+        struct Window(isize);
+        impl Drop for Window {
+            fn drop(&mut self) {
+                unsafe {
+                    DestroyWindow(self.0 as _);
+                }
+            }
+        }
+        let create = |x, y, width, height| {
+            let class: Vec<u16> = "STATIC\0".encode_utf16().collect();
+            let hwnd = unsafe {
+                CreateWindowExW(
+                    WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
+                    class.as_ptr(),
+                    class.as_ptr(),
+                    WS_POPUP | WS_VISIBLE,
+                    x,
+                    y,
+                    width,
+                    height,
+                    std::ptr::null_mut(),
+                    std::ptr::null_mut(),
+                    std::ptr::null_mut(),
+                    std::ptr::null(),
+                )
+            };
+            assert!(!hwnd.is_null());
+            Window(hwnd as isize)
+        };
+        let target = create(120, 180, 640, 720);
+        let border = create(10, 10, 20, 20);
+        let mut configuration = Configuration::default();
+        let workspace =
+            configuration.workspace_register("border regression", "1", false, crate::Layout::Tile);
+        let empty = configuration.workspace_register("empty", "2", false, crate::Layout::Tile);
+        let mut runtime = Runtime::initialize(configuration, DesktopSnapshot::default());
+        let planned = Rect::from_xywh(1400, 180, 640, 720);
+        runtime.configuration.state.client_add(
+            workspace,
+            Client {
+                data: crate::ClientData {
+                    hwnd: target.0,
+                    rect: planned,
+                    ..Default::default()
+                },
+                is_visible: true,
+                workspace,
+            },
+        );
+        runtime.border_window = Some(crate::border::BorderWindow { hwnd: border.0 });
+        runtime.border_frame.set(Some((target.0, planned, planned)));
+        let mut matched = false;
+        for _ in 0..30 {
+            runtime.border_window_update();
+            if let Some(actual) = visible_frame_rect(target.0)
+                && window_rect(border.0).unwrap() == crate::border::border_rect(actual)
+                && unsafe { IsWindowVisible(border.0 as _) } != 0
+            {
+                matched = true;
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert!(
+            matched,
+            "border must follow the actual frame even when cached layout coordinates differ"
+        );
+        assert_ne!(
+            unsafe {
+                SetWindowPos(
+                    target.0 as _,
+                    std::ptr::null_mut(),
+                    420,
+                    260,
+                    640,
+                    720,
+                    SWP_NOZORDER | SWP_NOACTIVATE,
+                )
+            },
+            0
+        );
+        let mut moved = false;
+        for _ in 0..30 {
+            // No WinEvent is delivered to this Runtime: refresh itself must
+            // discard the cached position after the window moves.
+            runtime.border_window_update();
+            if let Some(actual) = visible_frame_rect(target.0)
+                && actual.left >= 420
+                && window_rect(border.0).unwrap() == crate::border::border_rect(actual)
+                && unsafe { IsWindowVisible(border.0 as _) } != 0
+            {
+                moved = true;
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert!(moved, "border must catch up without a location event");
+        runtime.hide_border_for_workspace_change();
+        assert_eq!(unsafe { IsWindowVisible(border.0 as _) }, 0);
+        runtime.swap_selected_monitor_to(empty).unwrap();
+        assert_eq!(unsafe { IsWindowVisible(border.0 as _) }, 0);
+        runtime.swap_selected_monitor_to(workspace).unwrap();
+        let mut restored = false;
+        for _ in 0..30 {
+            runtime.border_window_update();
+            if let Some(actual) = visible_frame_rect(target.0)
+                && window_rect(border.0).unwrap() == crate::border::border_rect(actual)
+                && unsafe { IsWindowVisible(border.0 as _) } != 0
+            {
+                restored = true;
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert!(
+            restored,
+            "border must align after switching back from an empty workspace"
+        );
+    }
 
     #[test]
     fn border_stays_at_the_original_frame_during_a_mouse_drag() {

@@ -38,6 +38,64 @@ pub(crate) fn window_message_name(message: u32) -> &'static str {
 }
 
 static WORKSPACE_MOVE_TIMER: Mutex<usize> = Mutex::new(0);
+static BORDER_SYNC_TIMER: Mutex<(usize, u8)> = Mutex::new((0, 0));
+
+pub(crate) fn schedule_border_sync() {
+    use windows_sys::Win32::UI::WindowsAndMessaging::SetTimer;
+    if RUNTIME.get().is_none() {
+        return;
+    }
+    let mut timer = BORDER_SYNC_TIMER.lock().unwrap();
+    if timer.0 == 0 {
+        timer.0 = unsafe {
+            SetTimer(
+                std::ptr::null_mut(),
+                0,
+                16,
+                Some(refresh_border_after_layout),
+            )
+        };
+        if timer.0 == 0 {
+            crate::error_log::last_win32("SetTimer(border synchronization) failed");
+            return;
+        }
+    }
+    // A short settling period covers delayed DWM frames and missed/reentrant
+    // location events. Later layout commands extend the existing timer.
+    timer.1 = 32;
+}
+
+unsafe extern "system" fn refresh_border_after_layout(
+    _hwnd: windows_sys::Win32::Foundation::HWND,
+    _message: u32,
+    timer_id: usize,
+    _time: u32,
+) {
+    if BORDER_SYNC_TIMER.lock().unwrap().0 != timer_id {
+        return;
+    }
+    let Some(runtime) = RUNTIME.get() else {
+        return;
+    };
+    let Ok(runtime) = runtime.try_lock() else {
+        return;
+    };
+    runtime.border_window_update();
+    drop(runtime);
+    let mut timer = BORDER_SYNC_TIMER.lock().unwrap();
+    if timer.0 == timer_id {
+        timer.1 = timer.1.saturating_sub(1);
+        if timer.1 == 0 {
+            unsafe {
+                windows_sys::Win32::UI::WindowsAndMessaging::KillTimer(
+                    std::ptr::null_mut(),
+                    timer_id,
+                );
+            }
+            *timer = (0, 0);
+        }
+    }
+}
 
 unsafe extern "system" fn refresh_ui_state(
     _hwnd: windows_sys::Win32::Foundation::HWND,
@@ -1156,6 +1214,12 @@ pub(crate) fn run_worker(
                 if timer != 0 {
                     KillTimer(std::ptr::null_mut(), timer);
                 }
+                let mut border_timer = BORDER_SYNC_TIMER.lock().unwrap();
+                if border_timer.0 != 0 {
+                    KillTimer(std::ptr::null_mut(), border_timer.0);
+                    *border_timer = (0, 0);
+                }
+                drop(border_timer);
                 if let Some(runtime) = RUNTIME.get() {
                     let mut runtime = runtime
                         .lock()

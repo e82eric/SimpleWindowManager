@@ -29,6 +29,13 @@ blocked, but the bar can still repaint and menus can open. Window-manager action
 still wait for the worker; this split does not make Win32 positioning calls
 asynchronous or give them a timeout.
 
+The focus border samples the selected window's current visible frame on each
+refresh. Workspace changes hide the previous border before moving windows;
+stale or cloaked DWM frames keep it hidden until a valid frame is available.
+After layout changes a bounded 16 ms refresh timer runs for about half a second,
+so delayed or missed location events do not leave cached border coordinates
+behind. Mouse dragging retains the existing fixed-border behavior.
+
 Mouse releases carry their original screen coordinates and gesture identity.
 An old release cannot complete a newer drag. If a release cannot be queued,
 the worker cancels drag state when it resumes. Menu-close messages carry an
