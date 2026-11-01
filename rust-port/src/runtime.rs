@@ -438,6 +438,12 @@ impl Runtime {
     fn apply_workspace(&mut self, workspace: WorkspaceId) -> PlatformResult<()> {
         self.border_frame.set(None);
         self.configuration.state.arrange_workspace(workspace);
+        // Move the border to its new slot before any window moves. The border
+        // sits directly below its target in z-order, so left at the old slot
+        // it would show through any window that lands over it. Window
+        // placement compensates for invisible resize borders, so the layout
+        // rect is where the window's visible frame will land.
+        self.border_window_update();
         apply_workspace_windows(
             &mut self.configuration.state,
             workspace,
@@ -446,6 +452,41 @@ impl Runtime {
             self.configuration.use_old_move_logic_configured,
         )?;
         Ok(())
+    }
+
+    /// Apply two workspaces that just exchanged monitors as one transition.
+    ///
+    /// When both end up on visible monitors, every window really moves, and
+    /// separate batches land window by window, leaving a monitor half-swapped
+    /// in between. Here both workspaces go in one batch, `incoming` last.
+    ///
+    /// The windows are deliberately not cloaked across the commit: that
+    /// blanked both monitors for as long as the slowest app took to move.
+    ///
+    /// A swap with the hidden monitor is already a cloak/uncloak in place and
+    /// keeps using the per-workspace path.
+    fn apply_workspace_swap(
+        &mut self,
+        incoming: WorkspaceId,
+        outgoing: WorkspaceId,
+    ) -> PlatformResult<()> {
+        let state = &self.configuration.state;
+        let both_visible =
+            !workspace_is_hidden(state, incoming) && !workspace_is_hidden(state, outgoing);
+        if !both_visible || self.configuration.use_old_move_logic_configured {
+            self.apply_workspace(incoming)?;
+            return self.apply_workspace(outgoing);
+        }
+        self.configuration.state.arrange_workspace(outgoing);
+        self.configuration.state.arrange_workspace(incoming);
+        // Move the border to its new slot first, as in `apply_workspace`.
+        self.border_window_update();
+        apply_workspaces_windows_deferred(
+            &mut self.configuration.state,
+            &[outgoing, incoming],
+            self.configuration.always_redraw,
+            self.hidden_window_monitor.x_offset,
+        )
     }
 
     fn focus_selected(&mut self, workspace: WorkspaceId) {
@@ -620,8 +661,7 @@ impl Runtime {
         self.configuration.state.workspaces[workspace.0].monitor = Some(selected_monitor);
         self.configuration.state.monitors[current_monitor.0].workspace = Some(displaced);
         self.configuration.state.workspaces[displaced.0].monitor = Some(current_monitor);
-        self.apply_workspace(workspace)?;
-        self.apply_workspace(displaced)?;
+        self.apply_workspace_swap(workspace, displaced)?;
         // In particular, this hides the old border immediately when the
         // destination workspace has no selected client.
         self.border_window_update();
@@ -780,8 +820,8 @@ impl Runtime {
 
             debug_out!("trigger build");
 
-            self.apply_workspace(workspace)?;
-            self.apply_workspace(displaced)?;
+            self.apply_workspace_swap(workspace, displaced)?;
+            self.border_window_update();
 
             let foreground = self
                 .configuration
@@ -2239,12 +2279,14 @@ fn workspace_is_hidden(state: &WindowManagerState, workspace: WorkspaceId) -> bo
 
 fn workspace_cloak_manager(
     state: &WindowManagerState,
-    workspace: WorkspaceId,
+    workspaces: &[WorkspaceId],
 ) -> Option<crate::cloak::CloakManager> {
-    let uses_cloaking = state.workspaces[workspace.0].clients.iter().any(|id| {
-        state.clients[id.0]
-            .as_ref()
-            .is_some_and(|client| client.data.use_cloak_to_hide)
+    let uses_cloaking = workspaces.iter().any(|workspace| {
+        state.workspaces[workspace.0].clients.iter().any(|id| {
+            state.clients[id.0]
+                .as_ref()
+                .is_some_and(|client| client.data.use_cloak_to_hide)
+        })
     });
     if !uses_cloaking {
         return None;
@@ -2273,8 +2315,12 @@ fn set_client_cloak(
     client: &Client,
     cloak_flag: i32,
 ) {
+    set_window_cloak(manager, client.data.hwnd, cloak_flag);
+}
+
+fn set_window_cloak(manager: Option<&crate::cloak::CloakManager>, hwnd: isize, cloak_flag: i32) {
     if let Some(manager) = manager
-        && let Err(error) = manager.set_cloak(client.data.hwnd, 1, cloak_flag)
+        && let Err(error) = manager.set_cloak(hwnd, 1, cloak_flag)
     {
         error.report();
     }
@@ -2446,60 +2492,91 @@ fn apply_workspace_windows_deferred(
     always_redraw: bool,
     hidden_x: i32,
 ) -> PlatformResult<()> {
+    apply_workspaces_windows_deferred(state, &[workspace], always_redraw, hidden_x)
+}
+
+/// Positions the windows of `workspaces` in one `DeferWindowPos` batch.
+/// Every queued window is brought to the top as the batch commits, so later
+/// workspaces end up above earlier ones.
+///
+/// Windows that become visible are uncloaked only after the batch commits;
+/// uncloaking first would show them for a moment at their old position.
+fn apply_workspaces_windows_deferred(
+    state: &mut WindowManagerState,
+    workspaces: &[WorkspaceId],
+    always_redraw: bool,
+    hidden_x: i32,
+) -> PlatformResult<()> {
     use windows_sys::Win32::UI::WindowsAndMessaging::{
         BeginDeferWindowPos, DeferWindowPos, EndDeferWindowPos, SWP_NOREDRAW, SWP_SHOWWINDOW,
     };
-    let clients = state.workspaces[workspace.0].clients.clone();
-    let workspace_hidden = workspace_is_hidden(state, workspace);
-    let cloak_manager = workspace_cloak_manager(state, workspace);
-    let mut defer = unsafe { BeginDeferWindowPos(clients.len() as i32 + 1) };
+    let cloak_manager = workspace_cloak_manager(state, workspaces);
+    let capacity: usize = workspaces
+        .iter()
+        .map(|workspace| state.workspaces[workspace.0].clients.len())
+        .sum();
+    let mut defer = unsafe { BeginDeferWindowPos(capacity as i32 + 1) };
     if defer.is_null() {
         return Err(PlatformError::last_win32("BeginDeferWindowPos"));
     }
-    for client_id in clients.into_iter().rev() {
-        let client = state.clients[client_id.0].as_mut().unwrap();
-        if should_cloak(client, workspace_hidden) {
-            set_client_cloak(cloak_manager.as_ref(), client, 2);
-            continue;
+    let flags = if always_redraw {
+        SWP_SHOWWINDOW
+    } else {
+        SWP_NOREDRAW
+    };
+    let mut uncloak_after_commit = Vec::new();
+    let uncloak_all = |windows: &[isize]| {
+        for hwnd in windows {
+            set_window_cloak(cloak_manager.as_ref(), *hwnd, 0);
         }
-        let placement = match capture_window_placement(client, hidden_x) {
-            Ok(placement) => placement,
-            Err(error) => {
-                error.report();
+    };
+    for workspace in workspaces {
+        let clients = state.workspaces[workspace.0].clients.clone();
+        let workspace_hidden = workspace_is_hidden(state, *workspace);
+        for client_id in clients.into_iter().rev() {
+            let client = state.clients[client_id.0].as_ref().unwrap();
+            if should_cloak(client, workspace_hidden) {
+                set_client_cloak(cloak_manager.as_ref(), client, 2);
                 continue;
             }
-        };
-        if placement.matches_target() {
-            continue;
-        }
-        let flags = if always_redraw {
-            SWP_SHOWWINDOW
-        } else {
-            SWP_NOREDRAW
-        };
-        defer = unsafe {
-            DeferWindowPos(
-                defer,
-                placement.hwnd as windows_sys::Win32::Foundation::HWND,
-                std::ptr::null_mut(),
-                placement.left,
-                placement.top,
-                placement.width,
-                placement.height,
-                flags,
-            )
-        };
-        if defer.is_null() {
-            // A failed DeferWindowPos invalidates the batch handle, so it is
-            // unsafe to queue additional moves or try to commit the batch.
-            return Err(PlatformError::last_win32("DeferWindowPos"));
-        }
-        if should_uncloak(client, workspace_hidden) {
-            set_client_cloak(cloak_manager.as_ref(), client, 0);
+            let placement = match capture_window_placement(client, hidden_x) {
+                Ok(placement) => placement,
+                Err(error) => {
+                    error.report();
+                    continue;
+                }
+            };
+            if placement.matches_target() {
+                continue;
+            }
+            defer = unsafe {
+                DeferWindowPos(
+                    defer,
+                    placement.hwnd as windows_sys::Win32::Foundation::HWND,
+                    std::ptr::null_mut(),
+                    placement.left,
+                    placement.top,
+                    placement.width,
+                    placement.height,
+                    flags,
+                )
+            };
+            if defer.is_null() {
+                // A failed DeferWindowPos invalidates the batch handle, so it is
+                // unsafe to queue additional moves or try to commit the batch.
+                // Nothing queued so far will move; still reveal the windows.
+                let error = PlatformError::last_win32("DeferWindowPos");
+                uncloak_all(&uncloak_after_commit);
+                return Err(error);
+            }
+            if should_uncloak(client, workspace_hidden) {
+                uncloak_after_commit.push(placement.hwnd);
+            }
         }
     }
-    check_bool(unsafe { EndDeferWindowPos(defer) }, "EndDeferWindowPos")?;
-    Ok(())
+    let result = check_bool(unsafe { EndDeferWindowPos(defer) }, "EndDeferWindowPos");
+    uncloak_all(&uncloak_after_commit);
+    result
 }
 
 // A translated frame belongs to a mouse drag: retain the pre-drag border.
@@ -2518,6 +2595,291 @@ fn border_frame_after_location_change(previous: Rect, actual: Rect, mouse_draggi
 #[cfg(test)]
 mod parity_tests {
     use super::*;
+
+    mod border_windows {
+        use super::*;
+        use windows_sys::Win32::UI::WindowsAndMessaging::*;
+
+        pub struct Window(pub isize);
+        impl Drop for Window {
+            fn drop(&mut self) {
+                unsafe {
+                    DestroyWindow(self.0 as _);
+                }
+            }
+        }
+
+        /// DWM frame bounds are always physical pixels, while GetWindowRect
+        /// is DPI-virtualized for unaware threads. The test harness is not
+        /// DPI-aware, so on a scaled display the two disagree unless the test
+        /// thread opts in before creating its windows.
+        pub fn per_monitor_dpi_aware_thread() {
+            use windows_sys::Win32::UI::HiDpi::{
+                DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, SetThreadDpiAwarenessContext,
+            };
+            unsafe {
+                SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+            }
+        }
+
+        pub fn create() -> Window {
+            let class: Vec<u16> = "STATIC\0".encode_utf16().collect();
+            let hwnd = unsafe {
+                CreateWindowExW(
+                    WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
+                    class.as_ptr(),
+                    class.as_ptr(),
+                    WS_POPUP | WS_VISIBLE,
+                    100,
+                    100,
+                    400,
+                    300,
+                    std::ptr::null_mut(),
+                    std::ptr::null_mut(),
+                    std::ptr::null_mut(),
+                    std::ptr::null(),
+                )
+            };
+            assert!(!hwnd.is_null());
+            Window(hwnd as isize)
+        }
+
+        /// A normal top-level app window. Unlike the tool-window popups from
+        /// `create`, the shell gives it an application view, so the cloak
+        /// manager can really cloak it. Needs COM on the calling thread.
+        pub fn create_app_window() -> Window {
+            use windows_sys::Win32::System::Com::{COINIT_APARTMENTTHREADED, CoInitializeEx};
+            unsafe { CoInitializeEx(std::ptr::null(), COINIT_APARTMENTTHREADED as u32) };
+            let class: Vec<u16> = "STATIC\0".encode_utf16().collect();
+            let hwnd = unsafe {
+                CreateWindowExW(
+                    0,
+                    class.as_ptr(),
+                    class.as_ptr(),
+                    WS_OVERLAPPEDWINDOW | WS_VISIBLE,
+                    100,
+                    100,
+                    400,
+                    300,
+                    std::ptr::null_mut(),
+                    std::ptr::null_mut(),
+                    std::ptr::null_mut(),
+                    std::ptr::null(),
+                )
+            };
+            assert!(!hwnd.is_null());
+            Window(hwnd as isize)
+        }
+
+        /// Give the shell time to create application views for new windows.
+        pub fn pump_messages_for(duration: std::time::Duration) {
+            let deadline = std::time::Instant::now() + duration;
+            let mut message = MSG::default();
+            while std::time::Instant::now() < deadline {
+                while unsafe { PeekMessageW(&mut message, std::ptr::null_mut(), 0, 0, PM_REMOVE) }
+                    != 0
+                {
+                    unsafe { DispatchMessageW(&message) };
+                }
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+        }
+
+        pub fn add_client(runtime: &mut Runtime, workspace: WorkspaceId, window: &Window) {
+            runtime.configuration.state.client_add(
+                workspace,
+                Client {
+                    data: crate::ClientData {
+                        hwnd: window.0,
+                        ..Default::default()
+                    },
+                    is_visible: true,
+                    workspace,
+                },
+            );
+        }
+
+        pub fn border_visible(border: &Window) -> bool {
+            unsafe { IsWindowVisible(border.0 as _) != 0 }
+        }
+
+        /// Refresh until the border sits on `hwnd`'s actual frame.
+        pub fn border_reaches(runtime: &Runtime, border: &Window, hwnd: isize) -> bool {
+            for _ in 0..30 {
+                runtime.border_window_update();
+                if let Some(actual) = visible_frame_rect(hwnd)
+                    && window_rect(border.0).unwrap() == crate::border::border_rect(actual)
+                    && border_visible(border)
+                {
+                    return true;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            false
+        }
+    }
+
+    /// The selected client of the selected monitor's workspace.
+    fn selected_client(runtime: &Runtime) -> &Client {
+        let state = &runtime.configuration.state;
+        let workspace = state.monitors[state.selected_monitor.unwrap().0]
+            .workspace
+            .unwrap();
+        let client = state.workspaces[workspace.0].selected.unwrap();
+        state.clients[client.0].as_ref().unwrap()
+    }
+
+    /// The border is visible and drawn around the selected client's layout slot.
+    fn border_at_target_slot(runtime: &Runtime, border: &border_windows::Window) -> bool {
+        let layout = selected_client(runtime).data.rect;
+        border_windows::border_visible(border)
+            && window_rect(border.0).unwrap() == crate::border::border_rect(layout)
+    }
+
+    /// Reassign monitors the way swap/move-to-monitor do, then lay out both
+    /// workspaces and update the border without moving any windows, as the
+    /// swap does just before its moves.
+    fn swap_assignment_and_prepare(runtime: &mut Runtime, incoming: WorkspaceId) {
+        let state = &mut runtime.configuration.state;
+        let selected = state.selected_monitor.unwrap();
+        let outgoing = state.monitors[selected.0].workspace.unwrap();
+        let other = state.workspaces[incoming.0].monitor.unwrap();
+        state.monitors[selected.0].workspace = Some(incoming);
+        state.workspaces[incoming.0].monitor = Some(selected);
+        state.monitors[other.0].workspace = Some(outgoing);
+        state.workspaces[outgoing.0].monitor = Some(other);
+        state.arrange_workspace(outgoing);
+        state.arrange_workspace(incoming);
+        runtime.border_window_update();
+    }
+
+    #[test]
+    fn border_leaves_the_split_pane_before_a_single_pane_lands_over_it() {
+        use border_windows::*;
+        per_monitor_dpi_aware_thread();
+        let left = create();
+        let right = create();
+        let single = create();
+        let border = create();
+        let mut configuration = Configuration::default();
+        let split = configuration.workspace_register("split", "1", false, crate::Layout::Tile);
+        let landing = configuration.workspace_register("single", "2", false, crate::Layout::Tile);
+        let mut runtime = Runtime::initialize(configuration, DesktopSnapshot::default());
+        add_client(&mut runtime, split, &left);
+        add_client(&mut runtime, split, &right);
+        add_client(&mut runtime, landing, &single);
+        runtime.border_window = Some(crate::border::BorderWindow { hwnd: border.0 });
+        runtime.apply_workspace(split).unwrap();
+        let selected = selected_client(&runtime).data.hwnd;
+        assert!(border_reaches(&runtime, &border, selected));
+        swap_assignment_and_prepare(&mut runtime, landing);
+        assert_ne!(selected_client(&runtime).data.hwnd, selected);
+        assert!(
+            border_at_target_slot(&runtime, &border),
+            "before any window moves, the border must already surround the landing slot"
+        );
+    }
+
+    #[test]
+    fn border_survives_the_pre_move_step_between_single_panes() {
+        use border_windows::*;
+        per_monitor_dpi_aware_thread();
+        let first_window = create();
+        let second_window = create();
+        let border = create();
+        let mut configuration = Configuration::default();
+        let first = configuration.workspace_register("first", "1", false, crate::Layout::Tile);
+        let second = configuration.workspace_register("second", "2", false, crate::Layout::Tile);
+        let mut runtime = Runtime::initialize(configuration, DesktopSnapshot::default());
+        add_client(&mut runtime, first, &first_window);
+        add_client(&mut runtime, second, &second_window);
+        runtime.border_window = Some(crate::border::BorderWindow { hwnd: border.0 });
+        runtime.apply_workspace(first).unwrap();
+        assert!(border_reaches(&runtime, &border, first_window.0));
+        swap_assignment_and_prepare(&mut runtime, second);
+        assert!(border_at_target_slot(&runtime, &border));
+    }
+
+    fn is_cloaked(hwnd: isize) -> bool {
+        use windows_sys::Win32::Graphics::Dwm::{DWMWA_CLOAKED, DwmGetWindowAttribute};
+        let mut cloaked = 0u32;
+        let result = unsafe {
+            DwmGetWindowAttribute(
+                hwnd as _,
+                DWMWA_CLOAKED as u32,
+                &mut cloaked as *mut _ as _,
+                std::mem::size_of::<u32>() as u32,
+            )
+        };
+        result == 0 && cloaked != 0
+    }
+
+    /// Two workspaces on the first two (visible) monitors, each with one
+    /// window, swapped with `swap_selected_monitor_to`.
+    fn cross_monitor_swap(use_cloak: bool) {
+        use border_windows::*;
+        per_monitor_dpi_aware_thread();
+        let window = if use_cloak { create_app_window } else { create };
+        let outgoing_window = window();
+        let incoming_window = window();
+        let border = create();
+        // Let the shell create application views so cloaking really applies.
+        pump_messages_for(std::time::Duration::from_millis(300));
+        let mut configuration = Configuration::default();
+        let outgoing =
+            configuration.workspace_register("outgoing", "1", false, crate::Layout::Tile);
+        let incoming =
+            configuration.workspace_register("incoming", "2", false, crate::Layout::Tile);
+        // Runtime::initialize only uses the snapshot's monitor count; the
+        // monitors are laid out side by side at the primary screen size.
+        let snapshot = DesktopSnapshot {
+            monitors: (1..=2)
+                .map(|id| Monitor::new(id, Rect::default(), 13))
+                .collect(),
+            windows: Vec::new(),
+        };
+        let mut runtime = Runtime::initialize(configuration, snapshot);
+        assert!(!workspace_is_hidden(&runtime.configuration.state, incoming));
+        add_client(&mut runtime, outgoing, &outgoing_window);
+        add_client(&mut runtime, incoming, &incoming_window);
+        for client in runtime.configuration.state.clients.iter_mut().flatten() {
+            client.data.use_cloak_to_hide = use_cloak;
+        }
+        runtime.border_window = Some(crate::border::BorderWindow { hwnd: border.0 });
+        runtime.apply_workspace(outgoing).unwrap();
+        runtime.apply_workspace(incoming).unwrap();
+        assert!(border_reaches(&runtime, &border, outgoing_window.0));
+
+        runtime.swap_selected_monitor_to(incoming).unwrap();
+
+        let state = &runtime.configuration.state;
+        let selected = state.selected_monitor.unwrap();
+        assert_eq!(state.monitors[selected.0].workspace, Some(incoming));
+        assert!(!workspace_is_hidden(state, outgoing));
+        for window in [&outgoing_window, &incoming_window] {
+            let client = state
+                .window_manager_find_client_in_workspaces_by_hwnd(window.0)
+                .and_then(|id| state.clients[id.0].as_ref())
+                .unwrap();
+            assert_eq!(
+                visible_frame_rect(window.0),
+                Some(client.data.rect),
+                "each window lands on its new monitor's layout slot"
+            );
+            assert!(!is_cloaked(window.0), "no window is left cloaked");
+        }
+        assert!(border_reaches(&runtime, &border, incoming_window.0));
+    }
+
+    #[test]
+    fn cross_monitor_swap_lands_both_workspaces_in_one_transition() {
+        cross_monitor_swap(false);
+    }
+
+    #[test]
+    fn cross_monitor_swap_with_cloaking_leaves_every_window_shown() {
+        cross_monitor_swap(true);
+    }
 
     #[test]
     fn border_stays_at_the_original_frame_during_a_mouse_drag() {
