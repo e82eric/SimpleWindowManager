@@ -18,6 +18,7 @@ nfm-win32 = { git = "https://github.com/e82eric/npicker", rev = "8ac0a92a6491874
 nfm-preview-file = { git = "https://github.com/e82eric/npicker", rev = "8ac0a92a6491874e5b8a9fd4c02607662265cd32" }
 nfm-preview = { git = "https://github.com/e82eric/npicker", rev = "8ac0a92a6491874e5b8a9fd4c02607662265cd32", features = ["egui"] }
 serde_json = "1"
+png = "0.18"
 pulldown-cmark = { version = "0.13", default-features = false }
 two-face = "0.5.2"
 unicode-segmentation = "1"

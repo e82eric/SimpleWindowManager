@@ -146,7 +146,8 @@ pub fn configure(configuration: &mut Configuration) {
     });
     // Region screenshot to the clipboard: type a window's digit to start from
     // it, then trim it with arrows/hjkl (top and left edges; Shift for bottom
-    // and right, Ctrl for fine steps) and copy with Enter.
+    // and right, Ctrl for fine steps) and copy with Enter. Shift+Enter also
+    // saves it to Pictures\Screenshots and opens it in Paint.
     configuration.screenshot_hint_font_size = 88;
     configuration.keybinding_create(KeyBinding {
         modifiers: modifiers | LSHIFT,

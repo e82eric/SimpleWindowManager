@@ -68,7 +68,10 @@ pub(crate) enum Input {
         dy: i32,
     },
     Back,
-    Accept,
+    /// Copy the rectangle; with `edit`, also save it and open it in Paint.
+    Accept {
+        edit: bool,
+    },
     Cancel,
 }
 
@@ -76,7 +79,7 @@ pub(crate) enum Input {
 pub(crate) enum Outcome {
     Continue,
     Cancel,
-    Capture(Region),
+    Capture { region: Region, edit: bool },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -154,8 +157,10 @@ impl Selector {
                 }
             }
             (Input::Pick(_), State::Adjust(_)) => {}
-            (Input::Accept, State::Adjust(region)) => return Outcome::Capture(region),
-            (Input::Accept, State::Pick) => {}
+            (Input::Accept { edit }, State::Adjust(region)) => {
+                return Outcome::Capture { region, edit };
+            }
+            (Input::Accept { .. }, State::Pick) => {}
             // Trimming before choosing a window starts from the whole monitor.
             (Input::Resize { edges, dx, dy }, state) => {
                 let region = match state {
@@ -187,6 +192,7 @@ impl Selector {
 
 /// The input for virtual key `key`. Arrows and hjkl move the top and left
 /// edges, or with Shift the bottom and right ones; Ctrl makes the step fine.
+/// Enter copies, and Shift+Enter also opens the copy in Paint.
 pub(crate) fn translate(key: u16, ctrl: bool, shift: bool) -> Option<Input> {
     let resize = |dx: i32, dy: i32| {
         let step = if ctrl { FINE_STEP } else { STEP };
@@ -210,7 +216,7 @@ pub(crate) fn translate(key: u16, ctrl: bool, shift: bool) -> Option<Input> {
     match key {
         VK_ESCAPE => Some(Input::Cancel),
         VK_BACK => Some(Input::Back),
-        VK_RETURN => Some(Input::Accept),
+        VK_RETURN => Some(Input::Accept { edit: shift }),
         VK_LEFT | H => resize(-1, 0),
         VK_RIGHT | L => resize(1, 0),
         VK_UP | K => resize(0, -1),
@@ -246,11 +252,17 @@ mod tests {
         assert_eq!(s.state, State::Pick);
         // Past the last window, nothing; and Enter captures nothing yet.
         s.handle(Input::Pick(2));
-        assert_eq!(s.handle(Input::Accept), Outcome::Continue);
+        assert_eq!(s.handle(Input::Accept { edit: false }), Outcome::Continue);
         // Digits go left to right, whatever order the windows came in.
         s.handle(Input::Pick(1));
         assert_eq!(s.selection(), Some(right));
-        assert_eq!(s.handle(Input::Accept), Outcome::Capture(right));
+        assert_eq!(
+            s.handle(Input::Accept { edit: true }),
+            Outcome::Capture {
+                region: right,
+                edit: true
+            }
+        );
     }
 
     #[test]
@@ -346,6 +358,14 @@ mod tests {
         );
         assert_eq!(translate(b'3'.into(), false, false), Some(Input::Pick(2)));
         assert_eq!(translate(VK_NUMPAD1, false, false), Some(Input::Pick(0)));
+        assert_eq!(
+            translate(VK_RETURN, false, false),
+            Some(Input::Accept { edit: false })
+        );
+        assert_eq!(
+            translate(VK_RETURN, true, true),
+            Some(Input::Accept { edit: true })
+        );
         assert_eq!(translate(b'X'.into(), false, false), None);
     }
 }

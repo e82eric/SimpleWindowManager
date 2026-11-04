@@ -1110,6 +1110,7 @@ dependencies = [
  "nfm-window-egui",
  "nfm_file_system",
  "nfm_search_core",
+ "png",
  "pulldown-cmark",
  "serde_json",
  "tracing",

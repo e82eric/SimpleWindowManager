@@ -11,6 +11,7 @@ use windows_sys::Win32::Graphics::Gdi::*;
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::*;
 use windows_sys::Win32::UI::WindowsAndMessaging::*;
 
+mod edit;
 mod selector;
 use selector::{Edges, Outcome, Region, Selector, State};
 
@@ -177,6 +178,9 @@ struct Session {
     /// The rectangle just copied, flashing until the overlay closes; keys are
     /// ignored meanwhile.
     yanked: Option<Region>,
+    /// Whether to save the copied rectangle and open it in Paint once
+    /// the overlay has closed (Shift+Enter).
+    edit: bool,
 }
 impl Drop for Session {
     fn drop(&mut self) {
@@ -316,6 +320,7 @@ pub(crate) fn start(point: (i32, i32), windows: &[isize], hint_font_size: i32) {
         hint_font: font(hint_font_size),
         label_font: font((hint_font_size / 5).max(14)),
         yanked: None,
+        edit: false,
     };
     SESSION.with(|slot| *slot.borrow_mut() = Some(session));
     unsafe {
@@ -369,6 +374,16 @@ fn close() {
     unsafe {
         KillTimer(hwnd, YANK_TIMER);
         ShowWindow(hwnd, SW_HIDE);
+    }
+    // Only now, so Paint can't take the focus during the flash.
+    if session.edit
+        && let Some(region) = session.yanked
+    {
+        edit::open(
+            rgb_bytes(&session.original, region),
+            region.width(),
+            region.height(),
+        );
     }
     drop(session);
 }
@@ -431,9 +446,10 @@ fn on_key(hwnd: HWND, key: u16) {
         let mut slot = slot.borrow_mut();
         let session = slot.as_mut().filter(|session| session.yanked.is_none())?;
         let outcome = session.selector.handle(input);
-        if let Outcome::Capture(region) = outcome {
+        if let Outcome::Capture { region, edit } = outcome {
             copy_to_clipboard(hwnd, &session.original, region);
             session.yanked = Some(region);
+            session.edit = edit;
         }
         Some(outcome)
     });
@@ -444,7 +460,7 @@ fn on_key(hwnd: HWND, key: u16) {
             InvalidateRect(hwnd, std::ptr::null(), 0);
         },
         // Flash what was copied, then close.
-        Some(Outcome::Capture(_)) => unsafe {
+        Some(Outcome::Capture { .. }) => unsafe {
             InvalidateRect(hwnd, std::ptr::null(), 0);
             if SetTimer(hwnd, YANK_TIMER, YANK_FLASH_MS, None) == 0 {
                 close();
@@ -687,6 +703,21 @@ fn size_label(session: &Session, r: Region) {
         r.bottom - GAP - half_height
     };
     badge(dc, x, y, &text, LIGHT, 1);
+}
+
+/// `region` of `image` as rows of red, green, blue bytes, top row first.
+fn rgb_bytes(image: &Surface, region: Region) -> Vec<u8> {
+    let source = image.pixels();
+    let stride = image.width as usize * 4;
+    let (left, right) = (region.left as usize, region.right as usize);
+    let mut rgb = Vec::with_capacity((right - left) * region.height() as usize * 3);
+    for y in region.top as usize..region.bottom as usize {
+        // DIB pixels are blue, green, red, unused.
+        for pixel in source[y * stride + left * 4..y * stride + right * 4].chunks_exact(4) {
+            rgb.extend([pixel[2], pixel[1], pixel[0]]);
+        }
+    }
+    rgb
 }
 
 /// Puts `region` of `image` on the clipboard as a 24-bit bottom-up DIB.
