@@ -1,4 +1,4 @@
-//! Run with: cargo run --manifest-path rust-port/Cargo.toml --example hang_window
+//! Run with: cargo run --example hang_window
 //! Deliberately blocks this process's UI thread; does not suspend another app.
 #![windows_subsystem = "windows"]
 

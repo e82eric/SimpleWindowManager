@@ -2,12 +2,9 @@ bin
 bin2
 bak
 *~
-Config.c
 tmp
-props.mk.local
 .claude
 logs
-target
-/rust-port/target*/
-/rust-port/build.local.ps1
-/rust-port/.idea*/
+/target*/
+/build.local.ps1
+/.idea*/
