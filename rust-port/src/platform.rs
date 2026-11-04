@@ -172,6 +172,7 @@ pub(crate) fn binding_name(binding: &crate::commands::KeyBinding) -> String {
         RedrawFocused => "redraw_focused_window".into(),
         ShowPicker(picker) => picker.name.into(),
         ShowMailbox(_) => "show_bar_mailbox".into(),
+        Screenshot => "screenshot".into(),
         Launch(_) => "Shell".into(),
         MoveFloat(1, 0) => "move_focused_window_right".into(),
         MoveFloat(-1, 0) => "move_focused_window_left".into(),

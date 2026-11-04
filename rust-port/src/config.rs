@@ -125,6 +125,8 @@ pub struct Configuration {
     pub file_preview_bat_theme: Option<String>,
     /// Host-owned routing for filesystem/program previews. Runs on the NFM worker.
     pub file_preview_resolver: crate::file_preview::FilePreviewResolver,
+    /// Height in pixels of the screenshot's window digits (clamped to 10..=128).
+    pub screenshot_hint_font_size: i32,
 }
 
 impl Default for Configuration {
@@ -159,6 +161,7 @@ impl Default for Configuration {
             picker_preview_rows: 14,
             file_preview_bat_theme: Some("gruvbox-dark".into()),
             file_preview_resolver: crate::file_preview::resolver(Default::default()),
+            screenshot_hint_font_size: 88,
         }
     }
 }

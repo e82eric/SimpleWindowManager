@@ -336,12 +336,12 @@ impl Runtime {
     #[tracing::instrument(skip(self))]
     pub fn execute(&mut self, action: Action) -> PlatformResult<()> {
         use Action::*;
-        if crate::ui::is_menu(action) {
+        if crate::ui::is_overlay(action) {
             crate::ui::post(crate::ui::Command::Action(action));
             return Ok(());
         }
         match action {
-            ShowPicker(_) | ShowMailbox(_) => unreachable!(),
+            ShowPicker(_) | ShowMailbox(_) | Screenshot => unreachable!(),
             Quit => platform_exit(),
             QuitAndRestore => {
                 crate::restore::restore_moved_windows_to_screen(false)?;

@@ -33,6 +33,7 @@ pub mod platform_error;
 pub mod process;
 pub mod restore;
 pub mod runtime;
+pub mod screenshot;
 pub mod snapshot;
 pub mod status;
 pub mod ui;

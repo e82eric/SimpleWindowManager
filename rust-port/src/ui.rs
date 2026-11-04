@@ -77,7 +77,7 @@ pub(crate) fn close_menu(session: u64) -> bool {
 /// Run an action from any thread: pickers and quit on the UI thread, the rest on
 /// the worker.
 pub fn dispatch(action: Action) -> bool {
-    if is_menu(action) || matches!(action, Action::Quit) {
+    if runs_on_ui(action) {
         post(Command::Action(action))
     } else {
         crate::worker::send(crate::worker::Command::Action(action))
@@ -114,6 +114,15 @@ pub fn binding(key: u32, modifiers: i32) -> Option<Action> {
 pub fn is_menu(action: Action) -> bool {
     matches!(action, Action::ShowPicker(_) | Action::ShowMailbox(_))
 }
+/// Actions that open a window on the UI thread: pickers, mailboxes and the
+/// screenshot overlay.
+pub fn is_overlay(action: Action) -> bool {
+    is_menu(action) || matches!(action, Action::Screenshot)
+}
+/// Actions the UI thread carries out rather than the worker.
+pub fn runs_on_ui(action: Action) -> bool {
+    is_overlay(action) || matches!(action, Action::Quit)
+}
 fn picker_bounds(configuration: &Configuration) -> Option<crate::egui_window_menu::ScreenBounds> {
     let monitor = configuration.selected_picker_monitor()?;
     Some(crate::egui_window_menu::ScreenBounds {
@@ -137,6 +146,7 @@ impl Ui {
         match action {
             ShowPicker(picker) => self.show_picker(picker),
             ShowMailbox(name) => self.show_mailbox(name),
+            Screenshot => self.screenshot(),
             Quit => unsafe {
                 PostQuitMessage(0);
             },
@@ -179,6 +189,46 @@ impl Ui {
         if let Some(bar) = self.bars.iter().find(|bar| bar.monitor_index == monitor) {
             crate::bar::toggle_mailbox(bar.hwnd as _, monitor, index);
         }
+    }
+    /// Starts a screenshot on the focused monitor, with a digit on each of its
+    /// workspace's visible windows.
+    fn screenshot(&self) {
+        let configuration = &self.configuration;
+        let state = &configuration.state;
+        let monitors = &state.monitors;
+        let Some(monitor) = state
+            .selected_monitor
+            .and_then(|id| monitors.get(id.0))
+            .or_else(|| configuration.selected_picker_monitor())
+        else {
+            return;
+        };
+        // The workspace's showing windows, then the foreground window if it
+        // isn't one, such as a floating window. Layouts like deck hide windows
+        // by cloaking them, which leaves them "visible" to Win32, so this has
+        // to come from the layout's own visibility.
+        let mut hwnds: Vec<isize> = monitor
+            .workspace
+            .and_then(|workspace| state.workspaces.get(workspace.0))
+            .into_iter()
+            .flat_map(|workspace| &workspace.clients)
+            .filter_map(|client| state.clients.get(client.0)?.as_ref())
+            .filter(|client| client.is_visible && !client.data.is_minimized)
+            .map(|client| client.data.hwnd)
+            .collect();
+        if let Some(foreground) = crate::screenshot::foreground_window()
+            && !hwnds.contains(&foreground)
+        {
+            hwnds.push(foreground);
+        }
+        crate::screenshot::start(
+            (
+                monitor.x_offset + monitor.width / 2,
+                (monitor.top + monitor.bottom) / 2,
+            ),
+            &hwnds,
+            configuration.screenshot_hint_font_size.clamp(10, 128),
+        );
     }
     fn send_request(&self, request: Box<dyn crate::picker::PickerRequest>) -> bool {
         let Some(host) = self.egui_windows.as_ref() else {

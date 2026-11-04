@@ -144,6 +144,15 @@ pub fn configure(configuration: &mut Configuration) {
         key: VK_RETURN as u32,
         action: Action::MoveSecondaryFocusedToMain,
     });
+    // Region screenshot to the clipboard: type a window's digit to start from
+    // it, then trim it with arrows/hjkl (top and left edges; Shift for bottom
+    // and right, Ctrl for fine steps) and copy with Enter.
+    configuration.screenshot_hint_font_size = 88;
+    configuration.keybinding_create(KeyBinding {
+        modifiers: modifiers | LSHIFT,
+        key: b'S' as u32,
+        action: Action::Screenshot,
+    });
 
     for (key, (dx, dy)) in [
         (VK_RIGHT as u32, (1, 0)),
