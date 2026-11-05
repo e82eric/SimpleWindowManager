@@ -121,8 +121,6 @@ pub struct Configuration {
     pub picker_monitor: PickerMonitor,
     /// Maximum visible preview rows (clamped to 1..=256).
     pub picker_preview_rows: usize,
-    /// Bat syntax theme for file previews; None uses bat's own settings.
-    pub file_preview_bat_theme: Option<String>,
     /// Host-owned routing for filesystem/program previews. Runs on the NFM worker.
     pub file_preview_resolver: crate::file_preview::FilePreviewResolver,
     /// Height in pixels of the screenshot's window digits (clamped to 10..=128).
@@ -159,7 +157,6 @@ impl Default for Configuration {
             picker_result_rows: 7,
             picker_monitor: PickerMonitor::default(),
             picker_preview_rows: 14,
-            file_preview_bat_theme: Some("gruvbox-dark".into()),
             file_preview_resolver: crate::file_preview::resolver(Default::default()),
             screenshot_hint_font_size: 88,
         }

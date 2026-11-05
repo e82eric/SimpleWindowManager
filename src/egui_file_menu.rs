@@ -42,25 +42,15 @@ impl FileAction {
     }
 }
 
-/// NFM filesystem browsing. A missing `bat_theme` uses `file_preview_bat_theme`;
-/// empty roots list the drives.
+/// NFM filesystem browsing; empty roots list the drives.
 #[derive(Clone, Debug)]
 pub struct Files {
     pub options: FileSystemPickerOptions,
     pub action: FileAction,
 }
-impl Files {
-    fn resolved(&self, configuration: &crate::Configuration) -> Files {
-        let mut files = self.clone();
-        if files.options.bat_theme.is_none() {
-            files.options.bat_theme = configuration.file_preview_bat_theme.clone();
-        }
-        files
-    }
-}
 impl PickerSource for Files {
-    fn request(&self, configuration: &crate::Configuration) -> Box<dyn PickerRequest> {
-        Box::new(self.resolved(configuration))
+    fn request(&self, _: &crate::Configuration) -> Box<dyn PickerRequest> {
+        Box::new(self.clone())
     }
 }
 impl PickerRequest for Files {
@@ -145,20 +135,6 @@ fn accept(on_accept: FileCallback, path: PathBuf) -> io::Result<()> {
 mod accept_tests {
     use super::*;
     use std::sync::Mutex;
-
-    #[test]
-    fn requests_inherit_the_configured_bat_theme() {
-        let mut configuration = crate::Configuration::default();
-        configuration.file_preview_bat_theme = Some("gruvbox-dark".into());
-        let files = Files {
-            options: Default::default(),
-            action: FileAction::Launch { elevated: false },
-        };
-        assert_eq!(
-            files.resolved(&configuration).options.bat_theme.as_deref(),
-            Some("gruvbox-dark")
-        );
-    }
 
     #[test]
     fn callback_receives_the_path_and_propagates_errors() {

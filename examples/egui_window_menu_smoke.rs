@@ -306,7 +306,6 @@ fn main() {
                     max_depth: 5,
                     files_only: true,
                     preview_visible: false,
-                    bat_theme: Some("gruvbox-dark".into()),
                     ..Default::default()
                 },
                 FileAction::Launch { elevated },
@@ -594,7 +593,6 @@ fn main() {
                             max_depth: 5,
                             files_only: true,
                             preview_visible: false,
-                            bat_theme: Some("gruvbox-dark".into()),
                             ..Default::default()
                         },
                         FileAction::Launch { elevated: false },

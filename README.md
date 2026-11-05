@@ -12,9 +12,8 @@ I wrote this application to target my specific workflow where 90% of windows com
 ## Install
 - You will need to compile the application to install it
   - Install the Rust MSVC toolchain (https://rustup.rs) and the Visual Studio Build Tools.
-  - ANSI previews need a prebuilt Ghostty VT library (see [User configuration](#user-configuration)).
   - Make any configuration/customizations (see [User configuration](#user-configuration))
-  - Run `.\build.ps1 -GhosttyRoot <ghostty checkout>`
+  - Run `.\build.ps1`
   - Run `target\release\simple-window-manager-rs.exe` (the application requests elevation)
 
 ```powershell
@@ -187,22 +186,10 @@ configuration as normal output before building:
 .\build.ps1
 ```
 
-ANSI previews require a separately built standalone Ghostty VT static library.
-Build a compatible Ghostty checkout with:
 
-```powershell
-zig build -Demit-lib-vt -Doptimize=ReleaseFast -Dvt-features=-kitty-graphics --prefix zig-out/nfm-vt
-```
-
-Pass `-GhosttyRoot <checkout>` to the wrapper or set `GHOSTTY_ROOT`.
-Alternatively, set both `NFM_GHOSTTY_VT_INCLUDE_DIR` and
-`NFM_GHOSTTY_VT_LIB_DIR` to matching headers and libraries.
-`NFM_GHOSTTY_VT_LIB_NAME` defaults to `ghostty-vt-static`.
-The wrapper requires these paths before invoking Cargo.
-
-File previews default to bat's `gruvbox-dark` theme. Set
-`configuration.file_preview_bat_theme = Some("other-theme".into())` in your Rust
-configuration to override it, or set it to `None` to use bat's own settings.
+File previews come from npicker's `nfm-preview` resolver. Set
+`configuration.file_preview_resolver` to change tool paths, the video frame
+position or text highlighting (see `default_user_config.rs`).
 
 The wrapper builds release by default; pass `-Dev` for a debug build. An
 additional `-Timings` switch generates Cargo's build timing report at
@@ -235,10 +222,10 @@ Run those commands from the repository root. The manager requests elevation;
 `build.rs` embeds the `requireAdministrator` manifest.
 
 The Rust menus use shared crates from [npicker](https://github.com/e82eric/npicker),
-pinned to `de012392133660e8678c54afadefaadf1ec4c1b3` in Cargo.toml.
+pinned to `80ea8a6` in Cargo.toml.
 `nfm-win32` supplies Windows enumeration, process
-actions, drive roots, and typed snapshots. `nfm-preview` supplies file previews
-through its optional egui adapter, and `nfm-file-system` owns filesystem options
+actions, drive roots, and typed snapshots. `nfm-preview` supplies file-preview
+routing, and `nfm-file-system` owns filesystem options
 and scanning. SWM does not depend on `nfm-rust-win32host` or compile its legacy
 picker runtime, view model, DLL entry points, or Skia menu renderer.
 Neither `rust_nfm.dll` nor `LibNfm.dll` is required. The bar also uses egui and
@@ -382,11 +369,10 @@ program action. Ctrl+U goes to the parent (or back to the drive roots). Ctrl+P
 toggles previews, Ctrl+PageUp/PageDown scrolls them, Ctrl+C copies the path, and
 Escape dismisses the menu.
 
-Previews reuse NFM's Skia file-menu pipeline: `bat --color=always` for colored
-text, `ffmpeg` for images, and `ffprobe` plus `ffmpeg` for a frame at 25% of a
-video's duration. Directory and other-file listings use the same native resolver.
-These tools must be on PATH, as with the Skia menu. Text falls back to the bounded
-built-in preview when the command provider fails. Images preserve their aspect
+Previews use npicker's `nfm-preview` resolver: text and source files are
+highlighted in process, `ffmpeg` decodes images, and `ffprobe` plus `ffmpeg`
+find a frame at 25% of a video's duration. Directories show a sorted entry
+list. `ffmpeg` and `ffprobe` must be on PATH for media. Images preserve their aspect
 ratio and fit the preview area. Completed previews are cached during scrolling;
 replacement previews retain the previous display until ready.
 The native smoke example also checks filesystem typing and exact file selection
@@ -458,8 +444,7 @@ run with the window-manager runtime after the picker closes. A runtime call
 blocks window management while it runs, so slow work belongs on its own thread.
 The host, UI and worker know nothing about individual kinds.
 
-Empty roots use NFM's drive list. A file picker without a `bat_theme` uses
-`file_preview_bat_theme`. File pickers use NFM's existing
+Empty roots use NFM's drive list. File pickers use NFM's existing
 filesystem picker, including directory navigation, previews, and cancellation.
 `search_string` sets the editable initial query; it is not an enforced extension
 restriction. NFM owns scanning and search without a separate SWM filtering source.

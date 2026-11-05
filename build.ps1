@@ -1,7 +1,6 @@
 param(
     [switch]$Dev,
     [switch]$Timings,
-    [string]$GhosttyRoot,
     [Parameter(ValueFromRemainingArguments = $true)]
     [string[]]$CargoArgs
 )
@@ -16,14 +15,6 @@ if (Test-Path -LiteralPath $localSettings) {
 }
 if ([string]::IsNullOrWhiteSpace($selectedConfig)) {
     $selectedConfig = $SwmConfigRs
-}
-if (-not [string]::IsNullOrWhiteSpace($GhosttyRoot)) {
-    $env:GHOSTTY_ROOT = (Resolve-Path -LiteralPath $GhosttyRoot).Path
-}
-if ([string]::IsNullOrWhiteSpace($env:GHOSTTY_ROOT) -and
-    ([string]::IsNullOrWhiteSpace($env:NFM_GHOSTTY_VT_INCLUDE_DIR) -or
-     [string]::IsNullOrWhiteSpace($env:NFM_GHOSTTY_VT_LIB_DIR))) {
-    throw 'ANSI previews require a prebuilt Ghostty VT library. Pass -GhosttyRoot <checkout> or set GHOSTTY_ROOT (or both NFM_GHOSTTY_VT_INCLUDE_DIR and NFM_GHOSTTY_VT_LIB_DIR). Build it with zig build -Demit-lib-vt -Doptimize=ReleaseFast -Dvt-features=-kitty-graphics --prefix zig-out/nfm-vt first.'
 }
 if ([string]::IsNullOrWhiteSpace($selectedConfig)) {
     $selectedConfig = Join-Path $portDirectory 'default_user_config.rs'

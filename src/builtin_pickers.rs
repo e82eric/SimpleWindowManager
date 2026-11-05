@@ -33,7 +33,6 @@ pub static FILE_SYSTEM: PickerConfig = PickerConfig {
             files_only: false,
             search_string: None,
             preview_visible: true,
-            bat_theme: None,
         },
         action: FileAction::Launch { elevated: false },
     },
