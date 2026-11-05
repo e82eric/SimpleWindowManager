@@ -8,6 +8,9 @@ use crate::snapshot::{DesktopSnapshot, WindowSnapshot};
 use simple_window_manager_rs::debug_out;
 
 const MAX_WORKSPACES: usize = 10;
+/// How long to hold out for a window the manager focused before following
+/// other activations again.
+const FOCUS_EXPECTATION_DURATION: std::time::Duration = std::time::Duration::from_millis(500);
 
 pub struct Runtime {
     pub configuration: Configuration,
@@ -20,7 +23,9 @@ pub struct Runtime {
     pub border_window: Option<crate::border::BorderWindow>,
     pub drop_target_window: Option<crate::drop_target::DropTargetWindow>,
     border_frame: std::cell::Cell<Option<(isize, Rect, Rect)>>,
-    pub workspace_move_foreground: Option<isize>,
+    /// Window the manager just focused, and when to stop holding out for its
+    /// activation; see `foreground_changed`.
+    expected_foreground: Option<(isize, std::time::Instant)>,
     pub event_foreground_hwnd: isize,
     pub is_foreground_window_same_as_selected: bool,
 }
@@ -99,7 +104,7 @@ impl Runtime {
             border_window: None,
             drop_target_window: None,
             border_frame: std::cell::Cell::new(None),
-            workspace_move_foreground: None,
+            expected_foreground: None,
             event_foreground_hwnd: 0,
             is_foreground_window_same_as_selected: false,
         }
@@ -167,15 +172,11 @@ impl Runtime {
                 .as_ref()
                 .unwrap()
                 .workspace;
-            let foreground_is_managed = self
-                .configuration
-                .state
-                .window_manager_find_client_in_workspaces_by_hwnd(foreground_window())
-                .is_some();
+            // A managed window that shows or uncloaks is almost always the
+            // manager revealing its own workspace (or a virtual desktop switch),
+            // so re-apply its workspace but leave focus alone. Refocusing here
+            // would pull focus to a workspace moved onto another monitor.
             self.apply_workspace(workspace)?;
-            if foreground_is_managed {
-                self.focus_selected(workspace);
-            }
             self.redraw_bars();
             self.border_window_update();
             return Ok(());
@@ -275,13 +276,28 @@ impl Runtime {
 
     #[tracing::instrument(skip(self), fields(hwnd = hwnd as usize))]
     pub fn foreground_changed(&mut self, hwnd: isize) {
-        if let Some(preserved) = self.workspace_move_foreground {
-            if hwnd != preserved && is_window(preserved) {
-                nudge_set_foreground_window(preserved);
+        // Right after the manager focuses a window, Windows may still report
+        // activations it made on its own: the next window in z-order after a
+        // close, or windows being moved by a workspace swap. Following one would
+        // move the selected monitor (the cursor is often over it, so it
+        // hit-tests like a click). Hold out for the expected window unless the
+        // user is clicking. Unmanaged windows (dialogs, popups) pass through.
+        if let Some((expected, deadline)) = self.expected_foreground {
+            if hwnd == expected
+                || !is_window_visible(expected)
+                || std::time::Instant::now() >= deadline
+                || any_mouse_button_down()
+            {
+                self.expected_foreground = None;
+            } else if self
+                .configuration
+                .state
+                .window_manager_find_client_in_workspaces_by_hwnd(hwnd)
+                .is_some()
+            {
+                self.event_foreground_hwnd = hwnd;
+                nudge_set_foreground_window(expected);
                 return;
-            }
-            if !is_window(preserved) {
-                self.workspace_move_foreground = None;
             }
         }
         self.redraw_bars();
@@ -323,14 +339,14 @@ impl Runtime {
         self.redraw_bars();
     }
 
-    pub fn finish_workspace_move_focus_preservation(&mut self) {
-        let foreground = self.workspace_move_foreground.take();
-        if let Some(hwnd) = foreground
-            && is_window(hwnd)
-            && foreground_window() != hwnd
-        {
-            nudge_set_foreground_window(hwnd);
-        }
+    /// Nudge `hwnd` to the foreground and hold out for its activation; see
+    /// `foreground_changed`.
+    fn focus_window(&mut self, hwnd: isize) {
+        self.expected_foreground = Some((
+            hwnd,
+            std::time::Instant::now() + FOCUS_EXPECTATION_DURATION,
+        ));
+        nudge_set_foreground_window(hwnd);
     }
 
     #[tracing::instrument(skip(self))]
@@ -516,15 +532,16 @@ impl Runtime {
                 return;
             }
         }
-        if let Some(client) = self.configuration.state.workspaces[workspace.0].selected {
-            if let Some(client) = self.configuration.state.clients[client.0].as_ref() {
-                if foreground_window() != client.data.hwnd {
-                    nudge_set_foreground_window(client.data.hwnd);
-                }
-                self.is_foreground_window_same_as_selected =
-                    foreground_window() == client.data.hwnd;
-                return;
+        if let Some(hwnd) = self.configuration.state.workspaces[workspace.0]
+            .selected
+            .and_then(|client| self.configuration.state.clients[client.0].as_ref())
+            .map(|client| client.data.hwnd)
+        {
+            if foreground_window() != hwnd {
+                self.focus_window(hwnd);
             }
+            self.is_foreground_window_same_as_selected = foreground_window() == hwnd;
+            return;
         }
         if let Some(monitor) = self.configuration.state.workspaces[workspace.0].monitor
             && let Some(bar) = crate::ui::bar_handle(monitor.0)
@@ -837,16 +854,14 @@ impl Runtime {
                 .and_then(Option::as_ref)
                 .map(|client| client.data.hwnd);
 
-            if let Some(foreground) = foreground {
+            if let Some(foreground) = foreground
+                && foreground != 0
+            {
                 debug_out!("To foreground: {foreground:#x}");
-                self.workspace_move_foreground = Some(foreground);
-                if foreground != 0 && foreground_window() != foreground {
-                    nudge_set_foreground_window(foreground);
-                }
+                // Hold out even if it is already in front: the swap's own
+                // window moves can still activate other windows.
+                self.focus_window(foreground);
             }
-        }
-        if !crate::platform::schedule_workspace_move_focus_finish() {
-            self.workspace_move_foreground = None;
         }
         Ok(())
     }
@@ -1759,6 +1774,17 @@ fn foreground_window() -> isize {
     unsafe { windows_sys::Win32::UI::WindowsAndMessaging::GetForegroundWindow() as isize }
 }
 
+/// A click activates a window on button down, so a held button means an
+/// activation is the user's.
+fn any_mouse_button_down() -> bool {
+    use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
+        GetAsyncKeyState, VK_LBUTTON, VK_MBUTTON, VK_RBUTTON,
+    };
+    [VK_LBUTTON, VK_RBUTTON, VK_MBUTTON]
+        .into_iter()
+        .any(|key| unsafe { GetAsyncKeyState(key as i32) } as u16 & 0x8000 != 0)
+}
+
 fn left_mouse_button_down() -> bool {
     unsafe {
         windows_sys::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState(
@@ -1794,6 +1820,11 @@ fn set_foreground_window(hwnd: isize) {
 }
 fn is_window(hwnd: isize) -> bool {
     unsafe { windows_sys::Win32::UI::WindowsAndMessaging::IsWindow(hwnd as _) != 0 }
+}
+
+/// False for destroyed windows too, since `IsWindowVisible` fails for them.
+fn is_window_visible(hwnd: isize) -> bool {
+    unsafe { windows_sys::Win32::UI::WindowsAndMessaging::IsWindowVisible(hwnd as _) != 0 }
 }
 
 fn nudge_set_foreground_window(hwnd: isize) {

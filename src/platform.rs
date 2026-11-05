@@ -37,8 +37,6 @@ pub(crate) fn window_message_name(message: u32) -> &'static str {
     }
 }
 
-static WORKSPACE_MOVE_TIMER: Mutex<usize> = Mutex::new(0);
-
 unsafe extern "system" fn refresh_ui_state(
     _hwnd: windows_sys::Win32::Foundation::HWND,
     _message: u32,
@@ -50,57 +48,6 @@ unsafe extern "system" fn refresh_ui_state(
     {
         runtime.refresh_ui_state();
     }
-}
-
-unsafe extern "system" fn finish_workspace_move_focus_preservation(
-    _hwnd: windows_sys::Win32::Foundation::HWND,
-    _message: u32,
-    timer_id: usize,
-    _time: u32,
-) {
-    let span = tracing::info_span!(
-        "finish_workspace_move_focus_preservation",
-        timer_id = timer_id as u64
-    );
-    let _entered = span.enter();
-    use windows_sys::Win32::UI::WindowsAndMessaging::KillTimer;
-    if unsafe { KillTimer(std::ptr::null_mut(), timer_id) } == 0 {
-        crate::error_log::last_win32("KillTimer(workspace focus callback) failed");
-    }
-    let mut current = WORKSPACE_MOVE_TIMER.lock().unwrap();
-    if *current == timer_id {
-        *current = 0;
-    }
-    drop(current);
-    if let Some(runtime) = RUNTIME.get()
-        && let Ok(mut runtime) = runtime.try_lock()
-    {
-        runtime.finish_workspace_move_focus_preservation();
-    }
-}
-
-pub(crate) fn schedule_workspace_move_focus_finish() -> bool {
-    use windows_sys::Win32::UI::WindowsAndMessaging::{KillTimer, SetTimer};
-    let mut current = WORKSPACE_MOVE_TIMER.lock().unwrap();
-    if *current != 0 {
-        if unsafe { KillTimer(std::ptr::null_mut(), *current) } == 0 {
-            crate::error_log::last_win32("KillTimer(replace workspace focus timer) failed");
-        }
-        *current = 0;
-    }
-    let timer = unsafe {
-        SetTimer(
-            std::ptr::null_mut(),
-            0,
-            250,
-            Some(finish_workspace_move_focus_preservation),
-        )
-    };
-    *current = timer;
-    if timer == 0 {
-        crate::error_log::last_win32("SetTimer(workspace focus) failed");
-    }
-    timer != 0
 }
 
 pub(crate) fn command_menu_rows(configuration: &crate::Configuration) -> Vec<Vec<String>> {
@@ -1152,10 +1099,6 @@ pub(crate) fn run_worker(
                 }
                 if self.timer != 0 {
                     KillTimer(std::ptr::null_mut(), self.timer);
-                }
-                let timer = *WORKSPACE_MOVE_TIMER.lock().unwrap();
-                if timer != 0 {
-                    KillTimer(std::ptr::null_mut(), timer);
                 }
                 if let Some(runtime) = RUNTIME.get() {
                     let mut runtime = runtime
