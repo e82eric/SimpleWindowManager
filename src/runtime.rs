@@ -2341,19 +2341,30 @@ fn should_uncloak(client: &Client, workspace_hidden: bool) -> bool {
     client.data.use_cloak_to_hide && !workspace_hidden
 }
 
+/// Returns whether the cloak state was applied. Callers that rely on cloaking
+/// to hide a window must fall back to moving it when this is false.
 fn set_client_cloak(
     manager: Option<&crate::cloak::CloakManager>,
     client: &Client,
     cloak_flag: i32,
-) {
-    set_window_cloak(manager, client.data.hwnd, cloak_flag);
+) -> bool {
+    set_window_cloak(manager, client.data.hwnd, cloak_flag)
 }
 
-fn set_window_cloak(manager: Option<&crate::cloak::CloakManager>, hwnd: isize, cloak_flag: i32) {
-    if let Some(manager) = manager
-        && let Err(error) = manager.set_cloak(hwnd, 1, cloak_flag)
-    {
-        error.report();
+fn set_window_cloak(
+    manager: Option<&crate::cloak::CloakManager>,
+    hwnd: isize,
+    cloak_flag: i32,
+) -> bool {
+    let Some(manager) = manager else {
+        return false;
+    };
+    match manager.set_cloak(hwnd, 1, cloak_flag) {
+        Ok(()) => true,
+        Err(error) => {
+            error.report();
+            false
+        }
     }
 }
 
@@ -2558,7 +2569,7 @@ fn apply_workspaces_windows_deferred(
     let mut uncloak_after_commit = Vec::new();
     let uncloak_all = |windows: &[isize]| {
         for hwnd in windows {
-            set_window_cloak(cloak_manager.as_ref(), *hwnd, 0);
+            let _ = set_window_cloak(cloak_manager.as_ref(), *hwnd, 0);
         }
     };
     for workspace in workspaces {
@@ -2566,8 +2577,13 @@ fn apply_workspaces_windows_deferred(
         let workspace_hidden = workspace_is_hidden(state, *workspace);
         for client_id in clients.into_iter().rev() {
             let client = state.clients[client_id.0].as_ref().unwrap();
-            if should_cloak(client, workspace_hidden) {
-                set_client_cloak(cloak_manager.as_ref(), client, 2);
+            // Some windows have no shell application view (GetViewForHwnd
+            // fails with "Element not found"), commonly right as they first
+            // show. Those cannot be cloaked, so move them like any other
+            // window instead of leaving them where they are.
+            if should_cloak(client, workspace_hidden)
+                && set_client_cloak(cloak_manager.as_ref(), client, 2)
+            {
                 continue;
             }
             let placement = match capture_window_placement(client, hidden_x) {
