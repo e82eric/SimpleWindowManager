@@ -12,14 +12,28 @@ pub(crate) fn open(rgb: Vec<u8>, width: i32, height: i32) {
     let spawned = std::thread::Builder::new()
         .name("screenshot-edit".into())
         .spawn(move || {
-            let Some(folder) = screenshots_folder() else {
-                return;
+            // Saved as the desktop user, not SWM's elevated one: the Screenshots
+            // folder is the user's to redirect, so a write SWM made as admin could
+            // be pointed into a protected folder.
+            let saved = crate::process::as_desktop_user(|| {
+                let folder = screenshots_folder()?;
+                let path = unused_path(&folder, &file_stem());
+                match save_png(&path, &rgb, width as u32, height as u32) {
+                    Ok(()) => Some(path),
+                    Err(error) => {
+                        crate::error_log::report("screenshot: saving PNG", error);
+                        None
+                    }
+                }
+            });
+            let path = match saved {
+                Ok(Some(path)) => path,
+                Ok(None) => return,
+                Err(error) => {
+                    error.report();
+                    return;
+                }
             };
-            let path = unused_path(&folder, &file_stem());
-            if let Err(error) = save_png(&path, &rgb, width as u32, height as u32) {
-                crate::error_log::report("screenshot: saving PNG", error);
-                return;
-            }
             // Started as the desktop user, so Paint doesn't inherit SWM's
             // elevation.
             if let Err(error) = crate::process::start_program_as_explorer_user(
@@ -88,7 +102,13 @@ fn unused_path(folder: &Path, stem: &str) -> PathBuf {
 }
 
 fn save_png(path: &Path, rgb: &[u8], width: u32, height: u32) -> Result<(), String> {
-    let file = std::fs::File::create(path).map_err(|error| error.to_string())?;
+    // `create_new`: fail rather than write through a file put in place after
+    // `unused_path` found the name free.
+    let file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)
+        .map_err(|error| error.to_string())?;
     let mut encoder = png::Encoder::new(std::io::BufWriter::new(file), width, height);
     encoder.set_color(png::ColorType::Rgb);
     encoder.set_depth(png::BitDepth::Eight);

@@ -10,7 +10,7 @@ use std::{cell::RefCell, collections::HashMap, ffi::CString, sync::Arc};
 use windows_sys::Win32::{
     Foundation::{FreeLibrary, HMODULE, HWND},
     Graphics::{Gdi::*, OpenGL::*},
-    System::LibraryLoader::{GetProcAddress, LoadLibraryW},
+    System::LibraryLoader::{GetProcAddress, LOAD_LIBRARY_SEARCH_SYSTEM32, LoadLibraryExW},
 };
 
 thread_local! {
@@ -164,9 +164,14 @@ impl BarRenderer {
                 swap(0);
             }
             let module_name: Vec<u16> = "opengl32.dll\0".encode_utf16().collect();
-            this.module = LoadLibraryW(module_name.as_ptr());
+            // System32 only: SWM is elevated, so a copy beside the exe must not load.
+            this.module = LoadLibraryExW(
+                module_name.as_ptr(),
+                std::ptr::null_mut(),
+                LOAD_LIBRARY_SEARCH_SYSTEM32,
+            );
             if this.module.is_null() {
-                return Err(win_error("LoadLibraryW(bar opengl32)"));
+                return Err(win_error("LoadLibraryExW(bar opengl32)"));
             }
             let gl = Arc::new(glow::Context::from_loader_function(|name| {
                 let name = CString::new(name).unwrap();

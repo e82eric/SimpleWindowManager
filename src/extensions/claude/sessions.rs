@@ -351,12 +351,22 @@ fn last_prompt(dir: &Path, id: &str) -> String {
 }
 
 fn transcript(dir: &Path, id: &str) -> Option<PathBuf> {
+    // `id` comes from a session file the user's own programs can write; as a path
+    // part, `..\` in it would have SWM (elevated) read a file anywhere.
+    if !is_session_id(id) {
+        return None;
+    }
     let name = format!("{id}.jsonl");
     std::fs::read_dir(dir.join("projects"))
         .ok()?
         .flatten()
         .map(|project| project.path().join(&name))
         .find(|path| path.is_file())
+}
+
+/// Whether `id` looks like a Claude session id (a UUID): only hex digits and dashes.
+fn is_session_id(id: &str) -> bool {
+    !id.is_empty() && id.chars().all(|c| c.is_ascii_hexdigit() || c == '-')
 }
 
 /// The last prompt `transcript` records.
@@ -561,6 +571,21 @@ mod tests {
 
     const START: Duration = Duration::from_secs(1_000_000);
     const DAY: Duration = Duration::from_secs(24 * 60 * 60);
+
+    #[test]
+    fn only_uuid_shaped_session_ids_name_a_transcript() {
+        assert!(is_session_id("31f2354f-1479-44b8-92e6-2d02faeb8b83"));
+        assert!(!is_session_id(""));
+        assert!(!is_session_id(r"..\..\secret"));
+        assert!(!is_session_id("../secret"));
+        assert!(!is_session_id(r"C:\secret"));
+
+        let dir = std::env::temp_dir().join(format!("swm-claude-id-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("projects").join("p")).unwrap();
+        std::fs::write(dir.join("outside.jsonl"), "{}").unwrap();
+        assert_eq!(transcript(&dir, r"..\..\outside"), None);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
 
     fn session(status: &str, updated: Option<SystemTime>, started: Option<SystemTime>) -> Live {
         Live {

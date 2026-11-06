@@ -411,7 +411,7 @@ pub(crate) fn error_logs_table(
     if rows.is_empty() {
         let log_path = crate::error_log::log_file_path()
             .map(|path| path.display().to_string())
-            .unwrap_or_else(|| "File logging unavailable: LOCALAPPDATA is not set".into());
+            .unwrap_or_else(|| "File logging unavailable: the executable's folder is unknown".into());
         rows.push(crate::egui_data_menu::DataRow {
             cells: vec![
                 String::new(),

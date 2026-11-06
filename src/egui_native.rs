@@ -496,9 +496,14 @@ impl NativeWindow {
                 let swap: unsafe extern "system" fn(i32) -> i32 = std::mem::transmute(proc);
                 swap(0);
             }
-            window.module = LoadLibraryW(wide("opengl32.dll").as_ptr());
+            // System32 only: SWM is elevated, so a copy beside the exe must not load.
+            window.module = LoadLibraryExW(
+                wide("opengl32.dll").as_ptr(),
+                std::ptr::null_mut(),
+                LOAD_LIBRARY_SEARCH_SYSTEM32,
+            );
             if window.module.is_null() {
-                return Err(win_error("LoadLibraryW(opengl32)"));
+                return Err(win_error("LoadLibraryExW(opengl32)"));
             }
             let margins = MARGINS {
                 cxLeftWidth: -1,

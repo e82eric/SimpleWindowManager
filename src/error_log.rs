@@ -102,12 +102,12 @@ macro_rules! debug_out {
     };
 }
 
+/// `logs` beside the executable. SWM runs elevated, so its logs must not live in a
+/// folder the user can write to (such as `%LOCALAPPDATA%`): a non-elevated process
+/// could turn it into a junction and have SWM create, append to, or delete files
+/// anywhere. Installed under Program Files, this folder is admin-only.
 fn configured_log_directory() -> Option<PathBuf> {
-    Some(
-        PathBuf::from(std::env::var_os("LOCALAPPDATA")?)
-            .join("SimpleWindowManager")
-            .join("logs"),
-    )
+    Some(std::env::current_exe().ok()?.parent()?.join("logs"))
 }
 
 pub fn log_file_path() -> Option<PathBuf> {
@@ -176,7 +176,7 @@ pub fn initialize() {
     } else if let Some(directory) = log_directory() {
         install_file_subscriber(&directory)
     } else {
-        Err("LOCALAPPDATA is not set".into())
+        Err("the executable's folder is unknown".into())
     };
     if let Err(error) = result {
         eprintln!("unable to install SWM tracing subscriber: {error}");

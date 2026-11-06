@@ -78,9 +78,46 @@ pub fn start_app(command: &str) -> PlatformResult<()> {
     }
 }
 
-/// Open `command` (a file or program) through `start`, as the desktop user.
-pub fn start_as_explorer_user(command: &str) -> PlatformResult<()> {
-    create_as_explorer_user(format!("cmd.exe /c start \"\" \"{command}\""))
+/// A handle closed, and any failure reported, when dropped.
+struct Handle(windows_sys::Win32::Foundation::HANDLE, &'static str);
+impl Drop for Handle {
+    fn drop(&mut self) {
+        if let Err(error) = unsafe { close_handle(self.0, self.1) } {
+            error.report();
+        }
+    }
+}
+
+/// Open `path` (a file, shortcut, folder or program) as the desktop user, as
+/// double-clicking it in Explorer would. This goes through `explorer.exe` rather
+/// than `cmd /c start`, which would expand any `%VAR%` in the path.
+pub fn start_as_explorer_user(path: &str) -> PlatformResult<()> {
+    // No Windows path holds a quote; refuse one rather than let it end the argument.
+    if path.contains('"') {
+        return Err(PlatformError::win32(
+            "start_as_explorer_user(path)",
+            windows_sys::Win32::Foundation::ERROR_INVALID_NAME,
+        ));
+    }
+    let explorer = windows_directory_file("explorer.exe")?;
+    // Explorer reads its own command line: a plain quoted path, so a drive root
+    // stays `"C:\"` rather than gaining the `\\` that `quote_argument` would add.
+    create_as_explorer_user(format!("\"{explorer}\" \"{path}\""))
+}
+
+/// `name` in the Windows directory, as a full path, so it isn't searched for.
+fn windows_directory_file(name: &str) -> PlatformResult<String> {
+    use windows_sys::Win32::System::SystemInformation::GetWindowsDirectoryW;
+    let mut buffer = [0u16; 260];
+    let length =
+        unsafe { GetWindowsDirectoryW(buffer.as_mut_ptr(), buffer.len() as u32) } as usize;
+    if length == 0 || length >= buffer.len() {
+        return Err(PlatformError::last_win32("GetWindowsDirectoryW"));
+    }
+    Ok(format!(
+        "{}\\{name}",
+        String::from_utf16_lossy(&buffer[..length]).trim_end_matches('\\')
+    ))
 }
 
 /// Run `program` with `args` as the desktop user rather than SWM's elevated user.
@@ -118,20 +155,17 @@ fn quote_argument(argument: &str) -> String {
     quoted
 }
 
-/// Start `command_line` with the shell's token, so it does not inherit SWM's elevation.
-fn create_as_explorer_user(command_line: String) -> PlatformResult<()> {
-    use std::mem::{size_of, zeroed};
+/// The desktop shell's token, duplicated as `kind`: `TokenPrimary` to start a
+/// process as the desktop user, `TokenImpersonation` to act as them on a thread.
+fn shell_token(kind: windows_sys::Win32::Security::TOKEN_TYPE) -> PlatformResult<Handle> {
     use windows_sys::Win32::Security::{
-        DuplicateTokenEx, SecurityImpersonation, TOKEN_DUPLICATE, TOKEN_QUERY, TokenPrimary,
+        DuplicateTokenEx, SecurityImpersonation, TOKEN_DUPLICATE, TOKEN_QUERY,
     };
     use windows_sys::Win32::System::SystemServices::MAXIMUM_ALLOWED;
     use windows_sys::Win32::System::Threading::{
-        CreateProcessWithTokenW, OpenProcess, OpenProcessToken, PROCESS_INFORMATION,
-        PROCESS_QUERY_INFORMATION, STARTF_USESHOWWINDOW, STARTUPINFOW,
+        OpenProcess, OpenProcessToken, PROCESS_QUERY_INFORMATION,
     };
-    use windows_sys::Win32::UI::WindowsAndMessaging::{
-        GetShellWindow, GetWindowThreadProcessId, SW_SHOWNORMAL,
-    };
+    use windows_sys::Win32::UI::WindowsAndMessaging::{GetShellWindow, GetWindowThreadProcessId};
     let shell = unsafe { GetShellWindow() };
     if shell.is_null() {
         return Err(PlatformError::null_output("GetShellWindow"));
@@ -144,37 +178,63 @@ fn create_as_explorer_user(command_line: String) -> PlatformResult<()> {
     if process.is_null() {
         return Err(PlatformError::last_win32("OpenProcess(shell)"));
     }
+    let process = Handle(process, "CloseHandle(shell process)");
     let mut token = std::ptr::null_mut();
-    if unsafe { OpenProcessToken(process, TOKEN_DUPLICATE | TOKEN_QUERY, &mut token) } == 0 {
-        let error = PlatformError::last_win32("OpenProcessToken(shell)");
-        if let Err(close_error) = unsafe { close_handle(process, "CloseHandle(shell process)") } {
-            close_error.report();
-        }
-        return Err(error);
+    if unsafe { OpenProcessToken(process.0, TOKEN_DUPLICATE | TOKEN_QUERY, &mut token) } == 0 {
+        return Err(PlatformError::last_win32("OpenProcessToken(shell)"));
     }
-    let mut primary = std::ptr::null_mut();
+    let token = Handle(token, "CloseHandle(shell token)");
+    let mut duplicate = std::ptr::null_mut();
     if unsafe {
         DuplicateTokenEx(
-            token,
+            token.0,
             MAXIMUM_ALLOWED,
             std::ptr::null(),
             SecurityImpersonation,
-            TokenPrimary,
-            &mut primary,
+            kind,
+            &mut duplicate,
         )
     } == 0
     {
-        let error = PlatformError::last_win32("DuplicateTokenEx(shell token)");
-        unsafe {
-            if let Err(close_error) = close_handle(token, "CloseHandle(shell token)") {
-                close_error.report();
-            }
-            if let Err(close_error) = close_handle(process, "CloseHandle(shell process)") {
-                close_error.report();
+        return Err(PlatformError::last_win32("DuplicateTokenEx(shell token)"));
+    }
+    Ok(Handle(duplicate, "CloseHandle(duplicated shell token)"))
+}
+
+/// Run `f` on this thread as the desktop user rather than SWM's elevated user.
+/// Files it creates are checked against, and owned by, that user, so a folder the
+/// user's own programs have redirected somewhere protected (a junction, or a
+/// known-folder setting in HKCU) refuses the write instead of SWM making it as admin.
+pub fn as_desktop_user<T>(f: impl FnOnce() -> T) -> PlatformResult<T> {
+    use windows_sys::Win32::Security::{RevertToSelf, TokenImpersonation};
+    use windows_sys::Win32::System::Threading::SetThreadToken;
+    struct Revert;
+    impl Drop for Revert {
+        fn drop(&mut self) {
+            if let Err(error) = check_bool(unsafe { RevertToSelf() }, "RevertToSelf") {
+                error.report();
             }
         }
-        return Err(error);
     }
+    let token = shell_token(TokenImpersonation)?;
+    check_bool(
+        unsafe { SetThreadToken(std::ptr::null(), token.0) },
+        "SetThreadToken(desktop user)",
+    )?;
+    // Reverts even if `f` panics, before `token` closes.
+    let _revert = Revert;
+    Ok(f())
+}
+
+/// Start `command_line` with the shell's token, so it does not inherit SWM's elevation.
+fn create_as_explorer_user(command_line: String) -> PlatformResult<()> {
+    use std::mem::{size_of, zeroed};
+    use windows_sys::Win32::Security::TokenPrimary;
+    use windows_sys::Win32::System::Threading::{
+        CreateProcessWithTokenW, PROCESS_INFORMATION, STARTF_USESHOWWINDOW, STARTUPINFOW,
+    };
+    use windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
+    let primary = shell_token(TokenPrimary)?;
     let mut startup: STARTUPINFOW = unsafe { zeroed() };
     startup.cb = size_of::<STARTUPINFOW>() as u32;
     startup.wShowWindow = SW_SHOWNORMAL as u16;
@@ -183,7 +243,7 @@ fn create_as_explorer_user(command_line: String) -> PlatformResult<()> {
     let mut command: Vec<u16> = command_line.encode_utf16().chain([0]).collect();
     let result = unsafe {
         CreateProcessWithTokenW(
-            primary,
+            primary.0,
             1,
             std::ptr::null(),
             command.as_mut_ptr(),
@@ -194,35 +254,12 @@ fn create_as_explorer_user(command_line: String) -> PlatformResult<()> {
             &mut info,
         )
     };
-    let create_error = (result == 0).then(|| PlatformError::last_win32("CreateProcessWithTokenW"));
-    let mut close_error = None;
-    unsafe {
-        for result in [
-            close_handle(info.hProcess, "CloseHandle(created process)"),
-            close_handle(info.hThread, "CloseHandle(created thread)"),
-            close_handle(primary, "CloseHandle(primary token)"),
-            close_handle(token, "CloseHandle(shell token)"),
-            close_handle(process, "CloseHandle(shell process)"),
-        ] {
-            if let Err(error) = result {
-                if close_error.is_none() {
-                    close_error = Some(error);
-                } else {
-                    error.report();
-                }
-            }
-        }
+    if result == 0 {
+        return Err(PlatformError::last_win32("CreateProcessWithTokenW"));
     }
-    if let Some(error) = create_error {
-        if let Some(close_error) = close_error {
-            close_error.report();
-        }
-        Err(error)
-    } else if let Some(error) = close_error {
-        Err(error)
-    } else {
-        Ok(())
-    }
+    drop(Handle(info.hThread, "CloseHandle(created thread)"));
+    drop(Handle(info.hProcess, "CloseHandle(created process)"));
+    Ok(())
 }
 
 pub fn list_services() -> PlatformResult<Vec<String>> {
@@ -319,6 +356,34 @@ pub fn list_services() -> PlatformResult<Vec<String>> {
 #[cfg(test)]
 mod tests {
     use super::quote_argument;
+
+    /// Whether the calling thread is impersonating (has a token of its own).
+    fn thread_has_token() -> bool {
+        use windows_sys::Win32::Foundation::CloseHandle;
+        use windows_sys::Win32::Security::TOKEN_QUERY;
+        use windows_sys::Win32::System::Threading::{GetCurrentThread, OpenThreadToken};
+        let mut token = std::ptr::null_mut();
+        let opened = unsafe { OpenThreadToken(GetCurrentThread(), TOKEN_QUERY, 1, &mut token) };
+        if opened != 0 {
+            unsafe { CloseHandle(token) };
+        }
+        opened != 0
+    }
+
+    #[test]
+    fn desktop_user_closures_impersonate_and_then_revert() {
+        assert!(!thread_has_token());
+        let inside = super::as_desktop_user(thread_has_token).expect("desktop shell token");
+        assert!(inside, "the closure runs with the shell's token");
+        assert!(!thread_has_token(), "the thread reverts afterwards");
+    }
+
+    #[test]
+    fn explorer_is_named_by_its_full_path() {
+        let explorer = super::windows_directory_file("explorer.exe").unwrap();
+        assert!(explorer.ends_with(r"\explorer.exe") && !explorer.contains(r"\\"));
+        assert!(std::path::Path::new(&explorer).is_file());
+    }
 
     #[test]
     fn arguments_survive_the_windows_command_line_parser() {

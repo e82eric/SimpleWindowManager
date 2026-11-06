@@ -5,6 +5,10 @@ fn main() {
     println!(
         "cargo:rustc-link-arg-bin=simple-window-manager-rs=/MANIFESTUAC:level='requireAdministrator' uiAccess='false'"
     );
+    // SWM runs elevated: resolve the DLLs it links against from System32 only,
+    // never from the executable's folder, where a planted copy would run as admin.
+    // 0x800 is LOAD_LIBRARY_SEARCH_SYSTEM32.
+    println!("cargo:rustc-link-arg-bin=simple-window-manager-rs=/DEPENDENTLOADFLAG:0x800");
 
     println!("cargo:rerun-if-env-changed=SWM_CONFIG_RS");
     let manifest_dir = PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").unwrap());

@@ -14,7 +14,10 @@ I wrote this application to target my specific workflow where 90% of windows com
   - Install the Rust MSVC toolchain (https://rustup.rs) and the Visual Studio Build Tools.
   - Make any configuration/customizations (see [User configuration](#user-configuration))
   - Run `.\build.ps1`
-  - Run `target\release\simple-window-manager-rs.exe` (the application requests elevation)
+  - From an elevated PowerShell, run `.\install.ps1` to copy the build to `C:\Program Files\SimpleWindowManager`
+  - Run `C:\Program Files\SimpleWindowManager\simple-window-manager-rs.exe` (the application requests elevation)
+  - Run the installed copy rather than `target\release`: SWM runs as administrator, so it must start from a folder only administrators can write to. Otherwise any program running as you could replace the exe, or plant a DLL beside it, and get administrator rights the next time SWM starts.
+  - Error logs are written to a `logs` folder beside the executable.
 
 ```powershell
 cargo test
