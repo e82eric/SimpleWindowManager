@@ -5,18 +5,75 @@ use nfm_egui::shared::{self, SharedPicker};
 use nfm_egui::{Appearance, PickerEvent, Placement, egui};
 use nfm_picker_sources::structured::StructuredStreamingSnapshot;
 use nfm_search_core::snapshot_store::SnapshotStore;
+use crate::egui_window_menu::{BarAlign, BarAnchor, ScreenBounds};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 pub(crate) type CommandSource = SnapshotStore<StructuredStreamingSnapshot>;
 
-pub(crate) fn source(rows: Vec<Vec<String>>) -> Result<Arc<CommandSource>, String> {
+const COLUMNS: [&str; 4] = ["Name", "Type", "KeyBinding", "Description"];
+/// The launcher's columns, as indexes into `COLUMNS`.
+const LAUNCHER_COLUMNS: [usize; 2] = [0, 2];
+/// The launcher picker's width in points.
+const LAUNCHER_WIDTH: f32 = 900.0;
+
+#[cfg(test)]
+fn source(rows: Vec<Vec<String>>) -> Result<Arc<CommandSource>, String> {
+    columns_source(&[0, 1, 2, 3], rows)
+}
+
+/// `rows` of `COLUMNS`, cut to the `columns` at those indexes.
+fn columns_source(columns: &[usize], rows: Vec<Vec<String>>) -> Result<Arc<CommandSource>, String> {
+    let rows = rows
+        .into_iter()
+        .map(|row| {
+            if row.len() != COLUMNS.len() {
+                return Err(format!(
+                    "a command row has {} fields, not {}",
+                    row.len(),
+                    COLUMNS.len()
+                ));
+            }
+            Ok(columns.iter().map(|&column| row[column].clone()).collect())
+        })
+        .collect::<Result<_, _>>()?;
     nfm_picker_sources::structured::structured_source(
-        ["Name", "Type", "KeyBinding", "Description"]
-            .into_iter()
-            .map(str::to_owned)
-            .collect(),
+        columns.iter().map(|&column| COLUMNS[column].to_owned()).collect(),
         rows,
     )
+}
+
+/// Whether the launcher is open, so its button closes it.
+static LAUNCHER_OPEN: AtomicBool = AtomicBool::new(false);
+
+/// Open the commands launcher (names and key bindings) below `anchor`, its
+/// button on the bar, or close it if it is open.
+pub(crate) fn toggle_launcher(anchor: BarAnchor) {
+    if LAUNCHER_OPEN.load(Ordering::Acquire) && crate::ui::menu_visible() {
+        crate::ui::post(crate::ui::Command::Hide);
+        return;
+    }
+    let Some(snapshot) = crate::worker::snapshot() else {
+        return;
+    };
+    crate::ui::post(crate::ui::Command::ShowRequest(Box::new(Launcher {
+        list: CommandList::of(&snapshot.configuration),
+        anchor,
+    })));
+}
+
+struct Launcher {
+    list: CommandList,
+    anchor: BarAnchor,
+}
+impl PickerRequest for Launcher {
+    fn build(self: Box<Self>, host: &PickerHost<'_>) -> Result<Box<dyn PickerView>, String> {
+        let rows = self.list.rows.len().clamp(1, host.result_rows);
+        let mut view = self.list.view(host.ctx, host.config(), &LAUNCHER_COLUMNS)?;
+        view.launcher = Some((self.anchor, rows));
+        LAUNCHER_OPEN.store(true, Ordering::Release);
+        Ok(Box::new(view))
+    }
 }
 
 /// The registered commands; accepting one runs its action.
@@ -28,29 +85,34 @@ pub struct CommandList {
 }
 impl PickerSource for Commands {
     fn request(&self, configuration: &crate::Configuration) -> Box<dyn PickerRequest> {
-        Box::new(CommandList {
-            rows: crate::platform::command_menu_rows(configuration)
-                .into_iter()
-                .zip(configuration.commands.iter().map(|command| command.action))
-                .collect(),
-        })
+        Box::new(CommandList::of(configuration))
     }
 }
 impl PickerRequest for CommandList {
     fn build(self: Box<Self>, host: &PickerHost<'_>) -> Result<Box<dyn PickerView>, String> {
-        Ok(Box::new(self.view(host.ctx, host.config())?))
+        Ok(Box::new(self.view(host.ctx, host.config(), &[0, 1, 2, 3])?))
     }
 }
 impl CommandList {
+    fn of(configuration: &crate::Configuration) -> Self {
+        Self {
+            rows: crate::platform::command_menu_rows(configuration)
+                .into_iter()
+                .zip(configuration.commands.iter().map(|command| command.action))
+                .collect(),
+        }
+    }
+    /// A picker showing `columns` of the rows (indexes into `COLUMNS`).
     fn view(
         self,
         ctx: &egui::Context,
         config: nfm_egui::PickerConfig,
+        columns: &[usize],
     ) -> Result<CommandsView, String> {
         let (rows, actions) = self.rows.into_iter().unzip();
         let picker = shared::replace(
             ctx,
-            source(rows)?,
+            columns_source(columns, rows)?,
             nfm_egui::PickerConfig {
                 title: "Commands".into(),
                 preview_visible: false,
@@ -58,13 +120,27 @@ impl CommandList {
             },
             None,
         );
-        Ok(CommandsView { picker, actions })
+        Ok(CommandsView {
+            picker,
+            actions,
+            launcher: None,
+        })
     }
 }
 struct CommandsView {
     picker: SharedPicker,
     /// Each row's action, in row order.
     actions: Vec<Action>,
+    /// For the launcher, the bar button it drops down from and the rows its
+    /// window is sized for.
+    launcher: Option<(BarAnchor, usize)>,
+}
+impl Drop for CommandsView {
+    fn drop(&mut self) {
+        if self.launcher.is_some() {
+            LAUNCHER_OPEN.store(false, Ordering::Release);
+        }
+    }
 }
 impl PickerView for CommandsView {
     fn picker(&self) -> &SharedPicker {
@@ -72,6 +148,34 @@ impl PickerView for CommandsView {
     }
     fn has_header(&self) -> bool {
         true
+    }
+    fn position(&self) -> nfm_egui::Position {
+        // Against the bar, so any slack in the window's height falls below.
+        if self.launcher.is_some() {
+            nfm_egui::Position::Top
+        } else {
+            nfm_egui::Position::Center
+        }
+    }
+    fn window_bounds(
+        &self,
+        ctx: &egui::Context,
+        appearance: &Appearance,
+        margin: f32,
+        scale: f32,
+    ) -> Option<ScreenBounds> {
+        let (anchor, rows) = self.launcher?;
+        // The rows and the column header above them.
+        let height = nfm_egui::results_height(ctx, appearance, None, rows)
+            + appearance.typography.preview_row_height(ctx);
+        Some(crate::egui_window_menu::below_bar(
+            anchor,
+            BarAlign::Left,
+            LAUNCHER_WIDTH,
+            height,
+            margin,
+            scale,
+        ))
     }
     fn show(
         &mut self,
@@ -141,7 +245,9 @@ mod tests {
             ],
         };
         let ctx = egui::Context::default();
-        let mut view = list.view(&ctx, nfm_egui::PickerConfig::default()).unwrap();
+        let mut view = list
+            .view(&ctx, nfm_egui::PickerConfig::default(), &[0, 1, 2, 3])
+            .unwrap();
         let bounds = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0));
         let mut frame = |events: Vec<egui::Event>| {
             let mut outcome = None;
@@ -195,5 +301,26 @@ mod tests {
         let empty = source(Vec::new()).unwrap();
         assert!(empty.is_done());
         assert_eq!(empty.snapshot().unwrap().len(), 0);
+    }
+
+    #[test]
+    fn the_launcher_lists_only_names_and_key_bindings() {
+        let row = ["Focus next", "Action", "Alt+J", "Focus the next window"];
+        let source = columns_source(
+            &LAUNCHER_COLUMNS,
+            vec![row.map(str::to_owned).to_vec()],
+        )
+        .unwrap();
+        let item = source.snapshot().unwrap().item(0).unwrap();
+        let mut fields: Vec<_> = item.fields.iter().collect();
+        fields.sort();
+        assert_eq!(
+            fields,
+            [
+                (&"KeyBinding".to_owned(), &"Alt+J".to_owned()),
+                (&"Name".to_owned(), &"Focus next".to_owned()),
+            ]
+        );
+        assert!(columns_source(&LAUNCHER_COLUMNS, vec![vec!["short".into()]]).is_err());
     }
 }

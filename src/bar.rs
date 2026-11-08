@@ -192,7 +192,9 @@ unsafe extern "system" fn bar_message_loop(
             }
             let monitor = (userdata as usize).saturating_sub(1);
             let x = lparam as i16 as i32;
-            if let Some(snapshot) = crate::platform::bar_snapshot(monitor) {
+            if launcher_at_x(x) {
+                toggle_launcher(hwnd);
+            } else if let Some(snapshot) = crate::platform::bar_snapshot(monitor) {
                 if let Some((_, _, index)) = mailbox_at_x(snapshot.monitor_index, x) {
                     toggle_mailbox(hwnd, snapshot.monitor_index, index);
                 } else if let Some(workspace) = workspace_at_x(&snapshot, x) {
@@ -258,29 +260,59 @@ pub(crate) fn toggle_mailbox(
     monitor_index: usize,
     index: usize,
 ) {
-    use windows_sys::Win32::Foundation::RECT;
-    use windows_sys::Win32::UI::WindowsAndMessaging::GetWindowRect;
-    let right = MAILBOX_REGIONS.with(|all| {
+    let region = MAILBOX_REGIONS.with(|all| {
         all.borrow().get(&monitor_index).and_then(|regions| {
             regions
                 .iter()
                 .find(|&&(_, _, region)| region == index)
-                .map(|&(_, right, _)| right)
+                .map(|&(left, right, _)| (left, right))
         })
     });
-    let mut bar: RECT = unsafe { std::mem::zeroed() };
-    if unsafe { GetWindowRect(hwnd, &mut bar) } == 0 {
-        crate::error_log::last_win32("GetWindowRect(bar) failed");
+    let Some(bar) = window_rect(hwnd) else {
         return;
+    };
+    let (left, right) = region.map_or((bar.right, bar.right), |(left, right)| {
+        (bar.left + left as i32, bar.left + right as i32)
+    });
+    crate::mailbox_picker::toggle(index, anchor(&bar, left, right));
+}
+
+/// Opens or closes the commands launcher below its button on `hwnd`.
+pub(crate) fn toggle_launcher(hwnd: windows_sys::Win32::Foundation::HWND) {
+    let Some(bar) = window_rect(hwnd) else {
+        return;
+    };
+    let (left, right) = LAUNCHER;
+    crate::egui_command_menu::toggle_launcher(anchor(
+        &bar,
+        bar.left + left as i32,
+        bar.left + right as i32,
+    ));
+}
+
+fn window_rect(
+    hwnd: windows_sys::Win32::Foundation::HWND,
+) -> Option<windows_sys::Win32::Foundation::RECT> {
+    let mut bar = unsafe { std::mem::zeroed() };
+    if unsafe { windows_sys::Win32::UI::WindowsAndMessaging::GetWindowRect(hwnd, &mut bar) } == 0 {
+        crate::error_log::last_win32("GetWindowRect(bar) failed");
+        return None;
     }
-    crate::mailbox_picker::toggle(
-        index,
-        crate::mailbox_picker::Anchor {
-            right: right.map_or(bar.right, |right| bar.left + right as i32),
-            top: bar.bottom,
-            bounds: (bar.left, bar.right),
-        },
-    );
+    Some(bar)
+}
+
+/// A region from `left` to `right` on `bar`, in screen pixels.
+fn anchor(
+    bar: &windows_sys::Win32::Foundation::RECT,
+    left: i32,
+    right: i32,
+) -> crate::egui_window_menu::BarAnchor {
+    crate::egui_window_menu::BarAnchor {
+        left,
+        right,
+        top: bar.bottom,
+        bounds: (bar.left, bar.right),
+    }
 }
 
 /// Paints `mailbox` at the right of `space`, and returns its region; `None` when no
@@ -438,13 +470,23 @@ const BAR_MARGIN: f32 = 2.0;
 const REGION_GAP: f32 = 12.0;
 const REGION_PADDING: f32 = 14.0;
 const TAG_WIDTH: f32 = 42.0;
+/// The commands launcher's button at the bar's left end: its left and right
+/// edges, in bar pixels, and its Nerd Font glyph (`nf-fa-bars`).
+const LAUNCHER: (f32, f32) = (BAR_MARGIN, BAR_MARGIN + 44.0);
+const LAUNCHER_GLYPH: &str = "\u{f0c9}";
+
+/// Whether `x` is on the commands launcher's button.
+fn launcher_at_x(x: i32) -> bool {
+    (LAUNCHER.0..LAUNCHER.1).contains(&(x as f32))
+}
 
 fn tag_groups(snapshot: &BarSnapshot) -> Vec<(usize, usize, f32, f32)> {
     if snapshot.tags.is_empty() {
         Vec::new()
     } else {
+        let left = LAUNCHER.1 + REGION_GAP;
         let width = REGION_PADDING * 2.0 + snapshot.tags.len() as f32 * TAG_WIDTH;
-        vec![(0, snapshot.tags.len(), BAR_MARGIN, BAR_MARGIN + width)]
+        vec![(0, snapshot.tags.len(), left, left + width)]
     }
 }
 
@@ -476,6 +518,15 @@ pub(super) fn paint_bar(ui: &mut egui::Ui, size: [u32; 2], snapshot: &BarSnapsho
     let top = 4.0;
     let bottom = size[1] as f32 - 4.0;
     let shade = Shade::of(snapshot);
+    let launcher = rect(LAUNCHER.0, top, LAUNCHER.1, bottom);
+    draw_region(&canvas, launcher, false, false);
+    draw_centered_text(
+        &canvas,
+        LAUNCHER_GLYPH,
+        launcher,
+        &icon_font,
+        shade.content(),
+    );
     let groups = tag_groups(snapshot);
     for (start, end, left, right) in &groups {
         draw_region(
@@ -530,8 +581,8 @@ pub(super) fn paint_bar(ui: &mut egui::Ui, size: [u32; 2], snapshot: &BarSnapsho
     }
     let mut left = groups
         .last()
-        .map(|group| group.3 + REGION_GAP)
-        .unwrap_or(BAR_MARGIN);
+        .map_or(LAUNCHER.1, |group| group.3)
+        + REGION_GAP;
     let status = status_pieces(&canvas, &snapshot.segments, &normal_font, &icon_font, shade);
     let status_width = pieces_width(&status) + REGION_PADDING * 2.0;
     let status_left = (size[0] as f32 - BAR_MARGIN - status_width).max(left);
@@ -1229,10 +1280,21 @@ mod tests {
         let mut snapshot = crate::bar_renderer::tests::snapshot();
         snapshot.tags[0].0 = 10;
         snapshot.tags[1].0 = 20;
-        assert_eq!(workspace_at_x(&snapshot, 15), None);
-        assert_eq!(workspace_at_x(&snapshot, 16), Some(10));
-        assert_eq!(workspace_at_x(&snapshot, 57), Some(10));
-        assert_eq!(workspace_at_x(&snapshot, 58), Some(20));
-        assert_eq!(workspace_at_x(&snapshot, 142), None);
+        // The tags follow the launcher's button and a gap: 44 + 12 pixels.
+        assert_eq!(workspace_at_x(&snapshot, 71), None);
+        assert_eq!(workspace_at_x(&snapshot, 72), Some(10));
+        assert_eq!(workspace_at_x(&snapshot, 113), Some(10));
+        assert_eq!(workspace_at_x(&snapshot, 114), Some(20));
+        assert_eq!(workspace_at_x(&snapshot, 198), None);
+    }
+
+    #[test]
+    fn the_launcher_button_takes_clicks_before_the_workspaces() {
+        let snapshot = crate::bar_renderer::tests::snapshot();
+        assert!(!launcher_at_x(1));
+        assert!(launcher_at_x(2));
+        assert!(launcher_at_x(45));
+        assert!(!launcher_at_x(46));
+        assert_eq!(workspace_at_x(&snapshot, 45), None);
     }
 }

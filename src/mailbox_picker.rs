@@ -4,7 +4,7 @@
 //! elsewhere closes it. Fuzzy search reads the cards' text, including the age.
 //! The picker lists the entries as they were when it opened: it is open only
 //! briefly, and the bar shows what changes meanwhile.
-use crate::egui_window_menu::ScreenBounds;
+use crate::egui_window_menu::{BarAlign, BarAnchor, ScreenBounds};
 use crate::mailbox::{Activation, BarMailbox, MailboxEvent, MailboxState};
 use crate::picker::{Outcome, PickerHost, PickerRequest, PickerView};
 use nfm_egui::shared::{self, SharedPicker};
@@ -16,16 +16,6 @@ use nfm_search_core::row::RowTemplate;
 use nfm_search_core::snapshot_store::SnapshotStore;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
-
-/// Where the clicked mailbox is, in screen pixels.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct Anchor {
-    pub right: i32,
-    /// The bar's bottom edge.
-    pub top: i32,
-    /// The bar's left and right edges, which the picker stays within.
-    pub bounds: (i32, i32),
-}
 
 /// The picker's width in points, times the monitor's scale in pixels.
 const WIDTH: f32 = 800.0;
@@ -39,7 +29,7 @@ const TEMPLATE: &str = "Source:muted|Time:right:muted;Title:title;Detail:muted";
 static OPEN: Mutex<Option<usize>> = Mutex::new(None);
 
 /// Open the picker for mailbox `index` below `anchor`, or close it if it is open.
-pub(crate) fn toggle(index: usize, anchor: Anchor) {
+pub(crate) fn toggle(index: usize, anchor: BarAnchor) {
     if *OPEN.lock().unwrap() == Some(index) && crate::ui::menu_visible() {
         crate::ui::post(crate::ui::Command::Hide);
         return;
@@ -65,7 +55,7 @@ fn mailbox(index: usize) -> Option<BarMailbox> {
 struct Request {
     index: usize,
     mailbox: BarMailbox,
-    anchor: Anchor,
+    anchor: BarAnchor,
 }
 impl PickerRequest for Request {
     fn build(self: Box<Self>, host: &PickerHost<'_>) -> Result<Box<dyn PickerView>, String> {
@@ -158,28 +148,10 @@ fn snapshot(
     Ok((store.snapshot(), template))
 }
 
-/// The window: the picker `WIDTH` wide, its right edge at the mailbox's but
-/// inside the bar, its top touching the bar, and as tall as `height_points`.
-/// The window's `margin` (points, transparent) reaches over the bar's edge so
-/// the picker itself lines up with it.
-fn window_bounds(anchor: Anchor, height_points: f32, margin: f32, scale: f32) -> ScreenBounds {
-    let margin_pixels = (margin * scale).round() as i32;
-    let width = (((WIDTH + 2.0 * margin) * scale).round() as i32).max(1);
-    let lowest = anchor.bounds.0 - margin_pixels;
-    let left = (anchor.right + margin_pixels - width)
-        .clamp(lowest, (anchor.bounds.1 + margin_pixels - width).max(lowest));
-    ScreenBounds {
-        left,
-        top: anchor.top - margin_pixels,
-        width,
-        height: (((height_points + 2.0 * margin) * scale).ceil() as i32).max(1),
-    }
-}
-
 struct View {
     index: usize,
     mailbox: BarMailbox,
-    anchor: Anchor,
+    anchor: BarAnchor,
     /// Cards the window is sized for: one per entry, up to `MAX_ROWS`.
     rows: usize,
     template: RowTemplate,
@@ -204,7 +176,14 @@ impl PickerView for View {
         scale: f32,
     ) -> Option<ScreenBounds> {
         let height = nfm_egui::results_height(ctx, appearance, Some(&self.template), self.rows);
-        Some(window_bounds(self.anchor, height, margin, scale))
+        Some(crate::egui_window_menu::below_bar(
+            self.anchor,
+            BarAlign::Right,
+            WIDTH,
+            height,
+            margin,
+            scale,
+        ))
     }
     fn show(
         &mut self,
@@ -302,35 +281,6 @@ mod tests {
                 .contains("2 hours ago")
         );
         assert_eq!(snapshot.item(1).unwrap().fields["Id"], "b");
-    }
-
-    #[test]
-    fn the_picker_ends_at_the_mailbox_touching_the_bar_and_stays_inside_it() {
-        let anchor = Anchor {
-            right: 1500,
-            top: 30,
-            bounds: (0, 1920),
-        };
-        // An 8-point margin is 12 pixels at 1.5: the window reaches that far
-        // over the bar and past the mailbox, so the picker inside it meets both.
-        let window = window_bounds(anchor, 300.0, 8.0, 1.5);
-        assert_eq!(
-            [window.left, window.top, window.width, window.height],
-            [288, 18, 1224, 474]
-        );
-        assert_eq!(window.left + window.width - 12, anchor.right);
-        assert_eq!(window.top + 12, anchor.top);
-        let near_left = Anchor {
-            right: 200,
-            ..anchor
-        };
-        assert_eq!(window_bounds(near_left, 300.0, 8.0, 1.0).left, -8);
-        let narrow = Anchor {
-            right: 300,
-            top: 30,
-            bounds: (0, 300),
-        };
-        assert_eq!(window_bounds(narrow, 300.0, 8.0, 1.0).left, -8);
     }
 
     #[test]

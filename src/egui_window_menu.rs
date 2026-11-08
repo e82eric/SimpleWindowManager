@@ -189,6 +189,53 @@ fn picker_window_bounds(
     }
 }
 
+/// A bar region a picker drops down from, in screen pixels.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct BarAnchor {
+    /// The region's left and right edges.
+    pub left: i32,
+    pub right: i32,
+    /// The bar's bottom edge.
+    pub top: i32,
+    /// The bar's left and right edges, which the picker stays within.
+    pub bounds: (i32, i32),
+}
+
+/// Which of the region's edges the picker lines up with.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum BarAlign {
+    Left,
+    Right,
+}
+
+/// A picker window dropping down from `anchor`: the picker `width_points`
+/// wide and `height_points` tall, its top touching the bar and its `align`
+/// edge lined up with the region's, but inside the bar. The window's
+/// `margin` (points, transparent) reaches over the bar's edge so the picker
+/// inside it meets both.
+pub(crate) fn below_bar(
+    anchor: BarAnchor,
+    align: BarAlign,
+    width_points: f32,
+    height_points: f32,
+    margin: f32,
+    scale: f32,
+) -> ScreenBounds {
+    let margin_pixels = (margin * scale).round() as i32;
+    let width = (((width_points + 2.0 * margin) * scale).round() as i32).max(1);
+    let lowest = anchor.bounds.0 - margin_pixels;
+    let left = match align {
+        BarAlign::Left => anchor.left - margin_pixels,
+        BarAlign::Right => anchor.right + margin_pixels - width,
+    };
+    ScreenBounds {
+        left: left.clamp(lowest, (anchor.bounds.1 + margin_pixels - width).max(lowest)),
+        top: anchor.top - margin_pixels,
+        width,
+        height: (((height_points + 2.0 * margin) * scale).ceil() as i32).max(1),
+    }
+}
+
 fn full_pane(menu: &dyn PickerView) -> bool {
     menu.picker().effective_position(menu.position()) == nfm_egui::Position::FullPane
 }
@@ -443,5 +490,51 @@ mod full_pane_geometry_tests {
             dimensions(picker_window_bounds(small, 500.0, 1.0, false)),
             [40, 69, 720, 491]
         );
+    }
+    #[test]
+    fn a_drop_down_meets_its_region_and_the_bar_and_stays_inside_the_bar() {
+        let anchor = BarAnchor {
+            left: 1400,
+            right: 1500,
+            top: 30,
+            bounds: (0, 1920),
+        };
+        // An 8-point margin is 12 pixels at 1.5: the window reaches that far
+        // over the bar and past the region, so the picker inside it meets both.
+        let window = below_bar(anchor, BarAlign::Right, 800.0, 300.0, 8.0, 1.5);
+        assert_eq!(dimensions(window), [288, 18, 1224, 474]);
+        assert_eq!(window.left + window.width - 12, anchor.right);
+        assert_eq!(window.top + 12, anchor.top);
+        // Left-aligned, from a region with room to its right, as the launcher is.
+        let launcher = BarAnchor {
+            left: 100,
+            right: 144,
+            ..anchor
+        };
+        let window = below_bar(launcher, BarAlign::Left, 400.0, 300.0, 8.0, 1.5);
+        assert_eq!(window.left + 12, launcher.left);
+        assert_eq!(window.width, 624);
+        // Kept inside the bar, margin aside, at either end.
+        let near_left = BarAnchor {
+            left: 2,
+            right: 200,
+            ..anchor
+        };
+        assert_eq!(below_bar(near_left, BarAlign::Right, 800.0, 300.0, 8.0, 1.0).left, -8);
+        assert_eq!(below_bar(near_left, BarAlign::Left, 800.0, 300.0, 8.0, 1.0).left, -6);
+        let near_right = BarAnchor {
+            left: 1800,
+            right: 1900,
+            ..anchor
+        };
+        let window = below_bar(near_right, BarAlign::Left, 800.0, 300.0, 8.0, 1.0);
+        assert_eq!(window.left + window.width, 1920 + 8);
+        let narrow = BarAnchor {
+            left: 0,
+            right: 300,
+            top: 30,
+            bounds: (0, 300),
+        };
+        assert_eq!(below_bar(narrow, BarAlign::Right, 800.0, 300.0, 8.0, 1.0).left, -8);
     }
 }
