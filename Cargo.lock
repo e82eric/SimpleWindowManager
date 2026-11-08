@@ -39,6 +39,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "android_system_properties"
+version = "0.1.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ae221649c9976a6f6c56ae1facf410f3ddb33cc661c4b7b61020a912d4237fbc"
+dependencies = [
+ "libc",
+]
+
+[[package]]
 name = "anyhow"
 version = "1.0.104"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -125,7 +134,9 @@ version = "0.4.45"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1aa79e62e7697b8e29b513a68abacf485adcd1fe8284a4316c5ae868e6633327"
 dependencies = [
+ "iana-time-zone",
  "num-traits",
+ "windows-link",
 ]
 
 [[package]]
@@ -142,6 +153,12 @@ name = "color_quant"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3d7b894f5411737b7867f4827955924d7c254fc9f4d91a6aad6b097804b1018b"
+
+[[package]]
+name = "core-foundation-sys"
+version = "0.8.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "773648b94d0e5d620f64f280777445740e61fe701025087ec8b57f45c791888b"
 
 [[package]]
 name = "crc32fast"
@@ -479,6 +496,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "iana-time-zone"
+version = "0.1.65"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e31bc9ad994ba00e440a8aa5c9ef0ec67d5cb5e5cb0cc7f8b744a35b389cc470"
+dependencies = [
+ "android_system_properties",
+ "core-foundation-sys",
+ "iana-time-zone-haiku",
+ "js-sys",
+ "log",
+ "wasm-bindgen",
+ "windows-core",
+]
+
+[[package]]
+name = "iana-time-zone-haiku"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f31827a206f56af32e590ba56d5d2d085f558508192593743f16b2306495269f"
+dependencies = [
+ "cc",
+]
+
+[[package]]
 name = "image"
 version = "0.25.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -607,7 +648,7 @@ dependencies = [
 [[package]]
 name = "nfm-egui"
 version = "0.1.0"
-source = "git+https://github.com/e82eric/npicker?rev=724f0fa#724f0fa54bd203ce63fb9dfa50670c3c33f886e8"
+source = "git+https://github.com/e82eric/npicker?rev=0d03e1c#0d03e1c4ec1775133ed4a2f4c3c100c4e1d35e8b"
 dependencies = [
  "crossbeam-channel",
  "egui",
@@ -625,7 +666,7 @@ dependencies = [
 [[package]]
 name = "nfm-file-system-egui"
 version = "0.1.0"
-source = "git+https://github.com/e82eric/npicker?rev=724f0fa#724f0fa54bd203ce63fb9dfa50670c3c33f886e8"
+source = "git+https://github.com/e82eric/npicker?rev=0d03e1c#0d03e1c4ec1775133ed4a2f4c3c100c4e1d35e8b"
 dependencies = [
  "nfm-egui",
  "nfm-preview",
@@ -635,7 +676,7 @@ dependencies = [
 [[package]]
 name = "nfm-picker-sources"
 version = "0.1.0"
-source = "git+https://github.com/e82eric/npicker?rev=724f0fa#724f0fa54bd203ce63fb9dfa50670c3c33f886e8"
+source = "git+https://github.com/e82eric/npicker?rev=0d03e1c#0d03e1c4ec1775133ed4a2f4c3c100c4e1d35e8b"
 dependencies = [
  "chrono",
  "csv",
@@ -649,7 +690,7 @@ dependencies = [
 [[package]]
 name = "nfm-preview"
 version = "0.1.0"
-source = "git+https://github.com/e82eric/npicker?rev=724f0fa#724f0fa54bd203ce63fb9dfa50670c3c33f886e8"
+source = "git+https://github.com/e82eric/npicker?rev=0d03e1c#0d03e1c4ec1775133ed4a2f4c3c100c4e1d35e8b"
 dependencies = [
  "nfm-egui",
  "nfm-preview-file",
@@ -659,12 +700,12 @@ dependencies = [
 [[package]]
 name = "nfm-preview-command"
 version = "0.1.0"
-source = "git+https://github.com/e82eric/npicker?rev=724f0fa#724f0fa54bd203ce63fb9dfa50670c3c33f886e8"
+source = "git+https://github.com/e82eric/npicker?rev=0d03e1c#0d03e1c4ec1775133ed4a2f4c3c100c4e1d35e8b"
 
 [[package]]
 name = "nfm-preview-file"
 version = "0.1.0"
-source = "git+https://github.com/e82eric/npicker?rev=724f0fa#724f0fa54bd203ce63fb9dfa50670c3c33f886e8"
+source = "git+https://github.com/e82eric/npicker?rev=0d03e1c#0d03e1c4ec1775133ed4a2f4c3c100c4e1d35e8b"
 dependencies = [
  "image",
  "nfm-egui",
@@ -675,7 +716,7 @@ dependencies = [
 [[package]]
 name = "nfm-preview-text"
 version = "0.1.0"
-source = "git+https://github.com/e82eric/npicker?rev=724f0fa#724f0fa54bd203ce63fb9dfa50670c3c33f886e8"
+source = "git+https://github.com/e82eric/npicker?rev=0d03e1c#0d03e1c4ec1775133ed4a2f4c3c100c4e1d35e8b"
 dependencies = [
  "nfm-egui",
  "two-face",
@@ -686,7 +727,7 @@ dependencies = [
 [[package]]
 name = "nfm-process-egui"
 version = "0.1.0"
-source = "git+https://github.com/e82eric/npicker?rev=724f0fa#724f0fa54bd203ce63fb9dfa50670c3c33f886e8"
+source = "git+https://github.com/e82eric/npicker?rev=0d03e1c#0d03e1c4ec1775133ed4a2f4c3c100c4e1d35e8b"
 dependencies = [
  "nfm-egui",
  "nfm-win32",
@@ -696,7 +737,7 @@ dependencies = [
 [[package]]
 name = "nfm-win32"
 version = "0.1.0"
-source = "git+https://github.com/e82eric/npicker?rev=724f0fa#724f0fa54bd203ce63fb9dfa50670c3c33f886e8"
+source = "git+https://github.com/e82eric/npicker?rev=0d03e1c#0d03e1c4ec1775133ed4a2f4c3c100c4e1d35e8b"
 dependencies = [
  "anyhow",
  "csv",
@@ -709,7 +750,7 @@ dependencies = [
 [[package]]
 name = "nfm-window-egui"
 version = "0.1.0"
-source = "git+https://github.com/e82eric/npicker?rev=724f0fa#724f0fa54bd203ce63fb9dfa50670c3c33f886e8"
+source = "git+https://github.com/e82eric/npicker?rev=0d03e1c#0d03e1c4ec1775133ed4a2f4c3c100c4e1d35e8b"
 dependencies = [
  "nfm-egui",
  "nfm-win32",
@@ -720,7 +761,7 @@ dependencies = [
 [[package]]
 name = "nfm_file_system"
 version = "0.1.0"
-source = "git+https://github.com/e82eric/npicker?rev=724f0fa#724f0fa54bd203ce63fb9dfa50670c3c33f886e8"
+source = "git+https://github.com/e82eric/npicker?rev=0d03e1c#0d03e1c4ec1775133ed4a2f4c3c100c4e1d35e8b"
 dependencies = [
  "crossbeam-channel",
  "hashbrown",
@@ -731,7 +772,7 @@ dependencies = [
 [[package]]
 name = "nfm_search_core"
 version = "0.1.0"
-source = "git+https://github.com/e82eric/npicker?rev=724f0fa#724f0fa54bd203ce63fb9dfa50670c3c33f886e8"
+source = "git+https://github.com/e82eric/npicker?rev=0d03e1c#0d03e1c4ec1775133ed4a2f4c3c100c4e1d35e8b"
 dependencies = [
  "crossbeam-channel",
  "memchr",
