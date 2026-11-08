@@ -23,7 +23,7 @@ mod input;
 pub mod layout;
 pub mod list_windows;
 pub mod mailbox;
-mod mailbox_popup;
+mod mailbox_picker;
 pub mod markdown_document;
 pub mod model;
 pub mod palette;

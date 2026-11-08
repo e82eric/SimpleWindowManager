@@ -250,7 +250,7 @@ pub(crate) fn mailbox_at_x(monitor_index: usize, x: i32) -> Option<(f32, f32, us
     })
 }
 
-/// Opens or closes the drop-down of mailbox `index` below `hwnd`, the bar of
+/// Opens or closes the picker of mailbox `index` below `hwnd`, the bar of
 /// `monitor_index`: under the mailbox's region, or at the bar's right end while
 /// the mailbox shows nothing.
 pub(crate) fn toggle_mailbox(
@@ -273,10 +273,9 @@ pub(crate) fn toggle_mailbox(
         crate::error_log::last_win32("GetWindowRect(bar) failed");
         return;
     }
-    crate::mailbox_popup::toggle(
+    crate::mailbox_picker::toggle(
         index,
-        monitor_index,
-        crate::mailbox_popup::Anchor {
+        crate::mailbox_picker::Anchor {
             right: right.map_or(bar.right, |right| bar.left + right as i32),
             top: bar.bottom,
             bounds: (bar.left, bar.right),
@@ -765,21 +764,6 @@ fn status_pieces(
     pieces
 }
 
-/// `text` on one line of at most `width`, ending in an ellipsis when cut.
-pub(crate) fn one_line(
-    painter: &egui::Painter,
-    text: &str,
-    font: &egui::FontId,
-    color: egui::Color32,
-    width: f32,
-) -> std::sync::Arc<egui::Galley> {
-    let flat = text.split_whitespace().collect::<Vec<_>>().join(" ");
-    let mut job = egui::text::LayoutJob::simple(flat, font.clone(), color, width.max(1.0));
-    job.wrap.max_rows = 1;
-    job.wrap.break_anywhere = true;
-    painter.layout_job(job)
-}
-
 fn text_width(canvas: &egui::Painter, font: &egui::FontId, text: &str) -> f32 {
     canvas
         .layout_no_wrap(text.to_owned(), font.clone(), egui::Color32::WHITE)
@@ -1237,24 +1221,6 @@ mod tests {
             let (seven, hundred) = (measure("  7%"), measure("100%"));
             assert_eq!(seven.0, hundred.0);
             assert!((seven.1 - hundred.1).abs() < 0.5, "{seven:?} {hundred:?}");
-        });
-    }
-
-    #[test]
-    fn long_text_ends_in_an_ellipsis_within_its_width() {
-        with_painter(|painter, font| {
-            let title = one_line(
-                painter,
-                &"Long title ".repeat(50),
-                font,
-                palette::TEXT,
-                120.0,
-            );
-            assert!(title.size().x <= 120.0 + 1.0, "{}", title.size().x);
-            // The galley keeps the whole text; its one row is what is drawn.
-            let drawn = title.rows[0].text();
-            assert_eq!(title.rows.len(), 1);
-            assert!(drawn.ends_with('…'), "{drawn}");
         });
     }
 

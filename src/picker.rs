@@ -45,6 +45,20 @@ pub trait PickerView {
     fn position(&self) -> nfm_egui::Position {
         nfm_egui::Position::Center
     }
+    /// The window's own screen bounds, in pixels, for a picker that opens somewhere
+    /// other than its monitor's center, such as below a bar mailbox. Asked again
+    /// each frame, so the window follows when they change. `margin` is the
+    /// picker's margin inside the window, in points, and `scale` the window's DPI
+    /// scale. Pickers with their own bounds do not fill the pane.
+    fn window_bounds(
+        &self,
+        _ctx: &egui::Context,
+        _appearance: &Appearance,
+        _margin: f32,
+        _scale: f32,
+    ) -> Option<crate::egui_window_menu::ScreenBounds> {
+        None
+    }
     /// Draw one frame. `awaiting_handoff` is set after this picker returned a
     /// `ShowPicker` action, until the next picker replaces it.
     fn show(

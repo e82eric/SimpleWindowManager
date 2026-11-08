@@ -21,7 +21,7 @@ pub(crate) fn desktop_appearance() -> Appearance {
     appearance
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ScreenBounds {
     pub left: i32,
     pub top: i32,
@@ -101,6 +101,7 @@ impl WindowMenuHost {
                             quitting: false,
                             opened_frame: None,
                             presentation: None,
+                            window: None,
                             full_pane: false,
                             preview_visible: false,
                         }
@@ -207,6 +208,8 @@ pub(crate) struct WindowMenuApp {
     quitting: bool,
     opened_frame: Option<u64>,
     presentation: Option<ScreenBounds>,
+    /// The window's bounds as last presented.
+    window: Option<ScreenBounds>,
     full_pane: bool,
     preview_visible: bool,
 }
@@ -214,6 +217,7 @@ impl WindowMenuApp {
     fn clear_content(&mut self) {
         self.active_menu = None;
         self.presentation = None;
+        self.window = None;
         self.full_pane = false;
         self.preview_visible = false;
         self.session = None;
@@ -250,20 +254,28 @@ impl WindowMenuApp {
         };
         rows as f32 * row + 56.0 + 2.0 * PICKER_MARGIN + preview
     }
+    /// Where the active picker's window goes on the monitor `bounds`: where the
+    /// view asks, else centered and sized by its rows, or filling the pane.
+    fn window(&self, ctx: &egui::Context, menu: &dyn PickerView, bounds: ScreenBounds) -> ScreenBounds {
+        let scale =
+            unsafe { windows_sys::Win32::UI::HiDpi::GetDpiForWindow(self.hwnd as _) } as f32 / 96.0;
+        menu.window_bounds(ctx, &self.appearance, PICKER_MARGIN, scale)
+            .unwrap_or_else(|| {
+                picker_window_bounds(bounds, self.height(ctx, menu), scale, full_pane(menu))
+            })
+    }
     /// Size the window for the active picker; called again when its layout changes.
     fn present(&mut self, ctx: &egui::Context, bounds: ScreenBounds) {
         let Some(menu) = &self.active_menu else {
             return;
         };
-        let height_points = self.height(ctx, menu.as_ref());
+        let window = self.window(ctx, menu.as_ref(), bounds);
         self.presentation = Some(bounds);
+        self.window = Some(window);
         self.full_pane = full_pane(menu.as_ref());
         self.preview_visible = menu.picker().preview_visible();
         let visible = unsafe { IsWindowVisible(self.hwnd as _) != 0 };
         unsafe {
-            let scale =
-                windows_sys::Win32::UI::HiDpi::GetDpiForWindow(self.hwnd as _) as f32 / 96.0;
-            let window = picker_window_bounds(bounds, height_points, scale, self.full_pane);
             SetWindowPos(
                 self.hwnd as _,
                 HWND_TOPMOST,
@@ -358,13 +370,15 @@ impl WindowMenuApp {
         // Ctrl+Shift+F switches away from the picker's own position.
         placement.position = menu.position();
         let outcome = menu.show(ctx, placement, &self.appearance, self.awaiting_handoff);
-        // Ctrl+P and full-pane toggles change the window's size.
-        if full_pane(menu.as_ref()) != self.full_pane
-            || menu.picker().preview_visible() != self.preview_visible
+        // Ctrl+P and full-pane toggles change the window's size, as can a view
+        // with its own bounds.
+        let menu = self.active_menu.as_deref().expect("shown above");
+        if let Some(bounds) = self.presentation
+            && (full_pane(menu) != self.full_pane
+                || menu.picker().preview_visible() != self.preview_visible
+                || self.window != Some(self.window(ctx, menu, bounds)))
         {
-            if let Some(bounds) = self.presentation {
-                self.present(ctx, bounds);
-            }
+            self.present(ctx, bounds);
         }
         match outcome {
             // Keep the window for the next picker; see `awaiting_handoff`.

@@ -1,5 +1,5 @@
-//! Persistent egui/OpenGL state for the Win32 bars and the mailbox drop-down. All
-//! access is on the window thread.
+//! Persistent egui/OpenGL state for the Win32 bars. All access is on the window
+//! thread.
 use super::bar::{BarSnapshot, paint_bar};
 use glow::HasContext;
 use nfm_egui::{
@@ -34,26 +34,6 @@ pub(super) fn paint(hwnd: HWND, size: [u32; 2], snapshot: &BarSnapshot) -> Resul
     let result = match renderer.as_mut() {
         Some(renderer) => renderer.paint(size, snapshot, true),
         None => Ok(()), // WM_PAINT can arrive before initialization completes.
-    };
-    if let Some(renderer) = renderer {
-        RENDERERS.with(|renderers| renderers.borrow_mut().insert(hwnd as isize, renderer));
-    }
-    result
-}
-
-/// Paint `hwnd` with `run`, which receives `events` as focused pointer and keyboard
-/// input. Returns whether egui wants another frame right away, such as for hover.
-pub(crate) fn paint_ui(
-    hwnd: HWND,
-    size: [u32; 2],
-    font_name: &str,
-    events: Vec<egui::Event>,
-    run: impl FnMut(&mut egui::Ui),
-) -> Result<bool, String> {
-    let mut renderer = RENDERERS.with(|renderers| renderers.borrow_mut().remove(&(hwnd as isize)));
-    let result = match renderer.as_mut() {
-        Some(renderer) => renderer.render(size, font_name, events, true, run),
-        None => Ok(false),
     };
     if let Some(renderer) = renderer {
         RENDERERS.with(|renderers| renderers.borrow_mut().insert(hwnd as isize, renderer));
@@ -205,17 +185,6 @@ impl BarRenderer {
             |ui| paint_bar(ui, size, snapshot),
         )
         .map(|_| ())
-    }
-
-    fn render(
-        &mut self,
-        size: [u32; 2],
-        font_name: &str,
-        events: Vec<egui::Event>,
-        focused: bool,
-        run: impl FnMut(&mut egui::Ui),
-    ) -> Result<bool, String> {
-        self.render_frame(size, font_name, events, focused, true, run)
     }
 
     fn render_frame(

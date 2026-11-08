@@ -18,7 +18,7 @@ static THREAD: AtomicU32 = AtomicU32::new(0);
 static CHANNEL: OnceLock<SyncSender<Command>> = OnceLock::new();
 static BINDINGS: OnceLock<Vec<KeyBinding>> = OnceLock::new();
 static BAR_HANDLES: OnceLock<Vec<(usize, isize)>> = OnceLock::new();
-/// Repaint the bars and the open mailbox drop-down after a producer published.
+/// Repaint the bars after a producer published.
 /// May be called from any thread, as InvalidateRect may.
 pub(crate) fn mailbox_changed() {
     for &(_, hwnd) in BAR_HANDLES.get().into_iter().flatten() {
@@ -26,7 +26,6 @@ pub(crate) fn mailbox_changed() {
             windows_sys::Win32::Graphics::Gdi::InvalidateRect(hwnd as _, std::ptr::null(), 0);
         }
     }
-    crate::mailbox_popup::invalidate();
 }
 pub fn bar_handle(monitor: usize) -> Option<isize> {
     BAR_HANDLES

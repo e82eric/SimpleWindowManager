@@ -7,16 +7,16 @@ publish = false
 [dependencies]
 csv = "1"
 crossbeam-channel = "0.5"
-nfm-picker-sources = { git = "https://github.com/e82eric/npicker", rev = "724f0fa" }
-nfm-window-egui = { git = "https://github.com/e82eric/npicker", rev = "724f0fa" }
-nfm-process-egui = { git = "https://github.com/e82eric/npicker", rev = "724f0fa" }
-nfm-file-system-egui = { git = "https://github.com/e82eric/npicker", rev = "724f0fa" }
-nfm_file_system = { git = "https://github.com/e82eric/npicker", rev = "724f0fa" }
-nfm-egui = { git = "https://github.com/e82eric/npicker", rev = "724f0fa", features = ["opengl"] }
-nfm_search_core = { git = "https://github.com/e82eric/npicker", rev = "724f0fa" }
-nfm-win32 = { git = "https://github.com/e82eric/npicker", rev = "724f0fa" }
-nfm-preview-file = { git = "https://github.com/e82eric/npicker", rev = "724f0fa" }
-nfm-preview = { git = "https://github.com/e82eric/npicker", rev = "724f0fa" }
+nfm-picker-sources = { git = "https://github.com/e82eric/npicker", rev = "0d03e1c" }
+nfm-window-egui = { git = "https://github.com/e82eric/npicker", rev = "0d03e1c" }
+nfm-process-egui = { git = "https://github.com/e82eric/npicker", rev = "0d03e1c" }
+nfm-file-system-egui = { git = "https://github.com/e82eric/npicker", rev = "0d03e1c" }
+nfm_file_system = { git = "https://github.com/e82eric/npicker", rev = "0d03e1c" }
+nfm-egui = { git = "https://github.com/e82eric/npicker", rev = "0d03e1c", features = ["opengl"] }
+nfm_search_core = { git = "https://github.com/e82eric/npicker", rev = "0d03e1c" }
+nfm-win32 = { git = "https://github.com/e82eric/npicker", rev = "0d03e1c" }
+nfm-preview-file = { git = "https://github.com/e82eric/npicker", rev = "0d03e1c" }
+nfm-preview = { git = "https://github.com/e82eric/npicker", rev = "0d03e1c" }
 serde_json = "1"
 png = "0.18"
 pulldown-cmark = { version = "0.13", default-features = false }
