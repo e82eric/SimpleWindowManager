@@ -189,12 +189,11 @@ impl BarRenderer {
         size: [u32; 2],
         snapshot: &BarSnapshot,
         events: Vec<egui::Event>,
-        open_mailbox: Option<usize>,
         present: bool,
     ) -> Result<Option<BarFrame>, String> {
         let mut actions = Vec::new();
         let frame = self.render_frame(size, &snapshot.font_name, events, present, |ui| {
-            actions = paint_bar(ui, size, snapshot, open_mailbox)
+            actions = paint_bar(ui, size, snapshot)
         })?;
         Ok(frame.map(|(repaint, cursor)| BarFrame {
             actions,
@@ -473,10 +472,9 @@ pub(crate) mod tests {
         size: [u32; 2],
         snapshot: &BarSnapshot,
         events: Vec<egui::Event>,
-        open_mailbox: Option<usize>,
     ) -> BarFrame {
         renderer
-            .paint(size, snapshot, events, open_mailbox, false)
+            .paint(size, snapshot, events, false)
             .unwrap()
             .expect("the bar painted")
     }
@@ -547,17 +545,28 @@ pub(crate) mod tests {
             })
         };
         snapshot.mailboxes = vec![(mailbox.clone(), counts(2, 1, 3))];
-        // A key binding finds the mailbox where the frame put it.
-        let actions = frame(&mut renderer, size, &snapshot, Vec::new(), Some(0)).actions;
-        let [
-            BarAction::ToggleMailbox {
-                index: 0,
-                span: Some((left, right)),
-            },
-        ] = actions[..]
-        else {
-            panic!("the key binding did not open the mailbox: {actions:?}");
+        // Presses from the right find the mailbox where the frame put it.
+        let button = |pos, pressed| egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Default::default(),
         };
+        let found = (0..size[0]).rev().step_by(8).find_map(|x| {
+            let pos = egui::pos2(x as f32, 10.0);
+            frame(&mut renderer, size, &snapshot, vec![egui::Event::PointerMoved(pos)]);
+            let actions = frame(&mut renderer, size, &snapshot, vec![button(pos, true)]).actions;
+            frame(&mut renderer, size, &snapshot, vec![button(pos, false)]);
+            match actions[..] {
+                [BarAction::ToggleMailbox { index: 0, span }] => Some(span),
+                _ => None,
+            }
+        });
+        let Some((left, right)) = found else {
+            panic!("no press opened the mailbox");
+        };
+        frame(&mut renderer, size, &snapshot, vec![egui::Event::PointerGone]);
+        frame(&mut renderer, size, &snapshot, Vec::new());
         assert!(
             right < 1500.0,
             "the mailbox overlaps the status segments: {left}..{right}"
@@ -570,7 +579,6 @@ pub(crate) mod tests {
             size,
             &snapshot,
             vec![egui::Event::PointerMoved(at)],
-            None,
         );
         assert!(hovered.actions.is_empty());
         assert_eq!(hovered.cursor, egui::CursorIcon::PointingHand);
@@ -579,23 +587,17 @@ pub(crate) mod tests {
             plain,
             "a hovered mailbox looks the same"
         );
-        let press = egui::Event::PointerButton {
-            pos: at,
-            button: egui::PointerButton::Primary,
-            pressed: true,
-            modifiers: Default::default(),
-        };
         assert_eq!(
-            frame(&mut renderer, size, &snapshot, vec![press], None).actions,
+            frame(&mut renderer, size, &snapshot, vec![button(at, true)]).actions,
             [BarAction::ToggleMailbox {
                 index: 0,
-                span: Some((left, right)),
+                span: (left, right),
             }]
         );
         // Input can ask for one more frame, but a quiet bar settles rather than
         // repainting without end.
-        frame(&mut renderer, size, &snapshot, Vec::new(), None);
-        assert!(!frame(&mut renderer, size, &snapshot, Vec::new(), None).repaint);
+        frame(&mut renderer, size, &snapshot, Vec::new());
+        assert!(!frame(&mut renderer, size, &snapshot, Vec::new()).repaint);
         // A font missing a glyph would draw a box rather than the state symbol.
         let font = egui::FontId::new(12.0, egui::FontFamily::Name("bar".into()));
         for glyph in ['●', '✓'] {
@@ -606,14 +608,15 @@ pub(crate) mod tests {
                 "bar fonts lack {glyph:?}"
             );
         }
-        // An empty mailbox has no region, so its picker opens at the bar's end.
+        // An empty mailbox has no region, so nothing is there to press.
         snapshot.mailboxes = vec![(mailbox, counts(0, 0, 0))];
-        assert_eq!(
-            frame(&mut renderer, size, &snapshot, Vec::new(), Some(0)).actions,
-            [BarAction::ToggleMailbox {
-                index: 0,
-                span: None
-            }]
+        frame(&mut renderer, size, &snapshot, vec![button(at, false)]);
+        let actions = frame(&mut renderer, size, &snapshot, vec![button(at, true)]).actions;
+        assert!(
+            !actions
+                .iter()
+                .any(|action| matches!(action, BarAction::ToggleMailbox { .. })),
+            "an empty mailbox took a press: {actions:?}"
         );
     }
 
@@ -632,7 +635,7 @@ pub(crate) mod tests {
         let mut snapshot = snapshot();
         let size = [1600, 29];
         second
-            .paint(size, &snapshot, Vec::new(), None, false)
+            .paint(size, &snapshot, Vec::new(), false)
             .unwrap();
         assert_eq!(unsafe { wglGetCurrentContext() }, first.rc);
         let rendered = pixels(&second, size);
@@ -689,7 +692,7 @@ pub(crate) mod tests {
             let mut unfocused = snapshot.clone();
             unfocused.selected_monitor = false;
             second
-                .paint(size, &unfocused, Vec::new(), None, false)
+                .paint(size, &unfocused, Vec::new(), false)
                 .unwrap();
             write(
                 &path.with_extension("unfocused.bmp"),
@@ -700,13 +703,13 @@ pub(crate) mod tests {
         snapshot.focused_window = "Long title ".repeat(200);
         snapshot.font_name = "Consolas".into();
         second
-            .paint([800, 29], &snapshot, Vec::new(), None, true)
+            .paint([800, 29], &snapshot, Vec::new(), true)
             .unwrap();
         assert_eq!(unsafe { GetForegroundWindow() }, foreground);
         drop(second);
         assert_eq!(unsafe { wglGetCurrentContext() }, first.rc);
         first
-            .paint([1600, 40], &snapshot, Vec::new(), None, false)
+            .paint([1600, 40], &snapshot, Vec::new(), false)
             .unwrap();
         drop(first);
         assert!(unsafe { wglGetCurrentContext() }.is_null());
@@ -714,7 +717,7 @@ pub(crate) mod tests {
         let third_window = TestWindow::new();
         let mut third = BarRenderer::new(third_window.0).unwrap();
         third
-            .paint([1600, 40], &snapshot, Vec::new(), None, true)
+            .paint([1600, 40], &snapshot, Vec::new(), true)
             .unwrap();
     }
 }

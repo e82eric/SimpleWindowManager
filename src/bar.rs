@@ -219,12 +219,9 @@ pub(crate) enum BarAction {
     /// Open or close the commands launcher below its button, whose edges these
     /// are in bar pixels.
     ToggleLauncher { left: f32, right: f32 },
-    /// Open or close mailbox `index`'s picker below its region's edges, or at the
-    /// bar's right end while the mailbox shows nothing.
-    ToggleMailbox {
-        index: usize,
-        span: Option<(f32, f32)>,
-    },
+    /// Open or close mailbox `index`'s picker below its region, whose edges
+    /// these are in bar pixels.
+    ToggleMailbox { index: usize, span: (f32, f32) },
     /// Switch this monitor to the workspace with this id.
     Workspace(usize),
     /// Close any open picker: a press on the bar that opens none moves on from it.
@@ -239,8 +236,6 @@ pub(crate) struct BarState {
     renderer: Option<crate::bar_renderer::BarRenderer>,
     /// Mouse input for the next frame.
     events: Vec<egui::Event>,
-    /// A mailbox for the next frame to open, asked for by a key binding.
-    open_mailbox: Option<usize>,
     /// Whether the bar has asked for `WM_MOUSELEAVE`, which it does as the cursor
     /// arrives.
     tracking_leave: bool,
@@ -270,7 +265,6 @@ pub(crate) fn attach(hwnd: windows_sys::Win32::Foundation::HWND) -> Result<(), S
     let state = BarState {
         renderer: Some(renderer),
         events: Vec::new(),
-        open_mailbox: None,
         tracking_leave: false,
         cursor: egui::CursorIcon::Default,
     };
@@ -292,17 +286,13 @@ fn paint_window(
     size: [u32; 2],
     snapshot: &BarSnapshot,
 ) -> Vec<BarAction> {
-    let Some((Some(mut renderer), events, open_mailbox)) = with_bar(hwnd, |bar| {
-        (
-            bar.renderer.take(),
-            std::mem::take(&mut bar.events),
-            bar.open_mailbox.take(),
-        )
+    let Some((Some(mut renderer), events)) = with_bar(hwnd, |bar| {
+        (bar.renderer.take(), std::mem::take(&mut bar.events))
     }) else {
         // WM_PAINT can arrive before `attach`, or while a paint is under way.
         return Vec::new();
     };
-    let frame = renderer.paint(size, snapshot, events, open_mailbox, true);
+    let frame = renderer.paint(size, snapshot, events, true);
     // If the window was destroyed while painting, the renderer drops here.
     let over_bar = with_bar(hwnd, |bar| {
         bar.renderer = Some(renderer);
@@ -322,11 +312,7 @@ fn paint_window(
             }
             frame.actions
         }
-        // A frame that did not run still answers a key binding's mailbox.
-        Ok(None) => open_mailbox
-            .map(|index| BarAction::ToggleMailbox { index, span: None })
-            .into_iter()
-            .collect(),
+        Ok(None) => Vec::new(),
         Err(error) => {
             crate::error_log::report("egui bar paint", error);
             Vec::new()
@@ -347,12 +333,19 @@ fn run_actions(hwnd: windows_sys::Win32::Foundation::HWND, actions: Vec<BarActio
                     ));
                 }
             }
-            BarAction::ToggleMailbox { index, span } => {
+            BarAction::ToggleMailbox {
+                index,
+                span: (left, right),
+            } => {
                 if let Some(bar) = window_rect(hwnd) {
-                    let (left, right) = span.map_or((bar.right, bar.right), |(left, right)| {
-                        (bar.left + left as i32, bar.left + right as i32)
-                    });
-                    crate::mailbox_picker::toggle(index, anchor(&bar, left, right));
+                    crate::mailbox_picker::toggle(
+                        index,
+                        Some(anchor(
+                            &bar,
+                            bar.left + left as i32,
+                            bar.left + right as i32,
+                        )),
+                    );
                 }
             }
             BarAction::Workspace(workspace) => {
@@ -445,20 +438,6 @@ fn pointer_left(hwnd: windows_sys::Win32::Foundation::HWND) {
     });
     if left.is_some() {
         invalidate(hwnd);
-    }
-}
-
-/// Opens or closes the picker of mailbox `index` below the bar `hwnd`: under the
-/// mailbox's region, or at the bar's right end while the mailbox shows nothing.
-pub(crate) fn toggle_mailbox(hwnd: windows_sys::Win32::Foundation::HWND, index: usize) {
-    // The frame knows where the mailbox is, so it opens the picker.
-    if with_bar(hwnd, |bar| bar.open_mailbox = Some(index)).is_none() {
-        return;
-    }
-    repaint_now(hwnd);
-    // A bar that did not paint, such as a hidden one, still opens the picker.
-    if let Some(Some(index)) = with_bar(hwnd, |bar| bar.open_mailbox.take()) {
-        run_actions(hwnd, vec![BarAction::ToggleMailbox { index, span: None }]);
     }
 }
 
@@ -726,12 +705,11 @@ fn tag_groups(snapshot: &BarSnapshot) -> Vec<(usize, usize, f32, f32)> {
 }
 
 /// Paints the bar for `snapshot`, lighting what the pointer is over, and returns
-/// what this frame's clicks, and `open_mailbox` from a key binding, ask for.
+/// what this frame's clicks ask for.
 pub(super) fn paint_bar(
     ui: &mut egui::Ui,
     size: [u32; 2],
     snapshot: &BarSnapshot,
-    open_mailbox: Option<usize>,
 ) -> Vec<BarAction> {
     let mut actions = Vec::new();
     use egui::{FontFamily, FontId, Rect, pos2};
@@ -863,19 +841,15 @@ pub(super) fn paint_bar(
             shade,
             rect(left, top, available_right, bottom),
         );
-        let span = response
-            .as_ref()
-            .map(|response| (response.rect.left(), response.rect.right()));
-        if open_mailbox == Some(index) || response.as_ref().is_some_and(pressed) {
+        // A mailbox showing nothing has no region.
+        let Some(response) = response else {
+            continue;
+        };
+        let span = (response.rect.left(), response.rect.right());
+        if pressed(&response) {
             actions.push(BarAction::ToggleMailbox { index, span });
         }
-        if let Some((left, _)) = span {
-            available_right = left - REGION_GAP;
-        }
-    }
-    // A key binding can name a mailbox that does not exist.
-    if let Some(index) = open_mailbox.filter(|&index| index >= snapshot.mailboxes.len()) {
-        actions.push(BarAction::ToggleMailbox { index, span: None });
+        available_right = span.0 - REGION_GAP;
     }
     // Pressing the bar anywhere else, with either button, closes a picker. The
     // launcher and mailboxes open or close their own instead.
@@ -1578,7 +1552,7 @@ mod tests {
             let input = crate::bar_renderer::bar_input(Self::SIZE, self.time, events);
             let mut actions = Vec::new();
             let output = self.ctx.run_ui(input, |ui| {
-                actions = paint_bar(ui, Self::SIZE, &self.snapshot, None)
+                actions = paint_bar(ui, Self::SIZE, &self.snapshot)
             });
             let cursor = output.platform_output.cursor_icon;
             output.drop_without_applying_deltas();

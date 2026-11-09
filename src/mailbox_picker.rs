@@ -28,8 +28,11 @@ const TEMPLATE: &str = "Source:muted|Time:right:muted;Title:title;Detail:muted";
 /// The mailbox whose picker is open.
 static OPEN: Mutex<Option<usize>> = Mutex::new(None);
 
-/// Open the picker for mailbox `index` below `anchor`, or close it if it is open.
-pub(crate) fn toggle(index: usize, anchor: BarAnchor) {
+/// Open the picker for mailbox `index`, or close it if it is open: dropping
+/// down from `anchor`, its region on the bar, or without one (from a key
+/// binding) centered and sized like other pickers showing a preview, with
+/// cards in that height.
+pub(crate) fn toggle(index: usize, anchor: Option<BarAnchor>) {
     if *OPEN.lock().unwrap() == Some(index) && crate::ui::menu_visible() {
         crate::ui::post(crate::ui::Command::Hide);
         return;
@@ -55,7 +58,7 @@ fn mailbox(index: usize) -> Option<BarMailbox> {
 struct Request {
     index: usize,
     mailbox: BarMailbox,
-    anchor: BarAnchor,
+    anchor: Option<BarAnchor>,
 }
 impl PickerRequest for Request {
     fn build(self: Box<Self>, host: &PickerHost<'_>) -> Result<Box<dyn PickerView>, String> {
@@ -69,14 +72,22 @@ impl PickerRequest for Request {
         let source = Arc::new(SnapshotStore::new());
         source.publish(snapshot);
         source.complete();
-        // The window is sized for the entries (see `window_bounds`), which
-        // limits the cards to them.
+        let rows = state.entries.len().clamp(1, MAX_ROWS);
+        let result_rows = match anchor {
+            // The window is sized for the entries (see `window_bounds`), which
+            // limits the cards to them.
+            Some(_) => MAX_ROWS,
+            // The host's window with a preview (see `sized_with_preview`): as
+            // many cards as fit where its result and preview rows would go.
+            None => cards_in_rows(host, &template, host.result_rows + host.preview_rows),
+        };
         let picker = shared::replace(
             host.ctx,
             source,
             PickerConfig {
                 title: mailbox.name.clone(),
-                result_rows: MAX_ROWS,
+                result_rows,
+                preview_visible: false,
                 ..Default::default()
             },
             None,
@@ -87,11 +98,19 @@ impl PickerRequest for Request {
             index,
             mailbox,
             anchor,
-            rows: state.entries.len().clamp(1, MAX_ROWS),
+            rows,
             template,
             picker,
         }))
     }
+}
+
+/// How many cards fit in the height of `rows` of the host's one-line rows.
+fn cards_in_rows(host: &PickerHost<'_>, template: &RowTemplate, rows: usize) -> usize {
+    let line = host.appearance.typography.preview_row_height(host.ctx);
+    let card = nfm_egui::results_height(host.ctx, host.appearance, Some(template), 2)
+        - nfm_egui::results_height(host.ctx, host.appearance, Some(template), 1);
+    ((rows as f32 * line) / card).floor().max(1.0) as usize
 }
 
 /// The entries as a structured source with a card template.
@@ -151,8 +170,9 @@ fn snapshot(
 struct View {
     index: usize,
     mailbox: BarMailbox,
-    anchor: BarAnchor,
-    /// Cards the window is sized for: one per entry, up to `MAX_ROWS`.
+    /// The bar region it drops down from; without one, the host places it.
+    anchor: Option<BarAnchor>,
+    /// Cards a drop-down's window is sized for: one per entry, up to `MAX_ROWS`.
     rows: usize,
     template: RowTemplate,
     picker: SharedPicker,
@@ -164,9 +184,19 @@ impl PickerView for View {
     fn has_header(&self) -> bool {
         false
     }
-    /// Against the bar, so any slack in the window's height falls below.
+    /// From a key binding: as tall as other pickers showing their preview,
+    /// with cards where the preview would be.
+    fn sized_with_preview(&self) -> bool {
+        self.anchor.is_none()
+    }
     fn position(&self) -> nfm_egui::Position {
-        nfm_egui::Position::Top
+        // A drop-down sits against the bar, so any slack in the window's
+        // height falls below.
+        if self.anchor.is_some() {
+            nfm_egui::Position::Top
+        } else {
+            nfm_egui::Position::Center
+        }
     }
     fn window_bounds(
         &self,
@@ -175,9 +205,10 @@ impl PickerView for View {
         margin: f32,
         scale: f32,
     ) -> Option<ScreenBounds> {
+        let anchor = self.anchor?;
         let height = nfm_egui::results_height(ctx, appearance, Some(&self.template), self.rows);
         Some(crate::egui_window_menu::below_bar(
-            self.anchor,
+            anchor,
             BarAlign::Right,
             WIDTH,
             height,
@@ -294,5 +325,29 @@ mod tests {
         let three = nfm_egui::results_height(&ctx, &appearance, Some(&template), 3);
         let card = (three - one) / 2.0;
         assert!(card > appearance.typography.preview_row_height(&ctx) * 2.0);
+    }
+
+    #[test]
+    fn the_centered_picker_fills_the_preview_height_with_cards() {
+        let ctx = egui::Context::default();
+        ctx.run_ui(Default::default(), |_| {})
+            .drop_without_applying_deltas();
+        let appearance = crate::egui_window_menu::desktop_appearance();
+        let resolver = crate::file_preview::resolver(Default::default());
+        let host = PickerHost {
+            ctx: &ctx,
+            hwnd: 0,
+            appearance: &appearance,
+            result_rows: crate::egui_window_menu::RESULT_ROWS,
+            preview_rows: crate::egui_window_menu::PREVIEW_ROWS,
+            file_preview_resolver: &resolver,
+        };
+        let (_, template) = snapshot(&mailbox(), &MailboxState::default()).unwrap();
+        // The result rows alone fit 2 cards; with the preview's rows, 7.
+        assert_eq!(cards_in_rows(&host, &template, host.result_rows), 2);
+        assert_eq!(
+            cards_in_rows(&host, &template, host.result_rows + host.preview_rows),
+            7
+        );
     }
 }

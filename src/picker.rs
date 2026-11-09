@@ -45,6 +45,11 @@ pub trait PickerView {
     fn position(&self) -> nfm_egui::Position {
         nfm_egui::Position::Center
     }
+    /// Whether the host sizes the window as if the preview were showing, for a
+    /// picker that fills that height with results instead of a preview.
+    fn sized_with_preview(&self) -> bool {
+        false
+    }
     /// The window's own screen bounds, in pixels, for a picker that opens somewhere
     /// other than its monitor's center, such as below a bar mailbox. Asked again
     /// each frame, so the window follows when they change. `margin` is the

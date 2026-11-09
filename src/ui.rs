@@ -178,16 +178,9 @@ impl Ui {
             crate::error_log::report("show mailbox", format!("no bar mailbox named {name}"));
             return;
         };
-        let monitors = &configuration.state.monitors;
-        let Some(monitor) = configuration
-            .selected_picker_monitor()
-            .and_then(|selected| monitors.iter().position(|m| std::ptr::eq(m, selected)))
-        else {
-            return;
-        };
-        if let Some(bar) = self.bars.iter().find(|bar| bar.monitor_index == monitor) {
-            crate::bar::toggle_mailbox(bar.hwnd as _, index);
-        }
+        // Like other pickers, on the picker monitor; clicking the mailbox on the
+        // bar drops it down from there instead.
+        crate::mailbox_picker::toggle(index, None);
     }
     /// Starts a screenshot on the focused monitor, with a digit on each of its
     /// workspace's visible windows.

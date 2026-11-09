@@ -297,7 +297,7 @@ impl WindowMenuApp {
         if menu.has_header() {
             rows += 1;
         }
-        let preview = if menu.picker().preview_visible() {
+        let preview = if menu.picker().preview_visible() || menu.sized_with_preview() {
             self.preview_rows as f32 * row + 15.0
         } else {
             0.0
