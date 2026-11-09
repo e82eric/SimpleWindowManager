@@ -1,45 +1,17 @@
-//! Persistent egui/OpenGL state for the Win32 bars. All access is on the window
-//! thread.
-use super::bar::{BarSnapshot, paint_bar};
+//! The egui/OpenGL renderer each Win32 bar keeps in its `bar::BarState`. All access
+//! is on the window thread.
+use super::bar::{BarAction, BarSnapshot, paint_bar};
 use glow::HasContext;
 use nfm_egui::{
     egui,
     renderer::{Renderer, glow},
 };
-use std::{cell::RefCell, collections::HashMap, ffi::CString, sync::Arc};
+use std::{ffi::CString, sync::Arc};
 use windows_sys::Win32::{
     Foundation::{FreeLibrary, HMODULE, HWND},
     Graphics::{Gdi::*, OpenGL::*},
     System::LibraryLoader::{GetProcAddress, LOAD_LIBRARY_SEARCH_SYSTEM32, LoadLibraryExW},
 };
-
-thread_local! {
-    static RENDERERS: RefCell<HashMap<isize, BarRenderer>> = RefCell::new(HashMap::new());
-}
-
-pub(crate) fn attach(hwnd: HWND) -> Result<(), String> {
-    let renderer = BarRenderer::new(hwnd)?;
-    RENDERERS.with(|renderers| renderers.borrow_mut().insert(hwnd as isize, renderer));
-    Ok(())
-}
-
-pub(crate) fn detach(hwnd: HWND) {
-    let renderer = RENDERERS.with(|renderers| renderers.borrow_mut().remove(&(hwnd as isize)));
-    drop(renderer);
-}
-
-pub(super) fn paint(hwnd: HWND, size: [u32; 2], snapshot: &BarSnapshot) -> Result<(), String> {
-    // Do not retain a RefCell borrow across native calls that could dispatch messages.
-    let mut renderer = RENDERERS.with(|renderers| renderers.borrow_mut().remove(&(hwnd as isize)));
-    let result = match renderer.as_mut() {
-        Some(renderer) => renderer.paint(size, snapshot, true),
-        None => Ok(()), // WM_PAINT can arrive before initialization completes.
-    };
-    if let Some(renderer) = renderer {
-        RENDERERS.with(|renderers| renderers.borrow_mut().insert(hwnd as isize, renderer));
-    }
-    result
-}
 
 fn win_error(operation: &str) -> String {
     format!("{operation}: Win32 error {}", unsafe {
@@ -72,7 +44,47 @@ impl Drop for CurrentContext {
     }
 }
 
-struct BarRenderer {
+/// What a bar frame asks of its window.
+pub(crate) struct BarFrame {
+    /// What its clicks asked for, to run once painting is over.
+    pub(crate) actions: Vec<BarAction>,
+    /// The cursor to show over the bar.
+    pub(crate) cursor: egui::CursorIcon,
+    /// Whether egui wants another frame at once.
+    pub(crate) repaint: bool,
+}
+
+/// An egui context for a bar. Its targets take exactly their own pixels: egui's
+/// default reach past a widget's edge, meant for touch, would let a click between
+/// the launcher and the workspaces land on one of them.
+pub(crate) fn bar_context() -> egui::Context {
+    let ctx = egui::Context::default();
+    ctx.all_styles_mut(|style| style.interaction.interact_radius = 0.0);
+    ctx
+}
+
+/// egui input for a bar frame of `size` at `time`, with mouse `events`. Bar pixels
+/// are egui points, one to one, so the layout constants and window message
+/// positions hold at every monitor DPI. The bar never takes focus.
+pub(crate) fn bar_input(size: [u32; 2], time: f64, events: Vec<egui::Event>) -> egui::RawInput {
+    let mut input = egui::RawInput {
+        time: Some(time),
+        screen_rect: Some(egui::Rect::from_min_size(
+            egui::Pos2::ZERO,
+            egui::vec2(size[0] as f32, size[1] as f32),
+        )),
+        focused: false,
+        events,
+        ..Default::default()
+    };
+    let viewport = input.viewports.get_mut(&egui::ViewportId::ROOT).unwrap();
+    viewport.native_pixels_per_point = Some(1.0);
+    viewport.focused = Some(false);
+    input
+}
+
+/// One bar's egui context and its OpenGL context on the bar's window.
+pub(crate) struct BarRenderer {
     hwnd: HWND,
     dc: HDC,
     rc: HGLRC,
@@ -84,7 +96,7 @@ struct BarRenderer {
     start: std::time::Instant,
 }
 impl BarRenderer {
-    fn new(hwnd: HWND) -> Result<Self, String> {
+    pub(crate) fn new(hwnd: HWND) -> Result<Self, String> {
         let _previous = CurrentContext::capture();
         let mut this = Self {
             hwnd,
@@ -93,7 +105,7 @@ impl BarRenderer {
             module: std::ptr::null_mut(),
             gl: None,
             renderer: None,
-            ctx: egui::Context::default(),
+            ctx: bar_context(),
             font_name: None,
             start: std::time::Instant::now(),
         };
@@ -170,34 +182,39 @@ impl BarRenderer {
         Ok(this)
     }
 
-    fn paint(
+    /// Runs a frame of `snapshot` with the mouse `events` since the last one;
+    /// `None` when there was nothing to paint.
+    pub(crate) fn paint(
         &mut self,
         size: [u32; 2],
         snapshot: &BarSnapshot,
+        events: Vec<egui::Event>,
+        open_mailbox: Option<usize>,
         present: bool,
-    ) -> Result<(), String> {
-        self.render_frame(
-            size,
-            &snapshot.font_name,
-            Vec::new(),
-            false,
-            present,
-            |ui| paint_bar(ui, size, snapshot),
-        )
-        .map(|_| ())
+    ) -> Result<Option<BarFrame>, String> {
+        let mut actions = Vec::new();
+        let frame = self.render_frame(size, &snapshot.font_name, events, present, |ui| {
+            actions = paint_bar(ui, size, snapshot, open_mailbox)
+        })?;
+        Ok(frame.map(|(repaint, cursor)| BarFrame {
+            actions,
+            cursor,
+            repaint,
+        }))
     }
 
+    /// Runs and draws a frame of `run`; whether egui wants another frame at once
+    /// and the cursor it asked for, or `None` when there was nothing to paint.
     fn render_frame(
         &mut self,
         size: [u32; 2],
         font_name: &str,
         events: Vec<egui::Event>,
-        focused: bool,
         present: bool,
         run: impl FnMut(&mut egui::Ui),
-    ) -> Result<bool, String> {
+    ) -> Result<Option<(bool, egui::CursorIcon)>, String> {
         if size.contains(&0) {
-            return Ok(false);
+            return Ok(None);
         }
         let _previous = CurrentContext::capture();
         if unsafe { wglMakeCurrent(self.dc, self.rc) } == 0 {
@@ -207,26 +224,13 @@ impl BarRenderer {
             self.ctx.set_fonts(bar_fonts(font_name));
             self.font_name = Some(font_name.to_owned());
         }
-        // Existing bar height, layout constants and click hit tests are physical pixels.
-        // A one-to-one coordinate system preserves them at every monitor DPI.
-        let mut input = egui::RawInput {
-            time: Some(self.start.elapsed().as_secs_f64()),
-            screen_rect: Some(egui::Rect::from_min_size(
-                egui::Pos2::ZERO,
-                egui::vec2(size[0] as f32, size[1] as f32),
-            )),
-            focused,
-            events,
-            ..Default::default()
-        };
-        let viewport = input.viewports.get_mut(&egui::ViewportId::ROOT).unwrap();
-        viewport.native_pixels_per_point = Some(1.0);
-        viewport.focused = Some(focused);
+        let input = bar_input(size, self.start.elapsed().as_secs_f64(), events);
         let mut output = self.ctx.run_ui(input, run);
         let again = output
             .viewport_output
             .get(&egui::ViewportId::ROOT)
             .is_some_and(|viewport| viewport.repaint_delay.is_zero());
+        let cursor = output.platform_output.cursor_icon;
         let gl = self.gl.as_ref().unwrap();
         unsafe {
             gl.disable(glow::SCISSOR_TEST);
@@ -245,7 +249,7 @@ impl BarRenderer {
         if present && unsafe { SwapBuffers(self.dc) } == 0 {
             return Err(win_error("SwapBuffers(bar)"));
         }
-        Ok(again)
+        Ok(Some((again, cursor)))
     }
 }
 impl Drop for BarRenderer {
@@ -372,9 +376,9 @@ pub(crate) mod tests {
     use super::*;
     use windows_sys::Win32::{System::LibraryLoader::GetModuleHandleW, UI::WindowsAndMessaging::*};
 
-    struct TestWindow(HWND);
+    pub(crate) struct TestWindow(pub(crate) HWND);
     impl TestWindow {
-        fn new() -> Self {
+        pub(crate) fn new() -> Self {
             unsafe {
                 let class: Vec<u16> = "SWM.EguiBarTest\0".encode_utf16().collect();
                 let instance = GetModuleHandleW(std::ptr::null());
@@ -463,6 +467,20 @@ pub(crate) mod tests {
         }
     }
 
+    /// Runs a frame of `snapshot` that is not shown, with `events`.
+    fn frame(
+        renderer: &mut BarRenderer,
+        size: [u32; 2],
+        snapshot: &BarSnapshot,
+        events: Vec<egui::Event>,
+        open_mailbox: Option<usize>,
+    ) -> BarFrame {
+        renderer
+            .paint(size, snapshot, events, open_mailbox, false)
+            .unwrap()
+            .expect("the bar painted")
+    }
+
     fn pixels(renderer: &BarRenderer, size: [u32; 2]) -> Vec<u8> {
         let _previous = CurrentContext::capture();
         unsafe {
@@ -528,21 +546,57 @@ pub(crate) mod tests {
                 entries: Vec::new(),
             })
         };
-        let clickable = |monitor| {
-            (0..size[0] as i32)
-                .filter(|&x| crate::bar::mailbox_at_x(monitor, x).is_some())
-                .collect::<Vec<_>>()
-        };
         snapshot.mailboxes = vec![(mailbox.clone(), counts(2, 1, 3))];
-        renderer.paint(size, &snapshot, false).unwrap();
-        let region = clickable(snapshot.monitor_index);
-        assert!(!region.is_empty(), "no clickable mailbox");
+        // A key binding finds the mailbox where the frame put it.
+        let actions = frame(&mut renderer, size, &snapshot, Vec::new(), Some(0)).actions;
+        let [
+            BarAction::ToggleMailbox {
+                index: 0,
+                span: Some((left, right)),
+            },
+        ] = actions[..]
+        else {
+            panic!("the key binding did not open the mailbox: {actions:?}");
+        };
         assert!(
-            *region.last().unwrap() < 1500,
-            "the mailbox overlaps the status segments: {:?}",
-            (region.first(), region.last())
+            right < 1500.0,
+            "the mailbox overlaps the status segments: {left}..{right}"
         );
-        // A missing glyph would render as a box rather than the state symbol.
+        let plain = pixels(&renderer, size);
+        // Pointing at it lights it, with a hand cursor; pressing it opens it.
+        let at = egui::pos2((left + right) / 2.0, 10.0);
+        let hovered = frame(
+            &mut renderer,
+            size,
+            &snapshot,
+            vec![egui::Event::PointerMoved(at)],
+            None,
+        );
+        assert!(hovered.actions.is_empty());
+        assert_eq!(hovered.cursor, egui::CursorIcon::PointingHand);
+        assert_ne!(
+            pixels(&renderer, size),
+            plain,
+            "a hovered mailbox looks the same"
+        );
+        let press = egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed: true,
+            modifiers: Default::default(),
+        };
+        assert_eq!(
+            frame(&mut renderer, size, &snapshot, vec![press], None).actions,
+            [BarAction::ToggleMailbox {
+                index: 0,
+                span: Some((left, right)),
+            }]
+        );
+        // Input can ask for one more frame, but a quiet bar settles rather than
+        // repainting without end.
+        frame(&mut renderer, size, &snapshot, Vec::new(), None);
+        assert!(!frame(&mut renderer, size, &snapshot, Vec::new(), None).repaint);
+        // A font missing a glyph would draw a box rather than the state symbol.
         let font = egui::FontId::new(12.0, egui::FontFamily::Name("bar".into()));
         for glyph in ['●', '✓'] {
             assert!(
@@ -552,11 +606,14 @@ pub(crate) mod tests {
                 "bar fonts lack {glyph:?}"
             );
         }
+        // An empty mailbox has no region, so its picker opens at the bar's end.
         snapshot.mailboxes = vec![(mailbox, counts(0, 0, 0))];
-        renderer.paint(size, &snapshot, false).unwrap();
-        assert!(
-            clickable(snapshot.monitor_index).is_empty(),
-            "an empty mailbox left a region"
+        assert_eq!(
+            frame(&mut renderer, size, &snapshot, Vec::new(), Some(0)).actions,
+            [BarAction::ToggleMailbox {
+                index: 0,
+                span: None
+            }]
         );
     }
 
@@ -574,7 +631,9 @@ pub(crate) mod tests {
         let foreground = unsafe { GetForegroundWindow() };
         let mut snapshot = snapshot();
         let size = [1600, 29];
-        second.paint(size, &snapshot, false).unwrap();
+        second
+            .paint(size, &snapshot, Vec::new(), None, false)
+            .unwrap();
         assert_eq!(unsafe { wglGetCurrentContext() }, first.rc);
         let rendered = pixels(&second, size);
         assert!(
@@ -629,7 +688,9 @@ pub(crate) mod tests {
             // The same bar on a monitor that isn't focused, beside it.
             let mut unfocused = snapshot.clone();
             unfocused.selected_monitor = false;
-            second.paint(size, &unfocused, false).unwrap();
+            second
+                .paint(size, &unfocused, Vec::new(), None, false)
+                .unwrap();
             write(
                 &path.with_extension("unfocused.bmp"),
                 &pixels(&second, size),
@@ -638,27 +699,22 @@ pub(crate) mod tests {
         snapshot.selected_monitor = false;
         snapshot.focused_window = "Long title ".repeat(200);
         snapshot.font_name = "Consolas".into();
-        second.paint([800, 29], &snapshot, true).unwrap();
+        second
+            .paint([800, 29], &snapshot, Vec::new(), None, true)
+            .unwrap();
         assert_eq!(unsafe { GetForegroundWindow() }, foreground);
         drop(second);
         assert_eq!(unsafe { wglGetCurrentContext() }, first.rc);
-        first.paint([1600, 40], &snapshot, false).unwrap();
+        first
+            .paint([1600, 40], &snapshot, Vec::new(), None, false)
+            .unwrap();
         drop(first);
         assert!(unsafe { wglGetCurrentContext() }.is_null());
         // A fresh window/context exercises shutdown followed by recreation.
         let third_window = TestWindow::new();
         let mut third = BarRenderer::new(third_window.0).unwrap();
-        third.paint([1600, 40], &snapshot, true).unwrap();
-    }
-
-    #[test]
-    fn bar_window_renderer_registry_detaches_cleanly() {
-        let window = TestWindow::new();
-        attach(window.0).unwrap();
-        paint(window.0, [1600, 40], &snapshot()).unwrap();
-        RENDERERS.with(|renderers| assert_eq!(renderers.borrow().len(), 1));
-        detach(window.0);
-        RENDERERS.with(|renderers| assert!(renderers.borrow().is_empty()));
-        assert!(unsafe { wglGetCurrentContext() }.is_null());
+        third
+            .paint([1600, 40], &snapshot, Vec::new(), None, true)
+            .unwrap();
     }
 }

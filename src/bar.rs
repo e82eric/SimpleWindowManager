@@ -82,6 +82,7 @@ unsafe extern "system" fn bar_message_loop(
     use std::mem::zeroed;
     use windows_sys::Win32::Foundation::RECT;
     use windows_sys::Win32::Graphics::Gdi::{BeginPaint, EndPaint, InvalidateRect, PAINTSTRUCT};
+    use windows_sys::Win32::UI::Controls::WM_MOUSELEAVE;
     use windows_sys::Win32::UI::WindowsAndMessaging::*;
     let span = matches!(
         message,
@@ -114,17 +115,7 @@ unsafe extern "system" fn bar_message_loop(
             1
         }
         WM_PAINT => {
-            unsafe { windows_sys::Win32::Foundation::SetLastError(0) };
-            let userdata = unsafe { GetWindowLongPtrW(hwnd, GWLP_USERDATA) };
-            let userdata_error = unsafe { windows_sys::Win32::Foundation::GetLastError() };
-            if userdata == 0 && userdata_error != 0 {
-                crate::error_log::report_win32(
-                    "GetWindowLongPtrW(bar userdata) failed",
-                    userdata_error,
-                );
-            }
-            let monitor = (userdata as usize).saturating_sub(1);
-            let Some(snapshot) = crate::platform::bar_snapshot(monitor) else {
+            let Some(snapshot) = crate::platform::bar_snapshot(bar_monitor(hwnd)) else {
                 return unsafe { DefWindowProcW(hwnd, message, wparam, lparam) };
             };
             let mut paint: PAINTSTRUCT = unsafe { zeroed() };
@@ -141,13 +132,11 @@ unsafe extern "system" fn bar_message_loop(
                 unsafe { EndPaint(hwnd, &paint) };
                 return 0;
             }
-            if let Err(error) = crate::bar_renderer::paint(
+            let actions = paint_window(
                 hwnd,
                 [client.right.max(0) as u32, client.bottom.max(0) as u32],
                 &snapshot,
-            ) {
-                crate::error_log::report("egui bar paint", error);
-            }
+            );
             // Repaint quickly only while a mailbox shows an animated state.
             if snapshot
                 .mailboxes
@@ -160,6 +149,9 @@ unsafe extern "system" fn bar_message_loop(
             }
             // EndPaint is documented to always return nonzero.
             unsafe { EndPaint(hwnd, &paint) };
+            // Clicks open pickers and switch workspaces, which create windows and
+            // send messages: only once painting is over.
+            run_actions(hwnd, actions);
             0
         }
         WM_TIMER => {
@@ -177,31 +169,20 @@ unsafe extern "system" fn bar_message_loop(
             0
         }
         WM_NCDESTROY => {
-            crate::bar_renderer::detach(hwnd);
+            detach(hwnd);
             unsafe { DefWindowProcW(hwnd, message, wparam, lparam) }
         }
-        WM_LBUTTONDOWN => {
-            unsafe { windows_sys::Win32::Foundation::SetLastError(0) };
-            let userdata = unsafe { GetWindowLongPtrW(hwnd, GWLP_USERDATA) };
-            let userdata_error = unsafe { windows_sys::Win32::Foundation::GetLastError() };
-            if userdata == 0 && userdata_error != 0 {
-                crate::error_log::report_win32(
-                    "GetWindowLongPtrW(bar userdata) failed",
-                    userdata_error,
-                );
-            }
-            let monitor = (userdata as usize).saturating_sub(1);
-            let x = lparam as i16 as i32;
-            if launcher_at_x(x) {
-                toggle_launcher(hwnd);
-            } else if let Some(snapshot) = crate::platform::bar_snapshot(monitor) {
-                if let Some((_, _, index)) = mailbox_at_x(snapshot.monitor_index, x) {
-                    toggle_mailbox(hwnd, snapshot.monitor_index, index);
-                } else if let Some(workspace) = workspace_at_x(&snapshot, x) {
-                    crate::platform::bar_workspace_clicked(monitor, workspace);
-                }
-            }
+        WM_MOUSEMOVE | WM_LBUTTONDOWN | WM_LBUTTONUP => {
+            pointer_input(hwnd, message, lparam);
             0
+        }
+        WM_MOUSELEAVE => {
+            pointer_left(hwnd);
+            0
+        }
+        WM_SETCURSOR if (lparam & 0xffff) as u32 == HTCLIENT => {
+            set_cursor(with_bar(hwnd, |bar| bar.cursor).unwrap_or_default());
+            1
         }
         WM_RBUTTONDOWN => {
             crate::platform::bar_commands_clicked();
@@ -223,72 +204,302 @@ unsafe extern "system" fn bar_message_loop(
     }
 }
 
+/// The monitor index `hwnd`'s bar was created for.
+fn bar_monitor(hwnd: windows_sys::Win32::Foundation::HWND) -> usize {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{GWLP_USERDATA, GetWindowLongPtrW};
+    unsafe { windows_sys::Win32::Foundation::SetLastError(0) };
+    let userdata = unsafe { GetWindowLongPtrW(hwnd, GWLP_USERDATA) };
+    let userdata_error = unsafe { windows_sys::Win32::Foundation::GetLastError() };
+    if userdata == 0 && userdata_error != 0 {
+        crate::error_log::report_win32("GetWindowLongPtrW(bar userdata) failed", userdata_error);
+    }
+    (userdata as usize).saturating_sub(1)
+}
+
+/// What a click on the bar asks for. A frame only records these; they run after
+/// painting, since they create windows and send messages.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum BarAction {
+    /// Open or close the commands launcher below its button, whose edges these
+    /// are in bar pixels.
+    ToggleLauncher { left: f32, right: f32 },
+    /// Open or close mailbox `index`'s picker below its region's edges, or at the
+    /// bar's right end while the mailbox shows nothing.
+    ToggleMailbox {
+        index: usize,
+        span: Option<(f32, f32)>,
+    },
+    /// Switch this monitor to the workspace with this id.
+    Workspace(usize),
+}
+
+/// A bar window's own state, from `attach` until its `WM_NCDESTROY`.
+pub(crate) struct BarState {
+    /// Taken out while it paints, so no borrow of `BARS` is held across the
+    /// native calls painting makes.
+    renderer: Option<crate::bar_renderer::BarRenderer>,
+    /// Mouse input for the next frame.
+    events: Vec<egui::Event>,
+    /// A mailbox for the next frame to open, asked for by a key binding.
+    open_mailbox: Option<usize>,
+    /// Whether the bar has asked for `WM_MOUSELEAVE`, which it does as the cursor
+    /// arrives.
+    tracking_leave: bool,
+    /// The cursor the last frame asked for.
+    cursor: egui::CursorIcon,
+}
+
+thread_local! {
+    /// Each bar's state, by its window handle. Bars and their messages all run on
+    /// the UI thread.
+    static BARS: std::cell::RefCell<std::collections::HashMap<isize, BarState>> =
+        Default::default();
+}
+
+/// Runs `f` on `hwnd`'s state; `None` before `attach` or after `detach`. `f` must
+/// not make calls that can dispatch window messages.
+fn with_bar<R>(
+    hwnd: windows_sys::Win32::Foundation::HWND,
+    f: impl FnOnce(&mut BarState) -> R,
+) -> Option<R> {
+    BARS.with(|bars| bars.borrow_mut().get_mut(&(hwnd as isize)).map(f))
+}
+
+/// Gives the new bar `hwnd` its state and renderer.
+pub(crate) fn attach(hwnd: windows_sys::Win32::Foundation::HWND) -> Result<(), String> {
+    let renderer = crate::bar_renderer::BarRenderer::new(hwnd)?;
+    let state = BarState {
+        renderer: Some(renderer),
+        events: Vec::new(),
+        open_mailbox: None,
+        tracking_leave: false,
+        cursor: egui::CursorIcon::Default,
+    };
+    BARS.with(|bars| bars.borrow_mut().insert(hwnd as isize, state));
+    Ok(())
+}
+
+/// Drops `hwnd`'s state and renderer, as the window is destroyed.
+pub(crate) fn detach(hwnd: windows_sys::Win32::Foundation::HWND) {
+    // Dropped after the borrow ends: releasing the renderer makes native calls.
+    let state = BARS.with(|bars| bars.borrow_mut().remove(&(hwnd as isize)));
+    drop(state);
+}
+
+/// Runs a frame of `hwnd` for `snapshot`, with the input since the last one, and
+/// returns what its clicks asked for.
+fn paint_window(
+    hwnd: windows_sys::Win32::Foundation::HWND,
+    size: [u32; 2],
+    snapshot: &BarSnapshot,
+) -> Vec<BarAction> {
+    let Some((Some(mut renderer), events, open_mailbox)) = with_bar(hwnd, |bar| {
+        (
+            bar.renderer.take(),
+            std::mem::take(&mut bar.events),
+            bar.open_mailbox.take(),
+        )
+    }) else {
+        // WM_PAINT can arrive before `attach`, or while a paint is under way.
+        return Vec::new();
+    };
+    let frame = renderer.paint(size, snapshot, events, open_mailbox, true);
+    // If the window was destroyed while painting, the renderer drops here.
+    let over_bar = with_bar(hwnd, |bar| {
+        bar.renderer = Some(renderer);
+        if let Ok(Some(frame)) = &frame {
+            bar.cursor = frame.cursor;
+        }
+        bar.tracking_leave
+    });
+    match frame {
+        Ok(Some(frame)) => {
+            // WM_SETCURSOR came before the move this frame saw; show its answer now.
+            if over_bar == Some(true) {
+                set_cursor(frame.cursor);
+            }
+            if frame.repaint {
+                invalidate(hwnd);
+            }
+            frame.actions
+        }
+        // A frame that did not run still answers a key binding's mailbox.
+        Ok(None) => open_mailbox
+            .map(|index| BarAction::ToggleMailbox { index, span: None })
+            .into_iter()
+            .collect(),
+        Err(error) => {
+            crate::error_log::report("egui bar paint", error);
+            Vec::new()
+        }
+    }
+}
+
+/// Runs a frame's `actions` for the bar `hwnd`.
+fn run_actions(hwnd: windows_sys::Win32::Foundation::HWND, actions: Vec<BarAction>) {
+    for action in actions {
+        match action {
+            BarAction::ToggleLauncher { left, right } => {
+                if let Some(bar) = window_rect(hwnd) {
+                    crate::egui_command_menu::toggle_launcher(anchor(
+                        &bar,
+                        bar.left + left as i32,
+                        bar.left + right as i32,
+                    ));
+                }
+            }
+            BarAction::ToggleMailbox { index, span } => {
+                if let Some(bar) = window_rect(hwnd) {
+                    let (left, right) = span.map_or((bar.right, bar.right), |(left, right)| {
+                        (bar.left + left as i32, bar.left + right as i32)
+                    });
+                    crate::mailbox_picker::toggle(index, anchor(&bar, left, right));
+                }
+            }
+            BarAction::Workspace(workspace) => {
+                crate::platform::bar_workspace_clicked(bar_monitor(hwnd), workspace)
+            }
+        }
+    }
+}
+
+/// Queues a mouse move, or a left press or release, for `hwnd`'s next frame.
+fn pointer_input(hwnd: windows_sys::Win32::Foundation::HWND, message: u32, lparam: isize) {
+    use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
+        ReleaseCapture, SetCapture, TME_LEAVE, TRACKMOUSEEVENT, TrackMouseEvent,
+    };
+    use windows_sys::Win32::UI::WindowsAndMessaging::{WM_LBUTTONDOWN, WM_MOUSEMOVE};
+    let pos = pixel(lparam as i16 as i32, (lparam >> 16) as i16 as i32);
+    let Some(arriving) = with_bar(hwnd, |bar| {
+        bar.events.push(egui::Event::PointerMoved(pos));
+        if message != WM_MOUSEMOVE {
+            bar.events.push(egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed: message == WM_LBUTTONDOWN,
+                modifiers: egui::Modifiers::default(),
+            });
+        }
+        !std::mem::replace(&mut bar.tracking_leave, true)
+    }) else {
+        return;
+    };
+    if arriving {
+        let mut track = TRACKMOUSEEVENT {
+            cbSize: size_of::<TRACKMOUSEEVENT>() as u32,
+            dwFlags: TME_LEAVE,
+            hwndTrack: hwnd,
+            dwHoverTime: 0,
+        };
+        if unsafe { TrackMouseEvent(&mut track) } == 0 {
+            crate::error_log::last_win32("TrackMouseEvent(bar) failed");
+        }
+    }
+    if message == WM_MOUSEMOVE {
+        invalidate(hwnd);
+    } else {
+        // Capture keeps the release with the bar, so egui never sees a button
+        // stuck down, even when the press opened a picker under the cursor.
+        if message == WM_LBUTTONDOWN {
+            unsafe { SetCapture(hwnd) };
+        } else {
+            unsafe { ReleaseCapture() };
+        }
+        // A click acts now rather than whenever the bar next paints.
+        repaint_now(hwnd);
+    }
+}
+
+/// The egui position of the bar's pixel (`x`, `y`) from a window message: its
+/// center, since the pixel covers `x` to `x + 1`. egui rects include their right
+/// edge, so this keeps each pixel in exactly one target. Bar pixels are egui
+/// points, one to one; see `bar_renderer::bar_input`.
+fn pixel(x: i32, y: i32) -> egui::Pos2 {
+    egui::pos2(x as f32 + 0.5, y as f32 + 0.5)
+}
+
+/// Tells `hwnd`'s next frame that the cursor left it.
+fn pointer_left(hwnd: windows_sys::Win32::Foundation::HWND) {
+    let left = with_bar(hwnd, |bar| {
+        bar.tracking_leave = false;
+        bar.events.push(egui::Event::PointerGone);
+    });
+    if left.is_some() {
+        invalidate(hwnd);
+    }
+}
+
+/// Opens or closes the picker of mailbox `index` below the bar `hwnd`: under the
+/// mailbox's region, or at the bar's right end while the mailbox shows nothing.
+pub(crate) fn toggle_mailbox(hwnd: windows_sys::Win32::Foundation::HWND, index: usize) {
+    // The frame knows where the mailbox is, so it opens the picker.
+    if with_bar(hwnd, |bar| bar.open_mailbox = Some(index)).is_none() {
+        return;
+    }
+    repaint_now(hwnd);
+    // A bar that did not paint, such as a hidden one, still opens the picker.
+    if let Some(Some(index)) = with_bar(hwnd, |bar| bar.open_mailbox.take()) {
+        run_actions(hwnd, vec![BarAction::ToggleMailbox { index, span: None }]);
+    }
+}
+
+/// Asks for a repaint of `hwnd` whenever it next paints.
+fn invalidate(hwnd: windows_sys::Win32::Foundation::HWND) {
+    if unsafe { windows_sys::Win32::Graphics::Gdi::InvalidateRect(hwnd, std::ptr::null(), 0) } == 0
+    {
+        crate::error_log::last_win32("InvalidateRect(bar) failed");
+    }
+}
+
+/// Repaints `hwnd`, and runs what that frame asks for, before returning.
+fn repaint_now(hwnd: windows_sys::Win32::Foundation::HWND) {
+    invalidate(hwnd);
+    // Sends WM_PAINT directly; a hidden window has nothing to paint.
+    unsafe { windows_sys::Win32::Graphics::Gdi::UpdateWindow(hwnd) };
+}
+
+/// Shows `cursor`, as a frame asked for it, over the bar.
+fn set_cursor(cursor: egui::CursorIcon) {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        IDC_ARROW, IDC_HAND, LoadCursorW, SetCursor,
+    };
+    let shape = match cursor {
+        egui::CursorIcon::PointingHand => IDC_HAND,
+        _ => IDC_ARROW,
+    };
+    unsafe { SetCursor(LoadCursorW(std::ptr::null_mut(), shape)) };
+}
+
+/// Whether the primary button went down on `response` this frame. The bar acts on
+/// the press, as menus open, rather than on the release.
+fn pressed(response: &egui::Response) -> bool {
+    response.is_pointer_button_down_on()
+        && response.ctx.input(|input| input.pointer.primary_pressed())
+}
+
+/// Makes the bar's full height above and below `region` clickable, so the screen's
+/// edge works too, with a hand cursor over it.
+fn interact(
+    ui: &egui::Ui,
+    region: egui::Rect,
+    id: impl std::hash::Hash + std::fmt::Debug,
+) -> egui::Response {
+    let column = egui::Rect::from_x_y_ranges(region.x_range(), ui.max_rect().y_range());
+    ui.interact(column, egui::Id::new(("bar", id)), egui::Sense::click())
+        .on_hover_cursor(egui::CursorIcon::PointingHand)
+}
+
+/// Lights a hovered region from `draw_region`'s plain background.
+fn draw_region_hover(canvas: &egui::Painter, rect: egui::Rect) {
+    canvas.rect_filled(rect, 8, palette::BAR_HOVER);
+}
+
 /// The bar's regular repaint timer is id 0; this one runs only while animating.
 const ANIMATION_TIMER: usize = 1;
 const ANIMATION_INTERVAL_MS: u32 = 60;
 /// Between a state's icon and its count, and between states.
 const ICON_GAP: f32 = 6.0;
 const STATE_GAP: f32 = 14.0;
-
-/// A bar's mailbox regions from its last paint: (left, right, mailbox index).
-type MailboxRegions = Vec<(f32, f32, usize)>;
-
-thread_local! {
-    /// Each monitor's mailbox regions, for clicks. Painting and clicks both run on
-    /// the bar's thread.
-    static MAILBOX_REGIONS: std::cell::RefCell<std::collections::HashMap<usize, MailboxRegions>> =
-        Default::default();
-}
-
-/// The mailbox under `x` on the bar of `monitor_index`, with its region's edges.
-pub(crate) fn mailbox_at_x(monitor_index: usize, x: i32) -> Option<(f32, f32, usize)> {
-    MAILBOX_REGIONS.with(|all| {
-        all.borrow().get(&monitor_index).and_then(|regions| {
-            regions
-                .iter()
-                .copied()
-                .find(|&(left, right, _)| (left..right).contains(&(x as f32)))
-        })
-    })
-}
-
-/// Opens or closes the picker of mailbox `index` below `hwnd`, the bar of
-/// `monitor_index`: under the mailbox's region, or at the bar's right end while
-/// the mailbox shows nothing.
-pub(crate) fn toggle_mailbox(
-    hwnd: windows_sys::Win32::Foundation::HWND,
-    monitor_index: usize,
-    index: usize,
-) {
-    let region = MAILBOX_REGIONS.with(|all| {
-        all.borrow().get(&monitor_index).and_then(|regions| {
-            regions
-                .iter()
-                .find(|&&(_, _, region)| region == index)
-                .map(|&(left, right, _)| (left, right))
-        })
-    });
-    let Some(bar) = window_rect(hwnd) else {
-        return;
-    };
-    let (left, right) = region.map_or((bar.right, bar.right), |(left, right)| {
-        (bar.left + left as i32, bar.left + right as i32)
-    });
-    crate::mailbox_picker::toggle(index, anchor(&bar, left, right));
-}
-
-/// Opens or closes the commands launcher below its button on `hwnd`.
-pub(crate) fn toggle_launcher(hwnd: windows_sys::Win32::Foundation::HWND) {
-    let Some(bar) = window_rect(hwnd) else {
-        return;
-    };
-    let (left, right) = LAUNCHER;
-    crate::egui_command_menu::toggle_launcher(anchor(
-        &bar,
-        bar.left + left as i32,
-        bar.left + right as i32,
-    ));
-}
 
 fn window_rect(
     hwnd: windows_sys::Win32::Foundation::HWND,
@@ -315,28 +526,31 @@ fn anchor(
     }
 }
 
-/// Paints `mailbox` at the right of `space`, and returns its region; `None` when no
-/// declared state has a count or there is no room.
+/// Paints mailbox `mailbox_index` at the right of `space`, lit while hovered, and
+/// returns its interaction; `None` when no declared state has a count or there is
+/// no room.
 fn paint_mailbox(
-    canvas: &egui::Painter,
+    ui: &egui::Ui,
     mailbox: &crate::mailbox::BarMailbox,
     state: &crate::mailbox::MailboxState,
+    mailbox_index: usize,
     font: &egui::FontId,
-    seconds: f64,
     shade: Shade,
     space: egui::Rect,
-) -> Option<egui::Rect> {
+) -> Option<egui::Response> {
     use crate::mailbox::Shape;
-    let text_color = shade.content();
+    let canvas = &ui.ctx().layer_painter(egui::LayerId::background());
+    let seconds = ui.input(|input| input.time);
     let visible = mailbox.visible(state);
     if visible.is_empty() {
         return None;
     }
-    let galley = |text: &str, color| canvas.layout_no_wrap(text.to_owned(), font.clone(), color);
-    let header = mailbox
-        .header
-        .as_deref()
-        .map(|header| galley(header, shade.context()));
+    // Laid out uncolored: whether the mailbox is hovered, which sets its colors,
+    // is known only once these widths place it.
+    let galley = |text: &str| {
+        canvas.layout_no_wrap(text.to_owned(), font.clone(), egui::Color32::PLACEHOLDER)
+    };
+    let header = mailbox.header.as_deref().map(galley);
     let parts: Vec<_> = visible
         .iter()
         .map(|(_, style, count)| {
@@ -348,16 +562,11 @@ fn paint_mailbox(
                         Some(crate::mailbox::Animation::Frames { frames, .. }) => frames.iter(),
                         _ => [].iter(),
                     })
-                    .map(|text| galley(text, text_color).size().x)
+                    .map(|text| galley(text).size().x)
                     .fold(0.0, f32::max),
                 Shape::Drawn(_) => font.size,
             });
-            let count = style.show_count.then(|| {
-                galley(
-                    &count.to_string(),
-                    icon.map_or(text_color, |icon| shade.mark(icon.color)),
-                )
-            });
+            let count = style.show_count.then(|| galley(&count.to_string()));
             (icon, icon_width, count)
         })
         .collect();
@@ -382,21 +591,32 @@ fn paint_mailbox(
         egui::pos2(region_left, space.top()),
         egui::pos2(space.right(), space.bottom()),
     );
+    let response = interact(ui, region, ("mailbox", mailbox_index));
+    let hovered = response.hovered();
+    // Hover lights a dimmed mailbox up to full brightness.
+    let shade = if hovered { Shade::Focused } else { shade };
+    let text_color = shade.content();
     draw_region(canvas, region, false, false);
+    if hovered {
+        draw_region_hover(canvas, region);
+    }
     let painter = canvas.with_clip_rect(region);
     let middle = region.center().y;
     let mut x = region.left() + REGION_PADDING;
-    let text = |painter: &egui::Painter, x: &mut f32, galley: std::sync::Arc<egui::Galley>| {
+    let text = |painter: &egui::Painter,
+                x: &mut f32,
+                galley: std::sync::Arc<egui::Galley>,
+                color: egui::Color32| {
         let width = galley.size().x;
         painter.galley(
             egui::pos2(*x, middle - galley.size().y / 2.0),
             galley,
-            text_color,
+            color,
         );
         *x += width;
     };
     if let Some(header) = header {
-        text(&painter, &mut x, header);
+        text(&painter, &mut x, header, shade.context());
         x += ICON_GAP;
     }
     for (index, (icon, icon_width, count)) in parts.into_iter().enumerate() {
@@ -438,10 +658,11 @@ fn paint_mailbox(
             }
         }
         if let Some(count) = count {
-            text(&painter, &mut x, count);
+            let color = icon.map_or(text_color, |icon| shade.mark(icon.color));
+            text(&painter, &mut x, count, color);
         }
     }
-    Some(region)
+    Some(response)
 }
 
 /// Runs a configured shape; one that panics is reported once and then not drawn.
@@ -475,11 +696,6 @@ const TAG_WIDTH: f32 = 42.0;
 const LAUNCHER: (f32, f32) = (BAR_MARGIN, BAR_MARGIN + 44.0);
 const LAUNCHER_GLYPH: &str = "\u{f0c9}";
 
-/// Whether `x` is on the commands launcher's button.
-fn launcher_at_x(x: i32) -> bool {
-    (LAUNCHER.0..LAUNCHER.1).contains(&(x as f32))
-}
-
 fn tag_groups(snapshot: &BarSnapshot) -> Vec<(usize, usize, f32, f32)> {
     if snapshot.tags.is_empty() {
         Vec::new()
@@ -490,20 +706,15 @@ fn tag_groups(snapshot: &BarSnapshot) -> Vec<(usize, usize, f32, f32)> {
     }
 }
 
-fn workspace_at_x(snapshot: &BarSnapshot, x: i32) -> Option<usize> {
-    let x = x as f32;
-    for (start, end, left, right) in tag_groups(snapshot) {
-        if x >= left + REGION_PADDING && x < right - REGION_PADDING {
-            let index = start + ((x - left - REGION_PADDING) / TAG_WIDTH) as usize;
-            if index < end {
-                return Some(snapshot.tags[index].0);
-            }
-        }
-    }
-    None
-}
-
-pub(super) fn paint_bar(ui: &mut egui::Ui, size: [u32; 2], snapshot: &BarSnapshot) {
+/// Paints the bar for `snapshot`, lighting what the pointer is over, and returns
+/// what this frame's clicks, and `open_mailbox` from a key binding, ask for.
+pub(super) fn paint_bar(
+    ui: &mut egui::Ui,
+    size: [u32; 2],
+    snapshot: &BarSnapshot,
+    open_mailbox: Option<usize>,
+) -> Vec<BarAction> {
+    let mut actions = Vec::new();
     use egui::{FontFamily, FontId, Rect, pos2};
     let canvas = ui.ctx().layer_painter(egui::LayerId::background());
     let normal_font = FontId::new(
@@ -519,13 +730,27 @@ pub(super) fn paint_bar(ui: &mut egui::Ui, size: [u32; 2], snapshot: &BarSnapsho
     let bottom = size[1] as f32 - 4.0;
     let shade = Shade::of(snapshot);
     let launcher = rect(LAUNCHER.0, top, LAUNCHER.1, bottom);
+    let response = interact(ui, launcher, "launcher");
+    if pressed(&response) {
+        actions.push(BarAction::ToggleLauncher {
+            left: launcher.left(),
+            right: launcher.right(),
+        });
+    }
     draw_region(&canvas, launcher, false, false);
+    if response.hovered() {
+        draw_region_hover(&canvas, launcher);
+    }
     draw_centered_text(
         &canvas,
         LAUNCHER_GLYPH,
         launcher,
         &icon_font,
-        shade.content(),
+        if response.hovered() {
+            palette::TEXT
+        } else {
+            shade.content()
+        },
     );
     let groups = tag_groups(snapshot);
     for (start, end, left, right) in &groups {
@@ -536,21 +761,31 @@ pub(super) fn paint_bar(ui: &mut egui::Ui, size: [u32; 2], snapshot: &BarSnapsho
             false,
         );
         for index in *start..*end {
-            let (_, tag, selected, has_clients, is_icon) = &snapshot.tags[index];
+            let (workspace, tag, selected, has_clients, is_icon) = &snapshot.tags[index];
             let item_left = *left + REGION_PADDING + (index - *start) as f32 * TAG_WIDTH;
             let item = rect(item_left, top + 3.0, item_left + TAG_WIDTH, bottom - 3.0);
-            if *selected {
-                canvas.rect_filled(
-                    item,
-                    7,
-                    if snapshot.selected_monitor {
-                        palette::BACKGROUND
-                    } else {
-                        palette::INACTIVE
-                    },
-                );
+            let response = interact(ui, item, ("workspace", *workspace));
+            if pressed(&response) {
+                actions.push(BarAction::Workspace(*workspace));
+            }
+            let tag_hovered = response.hovered();
+            let fill = match (*selected, snapshot.selected_monitor, tag_hovered) {
+                (true, true, false) => Some(palette::BACKGROUND),
+                (true, true, true) => Some(palette::BAR_HOVER),
+                (true, false, false) => Some(palette::INACTIVE),
+                (true, false, true) => Some(palette::INACTIVE_HOVER),
+                // A lighter accent keeps the tag's dark text readable.
+                (false, true, true) => Some(palette::ACCENT_HOVER),
+                (false, false, true) => Some(palette::BAR_HOVER),
+                (false, _, false) => None,
+            };
+            if let Some(fill) = fill {
+                canvas.rect_filled(item, 7, fill);
             }
             let color = match (shade, *selected) {
+                // Hover lights a tag on another monitor to full brightness.
+                (Shade::Unfocused | Shade::Dimmed, true) if tag_hovered => palette::TEXT,
+                (Shade::Unfocused | Shade::Dimmed, false) if tag_hovered => palette::MUTED,
                 (Shade::Dimmed, true) => palette::MUTED,
                 (_, true) => palette::TEXT,
                 // On the focused monitor's accent background.
@@ -579,10 +814,7 @@ pub(super) fn paint_bar(ui: &mut egui::Ui, size: [u32; 2], snapshot: &BarSnapsho
             }
         }
     }
-    let mut left = groups
-        .last()
-        .map_or(LAUNCHER.1, |group| group.3)
-        + REGION_GAP;
+    let mut left = groups.last().map_or(LAUNCHER.1, |group| group.3) + REGION_GAP;
     let status = status_pieces(&canvas, &snapshot.segments, &normal_font, &icon_font, shade);
     let status_width = pieces_width(&status) + REGION_PADDING * 2.0;
     let status_left = (size[0] as f32 - BAR_MARGIN - status_width).max(left);
@@ -601,25 +833,31 @@ pub(super) fn paint_bar(ui: &mut egui::Ui, size: [u32; 2], snapshot: &BarSnapsho
     );
     left = info.right() + REGION_GAP;
     let mut available_right = status_left - REGION_GAP;
-    let seconds = ui.input(|input| input.time);
-    let mut regions = Vec::new();
     // The first mailbox added is leftmost, so place them from the right.
     for (index, (mailbox, state)) in snapshot.mailboxes.iter().enumerate().rev() {
-        let Some(region) = paint_mailbox(
-            &canvas,
+        let response = paint_mailbox(
+            ui,
             mailbox,
             state,
+            index,
             &normal_font,
-            seconds,
             shade,
             rect(left, top, available_right, bottom),
-        ) else {
-            continue;
-        };
-        regions.push((region.left(), region.right(), index));
-        available_right = region.left() - REGION_GAP;
+        );
+        let span = response
+            .as_ref()
+            .map(|response| (response.rect.left(), response.rect.right()));
+        if open_mailbox == Some(index) || response.as_ref().is_some_and(pressed) {
+            actions.push(BarAction::ToggleMailbox { index, span });
+        }
+        if let Some((left, _)) = span {
+            available_right = left - REGION_GAP;
+        }
     }
-    MAILBOX_REGIONS.with(|all| all.borrow_mut().insert(snapshot.monitor_index, regions));
+    // A key binding can name a mailbox that does not exist.
+    if let Some(index) = open_mailbox.filter(|&index| index >= snapshot.mailboxes.len()) {
+        actions.push(BarAction::ToggleMailbox { index, span: None });
+    }
     let desired_focus = (text_width(&canvas, &normal_font, &snapshot.focused_window)
         + REGION_PADDING * 2.0)
         .max(240.0);
@@ -654,6 +892,7 @@ pub(super) fn paint_bar(ui: &mut egui::Ui, size: [u32; 2], snapshot: &BarSnapsho
             region,
         );
     }
+    actions
 }
 
 /// How brightly a bar draws, by whether its monitor is focused.
@@ -955,7 +1194,7 @@ pub fn create_bars(
             }
             return Err(error);
         }
-        if let Err(error) = crate::bar_renderer::attach(hwnd) {
+        if let Err(error) = attach(hwnd) {
             crate::error_log::report("egui bar initialization", error);
             unsafe {
                 DestroyWindow(hwnd);
@@ -1275,26 +1514,139 @@ mod tests {
         });
     }
 
-    #[test]
-    fn workspace_hit_targets_use_the_rendered_pixel_layout() {
-        let mut snapshot = crate::bar_renderer::tests::snapshot();
-        snapshot.tags[0].0 = 10;
-        snapshot.tags[1].0 = 20;
-        // The tags follow the launcher's button and a gap: 44 + 12 pixels.
-        assert_eq!(workspace_at_x(&snapshot, 71), None);
-        assert_eq!(workspace_at_x(&snapshot, 72), Some(10));
-        assert_eq!(workspace_at_x(&snapshot, 113), Some(10));
-        assert_eq!(workspace_at_x(&snapshot, 114), Some(20));
-        assert_eq!(workspace_at_x(&snapshot, 198), None);
+    /// A bar run headlessly in egui, for its input.
+    struct Headless {
+        ctx: egui::Context,
+        snapshot: BarSnapshot,
+        time: f64,
+    }
+    impl Headless {
+        const SIZE: [u32; 2] = [1600, 40];
+
+        /// The test snapshot, with workspaces 10 and 20 first, after a first frame:
+        /// egui finds what the pointer is over among the last frame's widgets.
+        fn new() -> Self {
+            let ctx = crate::bar_renderer::bar_context();
+            ctx.set_fonts(crate::bar_renderer::bar_fonts(""));
+            let mut snapshot = crate::bar_renderer::tests::snapshot();
+            snapshot.tags[0].0 = 10;
+            snapshot.tags[1].0 = 20;
+            let mut bar = Self {
+                ctx,
+                snapshot,
+                time: 0.0,
+            };
+            bar.frame(Vec::new());
+            bar
+        }
+
+        /// Runs a frame with `events`: what it asked for and its cursor.
+        fn frame(&mut self, events: Vec<egui::Event>) -> (Vec<BarAction>, egui::CursorIcon) {
+            self.time += 0.1;
+            let input = crate::bar_renderer::bar_input(Self::SIZE, self.time, events);
+            let mut actions = Vec::new();
+            let output = self.ctx.run_ui(input, |ui| {
+                actions = paint_bar(ui, Self::SIZE, &self.snapshot, None)
+            });
+            let cursor = output.platform_output.cursor_icon;
+            output.drop_without_applying_deltas();
+            (actions, cursor)
+        }
+
+        /// Moves the pointer to (`x`, `y`) and presses there: what that asked for.
+        fn press(&mut self, x: i32, y: i32) -> Vec<BarAction> {
+            let pos = pixel(x, y);
+            self.frame(vec![egui::Event::PointerMoved(pos)]);
+            let (actions, _) = self.frame(vec![egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed: true,
+                modifiers: Default::default(),
+            }]);
+            // Released, so the next press starts fresh.
+            self.frame(vec![egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed: false,
+                modifiers: Default::default(),
+            }]);
+            actions
+        }
     }
 
     #[test]
-    fn the_launcher_button_takes_clicks_before_the_workspaces() {
-        let snapshot = crate::bar_renderer::tests::snapshot();
-        assert!(!launcher_at_x(1));
-        assert!(launcher_at_x(2));
-        assert!(launcher_at_x(45));
-        assert!(!launcher_at_x(46));
-        assert_eq!(workspace_at_x(&snapshot, 45), None);
+    fn workspaces_take_clicks_across_their_columns() {
+        let mut bar = Headless::new();
+        let workspace = |id| vec![BarAction::Workspace(id)];
+        // The tags follow the launcher's button and a gap: 44 + 12 pixels, then
+        // the region's padding.
+        assert_eq!(bar.press(71, 20), []);
+        assert_eq!(bar.press(72, 20), workspace(10));
+        assert_eq!(bar.press(113, 20), workspace(10));
+        assert_eq!(bar.press(114, 20), workspace(20));
+        assert_eq!(bar.press(198, 20), []);
+        // The bar's full height counts, up to the screen's edge.
+        assert_eq!(bar.press(90, 0), workspace(10));
+        assert_eq!(bar.press(90, 39), workspace(10));
+    }
+
+    #[test]
+    fn the_launcher_button_takes_clicks() {
+        let mut bar = Headless::new();
+        let launcher = vec![BarAction::ToggleLauncher {
+            left: LAUNCHER.0,
+            right: LAUNCHER.1,
+        }];
+        assert_eq!(bar.press(1, 20), []);
+        assert_eq!(bar.press(2, 20), launcher);
+        assert_eq!(bar.press(45, 0), launcher);
+        assert_eq!(bar.press(46, 20), []);
+    }
+
+    #[test]
+    fn what_takes_clicks_shows_a_hand_and_releases_do_nothing() {
+        let mut bar = Headless::new();
+        let moved = |x| vec![egui::Event::PointerMoved(egui::pos2(x, 20.0))];
+        assert_eq!(bar.frame(moved(20.0)).1, egui::CursorIcon::PointingHand);
+        assert_eq!(bar.frame(moved(90.0)).1, egui::CursorIcon::PointingHand);
+        // The workspace info takes no clicks.
+        assert_eq!(bar.frame(moved(300.0)).1, egui::CursorIcon::Default);
+        let (actions, _) = bar.frame(vec![egui::Event::PointerButton {
+            pos: egui::pos2(20.0, 20.0),
+            button: egui::PointerButton::Primary,
+            pressed: false,
+            modifiers: Default::default(),
+        }]);
+        assert_eq!(actions, []);
+    }
+
+    #[test]
+    fn a_bars_state_lives_from_attach_until_detach() {
+        use windows_sys::Win32::Graphics::OpenGL::wglGetCurrentContext;
+        let window = crate::bar_renderer::tests::TestWindow::new();
+        let count = || BARS.with(|bars| bars.borrow().len());
+        let before = count();
+        attach(window.0).unwrap();
+        with_bar(window.0, |bar| {
+            bar.events
+                .push(egui::Event::PointerMoved(egui::pos2(20.0, 20.0)))
+        })
+        .unwrap();
+        let actions = paint_window(
+            window.0,
+            [1600, 40],
+            &crate::bar_renderer::tests::snapshot(),
+        );
+        assert_eq!(actions, []);
+        assert_eq!(count(), before + 1);
+        with_bar(window.0, |bar| {
+            assert!(bar.renderer.is_some(), "painting put the renderer back");
+            assert!(bar.events.is_empty(), "the frame took the input");
+        })
+        .unwrap();
+        detach(window.0);
+        assert_eq!(count(), before);
+        assert!(with_bar(window.0, |_| ()).is_none());
+        assert!(unsafe { wglGetCurrentContext() }.is_null());
     }
 }

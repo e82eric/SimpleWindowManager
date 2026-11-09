@@ -186,7 +186,7 @@ impl Ui {
             return;
         };
         if let Some(bar) = self.bars.iter().find(|bar| bar.monitor_index == monitor) {
-            crate::bar::toggle_mailbox(bar.hwnd as _, monitor, index);
+            crate::bar::toggle_mailbox(bar.hwnd as _, index);
         }
     }
     /// Starts a screenshot on the focused monitor, with a digit on each of its

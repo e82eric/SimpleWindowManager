@@ -20,3 +20,10 @@ pub const TITLE: Color32 = Color32::from_rgb(0xfb, 0xf1, 0xc7);
 pub const ACCENT: Color32 = Color32::from_rgb(0x83, 0xa5, 0x98);
 pub const WARNING: Color32 = Color32::from_rgb(0xfa, 0xbd, 0x2f);
 pub const CRITICAL: Color32 = Color32::from_rgb(0xfb, 0x49, 0x34);
+/// A hovered region or workspace on the bar: lighter than both a region and the
+/// bar behind it.
+pub const BAR_HOVER: Color32 = Color32::from_rgb(0x50, 0x49, 0x45);
+/// A hovered workspace on the focused monitor's `ACCENT`.
+pub const ACCENT_HOVER: Color32 = Color32::from_rgb(0xa8, 0xc4, 0xb8);
+/// A hovered selected workspace on a monitor that isn't focused.
+pub const INACTIVE_HOVER: Color32 = Color32::from_rgb(0x7c, 0x6f, 0x64);
