@@ -36,10 +36,9 @@ pub(crate) fn open(rgb: Vec<u8>, width: i32, height: i32) {
             };
             // Started as the desktop user, so Paint doesn't inherit SWM's
             // elevation.
-            if let Err(error) = crate::process::start_program_as_explorer_user(
-                EDITOR,
-                &[&path.to_string_lossy()],
-            ) {
+            if let Err(error) =
+                crate::process::start_program_as_explorer_user(EDITOR, &[&path.to_string_lossy()])
+            {
                 error.report();
             }
         });

@@ -1,11 +1,11 @@
 //! Build the small in-memory command list synchronously for each opening.
 use crate::commands::Action;
+use crate::egui_window_menu::{BarAlign, BarAnchor, ScreenBounds};
 use crate::picker::{Outcome, PickerHost, PickerRequest, PickerSource, PickerView};
 use nfm_egui::shared::{self, SharedPicker};
 use nfm_egui::{Appearance, PickerEvent, Placement, egui};
 use nfm_picker_sources::structured::StructuredStreamingSnapshot;
 use nfm_search_core::snapshot_store::SnapshotStore;
-use crate::egui_window_menu::{BarAlign, BarAnchor, ScreenBounds};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -38,7 +38,10 @@ fn columns_source(columns: &[usize], rows: Vec<Vec<String>>) -> Result<Arc<Comma
         })
         .collect::<Result<_, _>>()?;
     nfm_picker_sources::structured::structured_source(
-        columns.iter().map(|&column| COLUMNS[column].to_owned()).collect(),
+        columns
+            .iter()
+            .map(|&column| COLUMNS[column].to_owned())
+            .collect(),
         rows,
     )
 }
@@ -90,7 +93,11 @@ impl PickerSource for Commands {
 }
 impl PickerRequest for CommandList {
     fn build(self: Box<Self>, host: &PickerHost<'_>) -> Result<Box<dyn PickerView>, String> {
-        Ok(Box::new(self.view(host.ctx, host.config(), &[0, 1, 2, 3])?))
+        Ok(Box::new(self.view(
+            host.ctx,
+            host.config(),
+            &[0, 1, 2, 3],
+        )?))
     }
 }
 impl CommandList {
@@ -306,11 +313,8 @@ mod tests {
     #[test]
     fn the_launcher_lists_only_names_and_key_bindings() {
         let row = ["Focus next", "Action", "Alt+J", "Focus the next window"];
-        let source = columns_source(
-            &LAUNCHER_COLUMNS,
-            vec![row.map(str::to_owned).to_vec()],
-        )
-        .unwrap();
+        let source =
+            columns_source(&LAUNCHER_COLUMNS, vec![row.map(str::to_owned).to_vec()]).unwrap();
         let item = source.snapshot().unwrap().item(0).unwrap();
         let mut fields: Vec<_> = item.fields.iter().collect();
         fields.sort();

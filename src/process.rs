@@ -109,8 +109,7 @@ pub fn start_as_explorer_user(path: &str) -> PlatformResult<()> {
 fn windows_directory_file(name: &str) -> PlatformResult<String> {
     use windows_sys::Win32::System::SystemInformation::GetWindowsDirectoryW;
     let mut buffer = [0u16; 260];
-    let length =
-        unsafe { GetWindowsDirectoryW(buffer.as_mut_ptr(), buffer.len() as u32) } as usize;
+    let length = unsafe { GetWindowsDirectoryW(buffer.as_mut_ptr(), buffer.len() as u32) } as usize;
     if length == 0 || length >= buffer.len() {
         return Err(PlatformError::last_win32("GetWindowsDirectoryW"));
     }

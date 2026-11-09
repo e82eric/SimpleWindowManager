@@ -342,10 +342,8 @@ impl Runtime {
     /// Nudge `hwnd` to the foreground and hold out for its activation; see
     /// `foreground_changed`.
     fn focus_window(&mut self, hwnd: isize) {
-        self.expected_foreground = Some((
-            hwnd,
-            std::time::Instant::now() + FOCUS_EXPECTATION_DURATION,
-        ));
+        self.expected_foreground =
+            Some((hwnd, std::time::Instant::now() + FOCUS_EXPECTATION_DURATION));
         nudge_set_foreground_window(hwnd);
     }
 

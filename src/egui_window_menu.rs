@@ -229,7 +229,10 @@ pub(crate) fn below_bar(
         BarAlign::Right => anchor.right + margin_pixels - width,
     };
     ScreenBounds {
-        left: left.clamp(lowest, (anchor.bounds.1 + margin_pixels - width).max(lowest)),
+        left: left.clamp(
+            lowest,
+            (anchor.bounds.1 + margin_pixels - width).max(lowest),
+        ),
         top: anchor.top - margin_pixels,
         width,
         height: (((height_points + 2.0 * margin) * scale).ceil() as i32).max(1),
@@ -303,7 +306,12 @@ impl WindowMenuApp {
     }
     /// Where the active picker's window goes on the monitor `bounds`: where the
     /// view asks, else centered and sized by its rows, or filling the pane.
-    fn window(&self, ctx: &egui::Context, menu: &dyn PickerView, bounds: ScreenBounds) -> ScreenBounds {
+    fn window(
+        &self,
+        ctx: &egui::Context,
+        menu: &dyn PickerView,
+        bounds: ScreenBounds,
+    ) -> ScreenBounds {
         let scale =
             unsafe { windows_sys::Win32::UI::HiDpi::GetDpiForWindow(self.hwnd as _) } as f32 / 96.0;
         menu.window_bounds(ctx, &self.appearance, PICKER_MARGIN, scale)
@@ -520,8 +528,14 @@ mod full_pane_geometry_tests {
             right: 200,
             ..anchor
         };
-        assert_eq!(below_bar(near_left, BarAlign::Right, 800.0, 300.0, 8.0, 1.0).left, -8);
-        assert_eq!(below_bar(near_left, BarAlign::Left, 800.0, 300.0, 8.0, 1.0).left, -6);
+        assert_eq!(
+            below_bar(near_left, BarAlign::Right, 800.0, 300.0, 8.0, 1.0).left,
+            -8
+        );
+        assert_eq!(
+            below_bar(near_left, BarAlign::Left, 800.0, 300.0, 8.0, 1.0).left,
+            -6
+        );
         let near_right = BarAnchor {
             left: 1800,
             right: 1900,
@@ -535,6 +549,9 @@ mod full_pane_geometry_tests {
             top: 30,
             bounds: (0, 300),
         };
-        assert_eq!(below_bar(narrow, BarAlign::Right, 800.0, 300.0, 8.0, 1.0).left, -8);
+        assert_eq!(
+            below_bar(narrow, BarAlign::Right, 800.0, 300.0, 8.0, 1.0).left,
+            -8
+        );
     }
 }
