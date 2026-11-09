@@ -116,7 +116,7 @@ Selection cleanup does not request focus restoration; cancellation does.
 
 For manual validation, temporarily block a test application's UI thread and
 trigger a workspace operation involving it. While the worker is stalled, verify
-that the bar repaints, right-click opens the commands menu, and typing in another
+that the bar repaints, its launcher button opens the commands menu, and typing in another
 responsive application works. After recovery, check workspace changes, dragging,
 empty workspaces, and closing/reopening menus. Also test quitting during the
 stall: shutdown waits at most 500 ms for the worker before allowing process exit.

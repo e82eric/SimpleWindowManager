@@ -86,7 +86,7 @@ unsafe extern "system" fn bar_message_loop(
     use windows_sys::Win32::UI::WindowsAndMessaging::*;
     let span = matches!(
         message,
-        WM_NCCREATE | WM_PAINT | WM_TIMER | WM_LBUTTONDOWN | WM_RBUTTONDOWN | WM_CLOSE | WM_DESTROY
+        WM_NCCREATE | WM_PAINT | WM_TIMER | WM_LBUTTONDOWN | WM_CLOSE | WM_DESTROY
     )
     .then(|| {
         tracing::info_span!(
@@ -183,10 +183,6 @@ unsafe extern "system" fn bar_message_loop(
         WM_SETCURSOR if (lparam & 0xffff) as u32 == HTCLIENT => {
             set_cursor(with_bar(hwnd, |bar| bar.cursor).unwrap_or_default());
             1
-        }
-        WM_RBUTTONDOWN => {
-            crate::platform::bar_commands_clicked();
-            0
         }
         WM_CLOSE => {
             if unsafe { DestroyWindow(hwnd) } == 0 {

@@ -846,11 +846,6 @@ pub(crate) fn bar_snapshot(monitor: usize) -> Option<crate::bar::BarSnapshot> {
 pub(crate) fn bar_workspace_clicked(monitor: usize, workspace: usize) {
     crate::worker::send(crate::worker::Command::Workspace(monitor, workspace));
 }
-pub(crate) fn bar_commands_clicked() {
-    crate::ui::post(crate::ui::Command::Action(
-        crate::commands::Action::ShowPicker(&crate::builtin_pickers::COMMANDS),
-    ));
-}
 unsafe extern "system" fn handle_windows_event(
     _hook: windows_sys::Win32::UI::Accessibility::HWINEVENTHOOK,
     event: u32,
