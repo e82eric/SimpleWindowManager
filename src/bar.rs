@@ -172,8 +172,8 @@ unsafe extern "system" fn bar_message_loop(
             detach(hwnd);
             unsafe { DefWindowProcW(hwnd, message, wparam, lparam) }
         }
-        WM_MOUSEMOVE | WM_LBUTTONDOWN | WM_LBUTTONUP => {
-            pointer_input(hwnd, message, lparam);
+        WM_MOUSEMOVE | WM_LBUTTONDOWN | WM_LBUTTONUP | WM_RBUTTONDOWN | WM_RBUTTONUP => {
+            pointer_input(hwnd, message, wparam, lparam);
             0
         }
         WM_MOUSELEAVE => {
@@ -227,6 +227,9 @@ pub(crate) enum BarAction {
     },
     /// Switch this monitor to the workspace with this id.
     Workspace(usize),
+    /// Close any open picker: a press on the bar that opens none moves on from it.
+    /// It comes before the press's own action.
+    Dismiss,
 }
 
 /// A bar window's own state, from `attach` until its `WM_NCDESTROY`.
@@ -355,24 +358,43 @@ fn run_actions(hwnd: windows_sys::Win32::Foundation::HWND, actions: Vec<BarActio
             BarAction::Workspace(workspace) => {
                 crate::platform::bar_workspace_clicked(bar_monitor(hwnd), workspace)
             }
+            BarAction::Dismiss => {
+                if crate::ui::menu_visible() {
+                    crate::ui::post(crate::ui::Command::Hide);
+                }
+            }
         }
     }
 }
 
-/// Queues a mouse move, or a left press or release, for `hwnd`'s next frame.
-fn pointer_input(hwnd: windows_sys::Win32::Foundation::HWND, message: u32, lparam: isize) {
+/// Queues a mouse move, or a left or right press or release, for `hwnd`'s next
+/// frame. `wparam` holds the buttons down after the message.
+fn pointer_input(
+    hwnd: windows_sys::Win32::Foundation::HWND,
+    message: u32,
+    wparam: usize,
+    lparam: isize,
+) {
+    use windows_sys::Win32::System::SystemServices::{MK_LBUTTON, MK_RBUTTON};
     use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
         ReleaseCapture, SetCapture, TME_LEAVE, TRACKMOUSEEVENT, TrackMouseEvent,
     };
-    use windows_sys::Win32::UI::WindowsAndMessaging::{WM_LBUTTONDOWN, WM_MOUSEMOVE};
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_RBUTTONDOWN,
+    };
     let pos = pixel(lparam as i16 as i32, (lparam >> 16) as i16 as i32);
+    let pressed = matches!(message, WM_LBUTTONDOWN | WM_RBUTTONDOWN);
     let Some(arriving) = with_bar(hwnd, |bar| {
         bar.events.push(egui::Event::PointerMoved(pos));
         if message != WM_MOUSEMOVE {
             bar.events.push(egui::Event::PointerButton {
                 pos,
-                button: egui::PointerButton::Primary,
-                pressed: message == WM_LBUTTONDOWN,
+                button: if matches!(message, WM_LBUTTONDOWN | WM_LBUTTONUP) {
+                    egui::PointerButton::Primary
+                } else {
+                    egui::PointerButton::Secondary
+                },
+                pressed,
                 modifiers: egui::Modifiers::default(),
             });
         }
@@ -396,9 +418,10 @@ fn pointer_input(hwnd: windows_sys::Win32::Foundation::HWND, message: u32, lpara
     } else {
         // Capture keeps the release with the bar, so egui never sees a button
         // stuck down, even when the press opened a picker under the cursor.
-        if message == WM_LBUTTONDOWN {
+        // It lasts until the last button held comes up.
+        if pressed {
             unsafe { SetCapture(hwnd) };
-        } else {
+        } else if wparam as u32 & (MK_LBUTTON | MK_RBUTTON) == 0 {
             unsafe { ReleaseCapture() };
         }
         // A click acts now rather than whenever the bar next paints.
@@ -853,6 +876,19 @@ pub(super) fn paint_bar(
     // A key binding can name a mailbox that does not exist.
     if let Some(index) = open_mailbox.filter(|&index| index >= snapshot.mailboxes.len()) {
         actions.push(BarAction::ToggleMailbox { index, span: None });
+    }
+    // Pressing the bar anywhere else, with either button, closes a picker. The
+    // launcher and mailboxes open or close their own instead.
+    let bar_pressed =
+        ui.input(|input| input.pointer.primary_pressed() || input.pointer.secondary_pressed());
+    let toggles = actions.iter().any(|action| {
+        matches!(
+            action,
+            BarAction::ToggleLauncher { .. } | BarAction::ToggleMailbox { .. }
+        )
+    });
+    if bar_pressed && !toggles {
+        actions.insert(0, BarAction::Dismiss);
     }
     let desired_focus = (text_width(&canvas, &normal_font, &snapshot.focused_window)
         + REGION_PADDING * 2.0)
@@ -1549,20 +1585,26 @@ mod tests {
             (actions, cursor)
         }
 
-        /// Moves the pointer to (`x`, `y`) and presses there: what that asked for.
+        /// Moves the pointer to (`x`, `y`) and left-presses there: what that asked
+        /// for.
         fn press(&mut self, x: i32, y: i32) -> Vec<BarAction> {
+            self.press_with(egui::PointerButton::Primary, x, y)
+        }
+
+        /// Moves the pointer to (`x`, `y`) and presses `button` there.
+        fn press_with(&mut self, button: egui::PointerButton, x: i32, y: i32) -> Vec<BarAction> {
             let pos = pixel(x, y);
             self.frame(vec![egui::Event::PointerMoved(pos)]);
             let (actions, _) = self.frame(vec![egui::Event::PointerButton {
                 pos,
-                button: egui::PointerButton::Primary,
+                button,
                 pressed: true,
                 modifiers: Default::default(),
             }]);
             // Released, so the next press starts fresh.
             self.frame(vec![egui::Event::PointerButton {
                 pos,
-                button: egui::PointerButton::Primary,
+                button,
                 pressed: false,
                 modifiers: Default::default(),
             }]);
@@ -1573,14 +1615,15 @@ mod tests {
     #[test]
     fn workspaces_take_clicks_across_their_columns() {
         let mut bar = Headless::new();
-        let workspace = |id| vec![BarAction::Workspace(id)];
+        let workspace = |id| vec![BarAction::Dismiss, BarAction::Workspace(id)];
+        let elsewhere = vec![BarAction::Dismiss];
         // The tags follow the launcher's button and a gap: 44 + 12 pixels, then
         // the region's padding.
-        assert_eq!(bar.press(71, 20), []);
+        assert_eq!(bar.press(71, 20), elsewhere);
         assert_eq!(bar.press(72, 20), workspace(10));
         assert_eq!(bar.press(113, 20), workspace(10));
         assert_eq!(bar.press(114, 20), workspace(20));
-        assert_eq!(bar.press(198, 20), []);
+        assert_eq!(bar.press(198, 20), elsewhere);
         // The bar's full height counts, up to the screen's edge.
         assert_eq!(bar.press(90, 0), workspace(10));
         assert_eq!(bar.press(90, 39), workspace(10));
@@ -1593,10 +1636,20 @@ mod tests {
             left: LAUNCHER.0,
             right: LAUNCHER.1,
         }];
-        assert_eq!(bar.press(1, 20), []);
+        // Its own button opens or closes the launcher, rather than dismissing it.
+        assert_eq!(bar.press(1, 20), [BarAction::Dismiss]);
         assert_eq!(bar.press(2, 20), launcher);
         assert_eq!(bar.press(45, 0), launcher);
-        assert_eq!(bar.press(46, 20), []);
+        assert_eq!(bar.press(46, 20), [BarAction::Dismiss]);
+    }
+
+    #[test]
+    fn right_presses_only_dismiss() {
+        let mut bar = Headless::new();
+        let right = egui::PointerButton::Secondary;
+        for x in [20, 90, 300] {
+            assert_eq!(bar.press_with(right, x, 20), [BarAction::Dismiss]);
+        }
     }
 
     #[test]

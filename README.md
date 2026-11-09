@@ -256,6 +256,8 @@ shows each declared state with a count as its icon and count, and hides the
 mailbox while every count is zero. Clicking it, or a key bound to
 `Action::ShowMailbox(name)`, opens a drop-down listing the entries; Up/Down or
 j/k select one, and clicking it or pressing Enter is sent back to the producer.
+Clicking the mailbox again closes the drop-down, as does pressing anywhere else
+on the bar, which also does what that press does (such as switching workspace).
 Mailboxes sit left of the status segments, in the order they are added.
 
 A mailbox is declared with a name, a producer and a style per state; declaring a
