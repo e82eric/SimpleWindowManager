@@ -1,14 +1,14 @@
 //! A Claude Code session as a document picker: one row per prompt, newest first,
 //! and the whole conversation in the preview with the assistant's markdown laid
-//! out. The Agents mailbox opens it for the entry pressed; see `ClaudeOptions`.
-use crate::document_picker::{DocumentItem, DocumentPicker};
-use crate::markdown_document::{BOLD, DocumentWriter, FAINT, Theme};
+//! out. A mailbox folder opens it for the entry pressed; see `ClaudeOptions`.
+use crate::document_picker::DocumentPicker;
+use crate::extensions::conversation::Conversation;
+use crate::markdown_document::Theme;
 use nfm_egui::egui::Color32;
-use nfm_egui::styled_document::{DocumentRange, Position, Style};
 use serde_json::Value;
 use std::path::Path;
 
-/// How the Agents mailbox shows a session.
+/// How a session is shown.
 #[derive(Clone, Debug)]
 pub struct ClaudeOptions {
     /// The assistant's markdown.
@@ -41,34 +41,13 @@ pub(super) fn picker(
 ) -> Result<DocumentPicker, String> {
     let text = std::fs::read_to_string(path)
         .map_err(|error| format!("reading {}: {error}", path.display()))?;
-    let (document, mut items) = conversation(&text, options);
-    items.reverse();
-    Ok(DocumentPicker {
-        title,
-        column: "Prompt".into(),
-        document: document.finish(),
-        items,
-        highlight: options.highlight,
-        full_pane: options.full_pane,
-    })
+    Ok(conversation(&text, options).picker(title, options.highlight, options.full_pane))
 }
 
-#[derive(PartialEq)]
-enum Speaker {
-    You,
-    Claude,
-}
-
-/// The conversation in the transcript's lines, and a range per prompt, oldest first.
-/// Subagents' messages, tool results and Claude's own notes are left out.
-fn conversation(transcript: &str, options: &ClaudeOptions) -> (DocumentWriter, Vec<DocumentItem>) {
-    let mut out = DocumentWriter::default();
-    let mut items = Vec::new();
-    let mut last = None;
-    let faint = Style {
-        flags: FAINT,
-        ..Default::default()
-    };
+/// The conversation in the transcript's lines. Subagents' messages, tool results
+/// and Claude's own notes are left out.
+fn conversation(transcript: &str, options: &ClaudeOptions) -> Conversation {
+    let mut out = Conversation::new("Claude", options.claude, options.you, options.theme.clone());
     for line in transcript.lines() {
         let Ok(entry) = serde_json::from_str::<Value>(line) else {
             continue;
@@ -84,79 +63,23 @@ fn conversation(transcript: &str, options: &ClaudeOptions) -> (DocumentWriter, V
                 let from_person = entry["origin"]["kind"]
                     .as_str()
                     .is_none_or(|kind| kind == "human");
-                let Some(prompt) = prompt(content).filter(|_| from_person) else {
-                    continue;
-                };
-                out.blank_line();
-                let start = out.line();
-                speaker(&mut out, "You", options.you);
-                for text in prompt.lines() {
-                    out.line_of(text, Style::default());
+                if let Some(prompt) = prompt(content).filter(|_| from_person) {
+                    out.prompt(&prompt);
                 }
-                items.push(DocumentItem {
-                    label: label(&prompt),
-                    range: DocumentRange {
-                        start: Position {
-                            line: start,
-                            byte: 0,
-                        },
-                        end: Position {
-                            line: out.line() - 1,
-                            byte: out.last_line_len().saturating_sub(1),
-                        },
-                    },
-                });
-                last = Some(Speaker::You);
             }
             Some("assistant") => {
-                let Some(blocks) = content.as_array() else {
-                    continue;
-                };
-                for block in blocks {
-                    let text = block["text"].as_str().filter(|t| !t.trim().is_empty());
-                    let tool =
-                        (block["type"] == "tool_use").then(|| super::sessions::tool_summary(block));
-                    if text.is_none() && tool.is_none() {
-                        continue;
-                    }
-                    if last != Some(Speaker::Claude) {
-                        out.blank_line();
-                        speaker(&mut out, "Claude", options.claude);
-                        last = Some(Speaker::Claude);
-                    }
-                    match (text, tool) {
-                        (Some(text), _) => {
-                            out.markdown(text, &options.theme);
-                        }
-                        (None, Some(tool)) => out.line_of(&format!("→ {tool}"), faint),
-                        (None, None) => {}
+                for block in content.as_array().into_iter().flatten() {
+                    if let Some(text) = block["text"].as_str().filter(|t| !t.trim().is_empty()) {
+                        out.reply(text);
+                    } else if block["type"] == "tool_use" {
+                        out.action(&format!("→ {}", tool_summary(block)));
                     }
                 }
             }
             _ => {}
         }
     }
-    (out, items)
-}
-
-fn speaker(out: &mut DocumentWriter, name: &str, color: Color32) {
-    out.finish_line();
-    out.push(
-        "▍",
-        Style {
-            foreground: Some(color),
-            ..Default::default()
-        },
-    );
-    out.push(
-        name,
-        Style {
-            foreground: Some(color),
-            flags: BOLD,
-            ..Default::default()
-        },
-    );
-    out.end_line();
+    out
 }
 
 /// The text of a prompt the person typed: a string, or text blocks without tool
@@ -199,16 +122,24 @@ fn tagged<'a>(text: &'a str, tag: &str) -> Option<&'a str> {
     Some(text[start..end].trim())
 }
 
-/// A prompt's first line, cut short.
-fn label(prompt: &str) -> String {
-    let line = prompt
-        .lines()
-        .find(|line| !line.trim().is_empty())
-        .unwrap_or_default();
-    match line.char_indices().nth(200) {
-        Some((cut, _)) => format!("{}…", &line[..cut]),
-        None => line.to_owned(),
-    }
+/// A tool call as its name and what it acted on: `Edit src/bar.rs`.
+fn tool_summary(block: &Value) -> String {
+    let name = block["name"].as_str().unwrap_or("Tool");
+    let input = &block["input"];
+    let target = [
+        "file_path",
+        "command",
+        "pattern",
+        "path",
+        "url",
+        "description",
+    ]
+    .iter()
+    .find_map(|key| input[*key].as_str())
+    .unwrap_or_default();
+    // A multi-line command shows its first line.
+    let target = target.lines().next().unwrap_or_default();
+    format!("{name} {target}").trim().to_owned()
 }
 
 #[cfg(test)]
@@ -217,6 +148,20 @@ mod tests {
 
     fn transcript(lines: &[&str]) -> String {
         lines.join("\n")
+    }
+
+    #[test]
+    fn a_tool_call_is_its_name_and_the_first_line_of_what_it_acted_on() {
+        let call = |json: &str| tool_summary(&serde_json::from_str(json).unwrap());
+        assert_eq!(
+            call(r#"{"name":"Edit","input":{"file_path":"src/bar.rs"}}"#),
+            "Edit src/bar.rs"
+        );
+        assert_eq!(
+            call(r#"{"name":"Bash","input":{"command":"cargo test\ncargo fmt"}}"#),
+            "Bash cargo test"
+        );
+        assert_eq!(call(r#"{"input":{}}"#), "Tool");
     }
 
     #[test]
@@ -231,9 +176,10 @@ mod tests {
             r#"{"type":"user","origin":{"kind":"task-notification"},"message":{"content":"<task-notification>done</task-notification>"}}"#,
             r#"{"type":"user","message":{"content":"<command-name>/clear</command-name><command-args></command-args>"}}"#,
         ]);
-        let (out, items) = conversation(&text, &ClaudeOptions::default());
+        let conversation = conversation(&text, &ClaudeOptions::default());
+        let (texts, items) = conversation.written();
         assert_eq!(
-            out.texts(),
+            texts,
             [
                 "▍You",
                 "fix the bar",
@@ -275,12 +221,5 @@ mod tests {
         );
         let blocks = serde_json::json!([{"type":"text","text":"a"},{"type":"text","text":"b"}]);
         assert_eq!(prompt(&blocks), Some("a\nb".into()));
-    }
-
-    #[test]
-    fn labels_are_the_first_line_cut_short() {
-        assert_eq!(label("\n  \nfirst\nsecond"), "first");
-        let long = "x".repeat(250);
-        assert_eq!(label(&long).chars().count(), 201);
     }
 }

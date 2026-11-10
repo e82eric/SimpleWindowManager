@@ -26,13 +26,19 @@ unsafe fn close_service_handle(
 /// Whether `pid` is still the process created at `created` (a FILETIME), so a
 /// recorded pid that Windows has since reused does not count.
 pub fn is_running(pid: u32, created: u64) -> bool {
+    running_since(pid) == Some(created)
+}
+
+/// When the running process `pid` was created (a FILETIME), or `None` if there is
+/// no such process or it has exited.
+pub fn running_since(pid: u32) -> Option<u64> {
     use windows_sys::Win32::Foundation::{FILETIME, STILL_ACTIVE};
     use windows_sys::Win32::System::Threading::{
         GetExitCodeProcess, GetProcessTimes, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
     };
     let process = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) };
     if process.is_null() {
-        return false;
+        return None;
     }
     let mut times = [FILETIME {
         dwLowDateTime: 0,
@@ -43,12 +49,12 @@ pub fn is_running(pid: u32, created: u64) -> bool {
     let running = unsafe {
         GetProcessTimes(process, creation, exit, kernel, user) != 0
             && GetExitCodeProcess(process, &mut exit_code) != 0
-    } && exit_code == STILL_ACTIVE as u32
-        && filetime_ticks(*creation) == created;
+    } && exit_code == STILL_ACTIVE as u32;
+    let created = filetime_ticks(*creation);
     if let Err(error) = unsafe { close_handle(process, "CloseHandle(process)") } {
         error.report();
     }
-    running
+    running.then_some(created)
 }
 
 /// A FILETIME as one count of 100 ns ticks.

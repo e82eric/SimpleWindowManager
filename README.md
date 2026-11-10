@@ -268,10 +268,10 @@ use crate::mailbox::{Animation, Icon, StateStyle};
 use nfm_egui::egui::Color32;
 
 configuration
-    .bar_mailbox("Agents", crate::extensions::claude::producer)
+    .bar_mailbox("Agents", my_producer)
     .header("Agents:")
     .state(
-        crate::extensions::claude::WAITING,
+        "waiting",
         StateStyle::icon(
             Icon::glyph("●", Color32::from_rgb(0xfb, 0x49, 0x34))
                 .animation(Animation::Pulse { min: 0.4, period: 1.0 }),
@@ -304,36 +304,173 @@ and registered from the configuration with one call. An extension uses only
 SWM's public API, the same API a configuration has, so one can be copied into a
 configuration and changed there.
 
-`extensions::claude` shows Claude Code sessions in an `Agents` mailbox, read from
-`~/.claude` (or `CLAUDE_CONFIG_DIR`): `running`, `waiting` (for you), and `done`
-(finished a turn, or closed, in the last 2 days; closed sessions come from their
-transcripts in `~/.claude/projects`). Each entry shows the project, the latest
-prompt and the session's last action. On the bar, a running session shows Claude's
-spark growing and shrinking, a waiting one a pulsing red dot, and a finished one a
-check. Opening an entry shows the session in a
-picker: a row per prompt, newest first, and the conversation in the preview with
-Claude's markdown laid out and its code highlighted, centered on the selected
-prompt, with copy mode and quick select.
+`extensions::claude` and `extensions::codex` each describe an agent's sessions
+as a kind of entry for a mailbox folder: the shape of its badges on the bar
+(Claude's spark, a ring for Codex) and the viewer for a session. The viewer is a
+picker with a row per prompt, newest first, and the conversation in the preview
+with the agent's markdown laid out and its code highlighted, centered on the
+selected prompt, with copy mode and quick select. A line stands for each tool
+call, command, file change and search. The sessions themselves reach the bar
+through the agents' hooks (see [Agent hooks](#agent-hooks)), which write entries
+with `"kind": "claude"` and `"kind": "codex"`.
 
 ```rust
-use crate::extensions::claude::{self, ClaudeOptions};
+use crate::extensions::{claude, codex, spool};
 
-claude::register(configuration, ClaudeOptions::default())
-    // Optional: restyle a state; it keeps its place on the bar.
-    .state(claude::RUNNING, StateStyle::icon(Icon::glyph("*", Color32::GOLD)));
-configuration.keybinding_create(KeyBinding {
-    modifiers,
-    key: VK_OEM_1 as u32,
-    action: Action::ShowMailbox(claude::MAILBOX),
-});
+spool::register_with(
+    configuration,
+    spool::SpoolOptions::named("Agents")
+        .kind(claude::kind(claude::ClaudeOptions::default()))
+        .kind(codex::kind(codex::CodexOptions::default())),
+);
 ```
 
-`ClaudeOptions` sets the preview's markdown theme (including the bat theme for
-code), the selected prompt's highlight, the speakers' colors, and `full_pane`, which
-opens the session filling the monitor up to the bar (Ctrl+Shift+F switches back).
-`claude::producer` and `claude::producer_with(options)` are the producer alone,
-for a mailbox declared by hand, and `claude::spark` draws the spark for
-`Icon::drawn` in a style of your own.
+`ClaudeOptions` and `CodexOptions` set the badge's color while running (`claude`,
+`codex`), the preview's markdown
+theme (including the bat theme for code), the selected prompt's highlight, the
+speakers' colors, and `full_pane`, which opens the session filling the monitor up
+to the bar (Ctrl+Shift+F switches back). `claude::spark` draws Claude's spark for
+`Icon::drawn` in a state's style.
+
+Codex's session files are its own and their format is not documented. The viewer
+reads the records it knows, as Codex has written them since July 2026, and passes
+over the rest, so a Codex that changes them shows less rather than failing.
+`extensions::conversation` is what both viewers write to, for a viewer of your
+own.
+
+### Mailbox folders
+
+`extensions::spool` fills a mailbox from entry files that other programs write
+to a folder, so anything that can write a file can report to the bar: a build
+wrapper, an agent's hooks, a scheduled task. SWM only reads the folder. It opens
+no pipe or socket, and runs nothing an entry names.
+
+```rust
+use crate::extensions::spool;
+
+// A mailbox of its own, with a style for each state below.
+spool::register(configuration, "Builds");
+// Or the producer alone, for a mailbox declared and styled by hand.
+configuration
+    .bar_mailbox("Agents", spool::producer(spool::SpoolOptions::named("Agents")))
+    .header("Agents:")
+    .state(spool::STOPPED, StateStyle::icon(Icon::glyph("■", Color32::GOLD)));
+```
+
+The folder is `%LOCALAPPDATA%\swm\mailbox\<name>` (`SpoolOptions::directory` names
+another). Each entry is one file, `<id>.json`, where the id is letters, digits,
+`.`, `_` and `-`:
+
+```json
+{ "state": "running", "source": "nterm", "title": "cargo build --release",
+  "detail": "", "time": 1731200000,
+  "pid": 1234, "started": "133754961234567890",
+  "log": "C:\\path\\build.log", "kind": "codex" }
+```
+
+`spool::register_with(configuration, SpoolOptions { full_pane: true,
+..SpoolOptions::named("Agents") })` is `register` with options: where the folder
+is, how long finished entries are listed, and how logs
+open.
+
+Only `state` is required. `spool::register` styles `running`, `waiting`, `failed`,
+`stopped` and `done`; a state the mailbox does not declare is listed but not
+counted on the bar. `time` is seconds since 1970, and defaults to when the file was
+written.
+
+- **Writing.** Write a temporary file beside the entry and rename it over the
+  entry, so SWM never reads half a file. Writers remove their own old entries;
+  SWM never writes to the folder.
+- **Work in progress.** An entry with a `pid` holds its state only while that
+  process runs (`started`, the process's creation time as a FILETIME, guards
+  against the pid being reused). When the process is gone the entry shows as
+  `stopped`, so a build that was killed does not stay `running`. Entries for
+  finished work leave `pid` out, and are listed for `SpoolOptions::keep_for`
+  (2 days).
+- **Only if it takes long.** An entry with `"delay": 5` is not listed until 5
+  seconds after its `time`. A writer can then report every command it starts and
+  remove the entry of one that ends sooner. If the entry's process ends before
+  the entry was ever listed, it is not listed at all.
+- **Kinds.** An entry can say which kind it is, `"kind": "codex"`, and the
+  configuration can give a kind badges and a viewer of its own with
+  `SpoolOptions::kind(spool::Kind::new("codex", shape, color).viewer(show))`.
+  The kind's entries then have the states `codex-running`, `codex-waiting` and
+  `codex-done`, which `register_with` declares in the kind's shape, and their
+  logs open with `show`, a function from the log's path and a title to a picker.
+  `failed` and `stopped` stay shared. An entry only names a kind: one the
+  configuration did not give has the plain states and a text log.
+- **Opening an entry** shows its `log` in a picker: text with a row per error and
+  warning, or what its kind's viewer shows. An entry without a log has nothing
+  to open.
+- **Limits.** 200 entry files of at most 64 KiB, and the last 512 KiB of a log.
+  The files are read as the desktop user rather than as elevated SWM, so an entry
+  cannot have SWM read a file that user could not.
+
+`mailbox\SwmMailbox.ps1` writes entries from PowerShell 7. Dot-source it at the
+end of your profile and have the prompt report every command that takes 5 seconds
+or more, with nothing to type:
+
+```powershell
+. C:\src\simplewindowmanager\mailbox\SwmMailbox.ps1
+Enable-SwmMailboxPrompt                  # -Mailbox Builds -After 5
+```
+
+The entry is `running` while the command runs, then `done`, `failed` (with the
+exit code, when a program gave one) or `stopped` after Ctrl+C. Commands you sit in rather than wait for, such as `nvim`,
+`ssh` and `claude`, are not reported; `-Ignore` replaces that list of names. It
+wraps the prompt and PSReadLine's line reader, whatever they already are, and
+costs about 2 ms a command.
+
+To also keep a command's output, wrap it instead:
+
+```powershell
+mbx { .\build.ps1 }                                  # Invoke-SwmMailboxCommand
+mbx -Title 'nterm release' -Log { cargo build --release }
+```
+
+That entry is `running` while the command runs, then `done`, or `failed` when it
+throws or ends with an exit code. Ctrl+C reports `stopped`, and so does SWM itself
+if the shell is killed. Without `-Log` the command writes straight to the
+terminal, keeping its colors and progress display. With `-Log` its output also
+goes to a file that opening the entry shows; most tools then print plainer output,
+as they do into any pipe. `Set-SwmMailboxEntry` and `Remove-SwmMailboxEntry` write
+entries for anything else.
+
+#### Agent hooks
+
+`mailbox\agent-hook.ps1` reports Claude Code and Codex sessions to the `Agents`
+folder from their hooks: `running` after a prompt, `waiting` when the agent asks
+for permission, `done` when the turn ends. It uses only the agents' documented hook input, and
+one script serves both. It prints nothing and always exits 0; problems are
+appended to `agent-hook.errors.txt` in the folder.
+
+Claude Code, in `~/.claude/settings.json`, with the same hook under
+`UserPromptSubmit`, `PostToolUse`, `PermissionRequest`, `Notification`, `Stop`
+and `SessionEnd`:
+
+```json
+{ "hooks": { "Stop": [ { "hooks": [ {
+  "type": "command", "async": true,
+  "command": "pwsh.exe",
+  "args": ["-NoProfile", "-File", "C:\\src\\simplewindowmanager\\mailbox\\agent-hook.ps1", "claude"]
+} ] } ] } }
+```
+
+Codex, in `~/.codex/hooks.json`, with the same hook under `UserPromptSubmit`,
+`PostToolUse`, `PermissionRequest`, `Stop`, `Interrupt` and `SessionEnd` (Codex
+asks you to trust new hooks with `/hooks`):
+
+```json
+{ "hooks": { "Stop": [ { "hooks": [ {
+  "type": "command",
+  "command": "pwsh -NoProfile -File C:\\src\\simplewindowmanager\\mailbox\\agent-hook.ps1 codex"
+} ] } ] } }
+```
+
+Each event starts PowerShell, about a quarter of a second; `async` keeps that
+from delaying Claude. A session that is interrupted stays `running` until its
+next prompt or until the agent exits, since Claude Code has no hook for an
+interrupt.
 
 ## Implemented surface
 

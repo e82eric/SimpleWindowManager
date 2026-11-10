@@ -7,7 +7,7 @@
 //! SWM keeps nothing beyond the latest publication.
 //!
 //! ```ignore
-//! let agents = configuration.bar_mailbox("Agents", crate::extensions::claude::producer);
+//! let agents = configuration.bar_mailbox("Agents", my_producer);
 //! agents.header("Agents:").state(
 //!     "waiting",
 //!     StateStyle::icon(Icon::glyph("●", Color32::RED).animation(Animation::Pulse {
