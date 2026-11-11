@@ -58,12 +58,7 @@ fn conversation(transcript: &str, options: &ClaudeOptions) -> Conversation {
         let content = &entry["message"]["content"];
         match entry["type"].as_str() {
             Some("user") => {
-                // Claude delivers task notifications as messages too; newer
-                // transcripts mark who a message came from.
-                let from_person = entry["origin"]["kind"]
-                    .as_str()
-                    .is_none_or(|kind| kind == "human");
-                if let Some(prompt) = prompt(content).filter(|_| from_person) {
+                if let Some(prompt) = typed_prompt(&entry) {
                     out.prompt(&prompt);
                 }
             }
@@ -80,6 +75,16 @@ fn conversation(transcript: &str, options: &ClaudeOptions) -> Conversation {
         }
     }
     out
+}
+
+/// The prompt in a `user` entry, if a person typed it. Claude delivers task
+/// notifications as messages too; newer transcripts mark who a message came
+/// from.
+pub(super) fn typed_prompt(entry: &Value) -> Option<String> {
+    let from_person = entry["origin"]["kind"]
+        .as_str()
+        .is_none_or(|kind| kind == "human");
+    prompt(&entry["message"]["content"]).filter(|_| from_person)
 }
 
 /// The text of a prompt the person typed: a string, or text blocks without tool

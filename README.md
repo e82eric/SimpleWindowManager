@@ -338,6 +338,25 @@ over the rest, so a Codex that changes them shows less rather than failing.
 `extensions::conversation` is what both viewers write to, for a viewer of your
 own.
 
+`claude::grep_command` is `GrepClaudeSessions`, a command for the Commands
+picker that searches every Claude Code conversation:
+
+```rust
+configuration.picker_command(claude::grep_command(claude::ClaudeOptions::default()));
+```
+
+Accepting its row asks for the text to find. Enter there lists each prompt and
+reply containing it, ignoring ASCII case, newest conversation first, as the
+search finds them; the query then fuzzy-finds among those. The preview shows
+the whole message with the matching line marked, and Enter opens the message's
+conversation. Esc goes back a step each time: from the conversation to the
+matches, to the search text, to Commands.
+
+`Configuration::picker_command` lists a command of your own the same way: a
+`PickerCommand` has a name, the argument it asks for, and a function that is
+given the argument as typed and returns the picker to show on top, or an error
+to show beside the argument.
+
 ### Mailbox folders
 
 `extensions::spool` fills a mailbox from entry files that other programs write

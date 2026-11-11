@@ -6,8 +6,14 @@
 //! mailbox folder (`extensions::spool`, and `mailbox\agent-hook.ps1`) with
 //! `"kind": "claude"`. The folder gives those entries the spark and this picker
 //! once the configuration adds `kind` to it.
+//!
+//! `grep_command` is `GrepClaudeSessions` for the commands picker: it asks for
+//! text, searches every conversation for it and lists the messages containing
+//! it to fuzzy-find among. `configuration.picker_command(claude::grep_command(options))`.
+mod grep;
 mod transcript;
 
+pub use grep::command as grep_command;
 pub use transcript::ClaudeOptions;
 
 use nfm_egui::egui::{self, Color32};
