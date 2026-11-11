@@ -25,8 +25,8 @@ impl PickerRequest for Windows {
 
 struct WindowsView(WindowPicker<SharedSource>);
 impl PickerView for WindowsView {
-    fn picker(&self) -> &SharedPicker {
-        self.0.picker()
+    fn picker(&self) -> Option<&SharedPicker> {
+        Some(self.0.picker())
     }
     fn has_header(&self) -> bool {
         false

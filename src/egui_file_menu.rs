@@ -79,8 +79,8 @@ struct FilesView {
     action: FileAction,
 }
 impl PickerView for FilesView {
-    fn picker(&self) -> &SharedPicker {
-        self.menu.picker()
+    fn picker(&self) -> Option<&SharedPicker> {
+        Some(self.menu.picker())
     }
     fn has_header(&self) -> bool {
         false

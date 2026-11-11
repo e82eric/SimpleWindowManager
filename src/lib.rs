@@ -1,5 +1,6 @@
 extern crate self as simple_window_manager_rs;
 
+mod prompt_page;
 pub mod bar;
 mod bar_renderer;
 pub mod border;

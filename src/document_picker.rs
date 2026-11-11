@@ -86,8 +86,8 @@ impl DocumentPicker {
 /// The picker, and whether it opens full-pane.
 struct DocumentView(SharedPicker, bool);
 impl PickerView for DocumentView {
-    fn picker(&self) -> &SharedPicker {
-        &self.0
+    fn picker(&self) -> Option<&SharedPicker> {
+        Some(&self.0)
     }
     fn has_header(&self) -> bool {
         true

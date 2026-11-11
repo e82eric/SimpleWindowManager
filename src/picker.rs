@@ -36,7 +36,14 @@ pub trait PickerRequest: Send {
 
 /// A picker open in the host.
 pub trait PickerView {
-    fn picker(&self) -> &SharedPicker;
+    /// The page's picker. A page that is not a picker, such as one asking
+    /// for a command's argument, has none.
+    fn picker(&self) -> Option<&SharedPicker>;
+    /// The height the page takes, in points, for one the host does not size
+    /// by its rows. Asked again each frame.
+    fn height(&self, _ctx: &egui::Context, _appearance: &Appearance) -> Option<f32> {
+        None
+    }
     /// Whether the source shows a column header row (structured sources do).
     /// NFM only reports it once results arrive, so the window size needs it upfront.
     fn has_header(&self) -> bool;
@@ -98,6 +105,12 @@ impl PickerHost<'_> {
 pub enum Outcome {
     /// Close and restore focus.
     Cancelled,
+    /// Go back to the page this picker was pushed on top of, as Esc does;
+    /// with no page beneath, close and restore focus.
+    Back,
+    /// Show another picker as a page on top of this one, which stays as it is
+    /// for coming back to.
+    Push(Box<dyn PickerRequest>),
     /// Close, report the error and restore focus.
     Failed(String),
     /// Run one of SWM's commands, as a keybinding would. A `ShowPicker` action
@@ -125,7 +138,10 @@ pub(crate) fn complete(session: u64, outcome: Outcome) {
         return; // A newer picker replaced this one.
     }
     let sent = match outcome {
-        Outcome::Cancelled => crate::worker::send(crate::worker::Command::MenuClosed),
+        // The host handles pages itself; from the first page, going back closes.
+        Outcome::Cancelled | Outcome::Back | Outcome::Push(_) => {
+            crate::worker::send(crate::worker::Command::MenuClosed)
+        }
         Outcome::Failed(error) => {
             crate::error_log::report("picker failed", error);
             crate::worker::send(crate::worker::Command::MenuClosed)

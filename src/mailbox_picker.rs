@@ -178,8 +178,8 @@ struct View {
     picker: SharedPicker,
 }
 impl PickerView for View {
-    fn picker(&self) -> &SharedPicker {
-        &self.picker
+    fn picker(&self) -> Option<&SharedPicker> {
+        Some(&self.picker)
     }
     fn has_header(&self) -> bool {
         false

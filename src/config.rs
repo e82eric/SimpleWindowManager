@@ -49,6 +49,57 @@ pub struct CommandEntry {
     pub key: Option<u32>,
 }
 
+/// A command in the commands picker that takes what the user types: accepting
+/// its row shows a page asking for the argument, and Enter there runs the
+/// command with it. See `Configuration::picker_command`.
+#[derive(Clone)]
+pub struct PickerCommand {
+    /// As listed, such as `GrepClaudeSessions`.
+    pub name: String,
+    pub description: String,
+    pub argument: CommandArgument,
+    pub run: CommandRun,
+}
+impl PickerCommand {
+    /// The command as its row shows it: `GrepClaudeSessions <search text>`,
+    /// or `[search text]` for an argument that may be left empty.
+    pub fn signature(&self) -> String {
+        if self.argument.required {
+            format!("{} <{}>", self.name, self.argument.name)
+        } else {
+            format!("{} [{}]", self.name, self.argument.name)
+        }
+    }
+}
+impl std::fmt::Debug for PickerCommand {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PickerCommand")
+            .field("name", &self.name)
+            .field("argument", &self.argument)
+            .finish_non_exhaustive()
+    }
+}
+
+/// What a `PickerCommand` asks the user to type.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CommandArgument {
+    /// Shown in the command's row and in the empty query box, as `<name>`.
+    pub name: String,
+    /// Shown beside the name in the empty query box.
+    pub description: String,
+    /// Enter does not run the command while a required argument is empty.
+    pub required: bool,
+}
+
+/// Runs a `PickerCommand` with its argument as typed, on the picker thread: a
+/// command that takes long does its work in the picker it returns. That
+/// picker is shown as a page on top; Esc there comes back to the argument. An
+/// error shows on the page that asked for the argument, which stays to try
+/// again.
+pub type CommandRun = std::sync::Arc<
+    dyn Fn(&str) -> Result<Box<dyn crate::picker::PickerRequest>, String> + Send + Sync,
+>;
+
 /// How the bar marks the focused monitor, in addition to its accent workspace
 /// region.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -99,6 +150,9 @@ pub struct Configuration {
     pub bar_height: i32,
     pub key_bindings: Vec<KeyBinding>,
     pub commands: Vec<CommandEntry>,
+    /// Commands that take an argument, listed in the commands picker; see
+    /// `picker_command`.
+    pub picker_commands: Vec<PickerCommand>,
     pub text_style: Option<TextStyle>,
     pub bar_segments: Vec<BarSegmentConfiguration>,
     /// Every registered picker, for listing; bindings refer to pickers directly.
@@ -143,6 +197,7 @@ impl Default for Configuration {
             bar_height: 29,
             key_bindings: Vec::new(),
             commands: Vec::new(),
+            picker_commands: Vec::new(),
             text_style: None,
             bar_segments: Vec::new(),
             pickers: crate::builtin_pickers::defaults(),
@@ -175,6 +230,13 @@ impl Configuration {
         self.bar_mailboxes
             .push(crate::mailbox::BarMailbox::new(name, producer));
         self.bar_mailboxes.last_mut().unwrap()
+    }
+    /// List `command` in the commands picker. A command with the same name
+    /// replaces the one registered before it.
+    pub fn picker_command(&mut self, command: PickerCommand) {
+        self.picker_commands
+            .retain(|existing| existing.name != command.name);
+        self.picker_commands.push(command);
     }
     /// Register a picker for the life of the process; open the returned picker with
     /// `Action::ShowPicker`.

@@ -1,5 +1,6 @@
 //! Build the small in-memory command list synchronously for each opening.
 use crate::commands::Action;
+use crate::config::PickerCommand;
 use crate::egui_window_menu::{BarAlign, BarAnchor, ScreenBounds};
 use crate::picker::{Outcome, PickerHost, PickerRequest, PickerSource, PickerView};
 use nfm_egui::shared::{self, SharedPicker};
@@ -46,6 +47,24 @@ fn columns_source(columns: &[usize], rows: Vec<Vec<String>>) -> Result<Arc<Comma
     )
 }
 
+/// A picker command's row: its signature, such as `GrepClaudeSessions <search
+/// text>`, and its description, which joins the name when `columns` leave the
+/// Description column out, as the launcher's do.
+fn command_row(command: &PickerCommand, columns: &[usize]) -> Vec<String> {
+    let signature = command.signature();
+    let name = if columns.contains(&3) || command.description.is_empty() {
+        signature
+    } else {
+        format!("{signature} — {}", command.description)
+    };
+    vec![
+        name,
+        "Command".into(),
+        String::new(),
+        command.description.clone(),
+    ]
+}
+
 /// Whether the launcher is open, so its button closes it.
 static LAUNCHER_OPEN: AtomicBool = AtomicBool::new(false);
 
@@ -71,7 +90,7 @@ struct Launcher {
 }
 impl PickerRequest for Launcher {
     fn build(self: Box<Self>, host: &PickerHost<'_>) -> Result<Box<dyn PickerView>, String> {
-        let rows = self.list.rows.len().clamp(1, host.result_rows);
+        let rows = (self.list.rows.len() + self.list.commands.len()).clamp(1, host.result_rows);
         let mut view = self.list.view(host.ctx, host.config(), &LAUNCHER_COLUMNS)?;
         view.launcher = Some((self.anchor, rows));
         LAUNCHER_OPEN.store(true, Ordering::Release);
@@ -82,9 +101,11 @@ impl PickerRequest for Launcher {
 /// The registered commands; accepting one runs its action.
 #[derive(Clone, Copy, Debug)]
 pub struct Commands;
-/// Rows of Name, Type, KeyBinding and Description, each with the action it runs.
+/// Rows of Name, Type, KeyBinding and Description, each with the action it runs,
+/// after a row for each command that takes an argument.
 pub struct CommandList {
     pub rows: Vec<(Vec<String>, Action)>,
+    pub commands: Vec<PickerCommand>,
 }
 impl PickerSource for Commands {
     fn request(&self, configuration: &crate::Configuration) -> Box<dyn PickerRequest> {
@@ -107,16 +128,27 @@ impl CommandList {
                 .into_iter()
                 .zip(configuration.commands.iter().map(|command| command.action))
                 .collect(),
+            commands: configuration.picker_commands.clone(),
         }
     }
-    /// A picker showing `columns` of the rows (indexes into `COLUMNS`).
+    /// A picker showing `columns` of the rows (indexes into `COLUMNS`), the
+    /// picker commands first.
     fn view(
         self,
         ctx: &egui::Context,
         config: nfm_egui::PickerConfig,
         columns: &[usize],
     ) -> Result<CommandsView, String> {
-        let (rows, actions) = self.rows.into_iter().unzip();
+        let mut rows = Vec::new();
+        let mut targets = Vec::new();
+        for command in self.commands {
+            rows.push(command_row(&command, columns));
+            targets.push(Target::Command(command));
+        }
+        for (row, action) in self.rows {
+            rows.push(row);
+            targets.push(Target::Action(action));
+        }
         let picker = shared::replace(
             ctx,
             columns_source(columns, rows)?,
@@ -129,15 +161,20 @@ impl CommandList {
         );
         Ok(CommandsView {
             picker,
-            actions,
+            targets,
             launcher: None,
         })
     }
 }
+/// What accepting a row does.
+enum Target {
+    Action(Action),
+    Command(PickerCommand),
+}
 struct CommandsView {
     picker: SharedPicker,
-    /// Each row's action, in row order.
-    actions: Vec<Action>,
+    /// What each row does, in row order.
+    targets: Vec<Target>,
     /// For the launcher, the bar button it drops down from and the rows its
     /// window is sized for.
     launcher: Option<(BarAnchor, usize)>,
@@ -150,8 +187,8 @@ impl Drop for CommandsView {
     }
 }
 impl PickerView for CommandsView {
-    fn picker(&self) -> &SharedPicker {
-        &self.picker
+    fn picker(&self) -> Option<&SharedPicker> {
+        Some(&self.picker)
     }
     fn has_header(&self) -> bool {
         true
@@ -198,10 +235,15 @@ impl PickerView for CommandsView {
         {
             // The selection's index is its row's position in the source, so commands
             // that share a name still run their own action.
-            Some(PickerEvent::Accepted(selection)) => self
-                .actions
-                .get(selection.index)
-                .map(|&action| Outcome::Action(action)),
+            Some(PickerEvent::Accepted(selection)) => match self.targets.get(selection.index)? {
+                Target::Action(action) => {
+                    let action = *action;
+                    // An action ends the picker, which accepting left open.
+                    self.picker.close();
+                    Some(Outcome::Action(action))
+                }
+                Target::Command(command) => Some(crate::prompt_page::start(command)),
+            },
             event => crate::egui_data_menu::copy_or_close(ctx, &mut self.picker, event),
         }
     }
@@ -250,6 +292,7 @@ mod tests {
                 (row("Win+F1"), Action::MoveWorkspaceToMonitor(0, 1)),
                 (row("Alt+F13"), Action::MoveWorkspaceToMonitor(0, 0)),
             ],
+            commands: Vec::new(),
         };
         let ctx = egui::Context::default();
         let mut view = list
@@ -300,6 +343,86 @@ mod tests {
             ),
             "the first command with that name ran instead"
         );
+    }
+
+    #[test]
+    fn a_picker_command_row_pushes_its_argument_page_and_the_list_stays_open() {
+        let command = PickerCommand {
+            name: "Echo".into(),
+            description: "Says its argument".into(),
+            argument: crate::config::CommandArgument {
+                name: "text".into(),
+                description: String::new(),
+                required: true,
+            },
+            run: Arc::new(|text| Err(format!("ran with {text}"))),
+        };
+        assert_eq!(
+            command_row(&command, &LAUNCHER_COLUMNS)[0],
+            "Echo <text> — Says its argument"
+        );
+        assert_eq!(command_row(&command, &[0, 1, 2, 3])[0], "Echo <text>");
+        let row = vec![
+            "Focus next".into(),
+            "Action".into(),
+            "Alt+J".into(),
+            String::new(),
+        ];
+        let list = CommandList {
+            rows: vec![(row, Action::MoveWorkspaceToMonitor(0, 0))],
+            commands: vec![command],
+        };
+        let ctx = egui::Context::default();
+        let mut view = list
+            .view(&ctx, nfm_egui::PickerConfig::default(), &[0, 1, 2, 3])
+            .unwrap();
+        let bounds = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0));
+        let enter = egui::Event::Key {
+            key: egui::Key::Enter,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        };
+        // Search runs on a worker; Enter accepts once the matching row is selected.
+        let accept = |view: &mut CommandsView, query: &str| {
+            view.picker.set_query(query);
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+            loop {
+                std::thread::sleep(std::time::Duration::from_millis(20));
+                let mut outcome = None;
+                ctx.run_ui(
+                    egui::RawInput {
+                        screen_rect: Some(bounds),
+                        events: vec![enter.clone()],
+                        ..Default::default()
+                    },
+                    |ui| {
+                        outcome = view.show(
+                            ui.ctx(),
+                            Placement::new(bounds),
+                            &Appearance::default(),
+                            false,
+                        )
+                    },
+                )
+                .drop_without_applying_deltas();
+                if let Some(outcome) = outcome {
+                    break outcome;
+                }
+                assert!(std::time::Instant::now() < deadline, "nothing was accepted");
+            }
+        };
+        assert!(matches!(accept(&mut view, "echo"), Outcome::Push(_)));
+        assert!(!view.picker.is_closed(), "it is come back to");
+        assert_eq!(view.picker.query(), "echo");
+        // An action row after the command's still runs its own action, and
+        // ends the picker.
+        assert!(matches!(
+            accept(&mut view, "focus"),
+            Outcome::Action(Action::MoveWorkspaceToMonitor(0, 0))
+        ));
+        assert!(view.picker.is_closed());
     }
 
     #[test]

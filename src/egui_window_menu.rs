@@ -90,7 +90,7 @@ impl WindowMenuHost {
                             receiver,
                             completed,
                             hwnd,
-                            active_menu: None,
+                            pages: nfm_egui::PageStack::new(),
                             awaiting_handoff: false,
                             session: None,
                             appearance: desktop_appearance(),
@@ -240,14 +240,28 @@ pub(crate) fn below_bar(
 }
 
 fn full_pane(menu: &dyn PickerView) -> bool {
-    menu.picker().effective_position(menu.position()) == nfm_egui::Position::FullPane
+    match menu.picker() {
+        Some(picker) => {
+            picker.effective_position(menu.position()) == nfm_egui::Position::FullPane
+        }
+        None => false,
+    }
+}
+
+fn preview_visible(menu: &dyn PickerView) -> bool {
+    match menu.picker() {
+        Some(picker) => picker.preview_visible(),
+        None => false,
+    }
 }
 
 pub(crate) struct WindowMenuApp {
     receiver: mpsc::Receiver<Command>,
     completed: Completion,
     hwnd: isize,
-    active_menu: Option<Box<dyn PickerView>>,
+    /// The pickers showing, each a page on top of the one before; the top
+    /// one is drawn and takes input.
+    pages: nfm_egui::PageStack<Box<dyn PickerView>>,
     awaiting_handoff: bool,
     session: Option<u64>,
     appearance: Appearance,
@@ -265,7 +279,7 @@ pub(crate) struct WindowMenuApp {
 }
 impl WindowMenuApp {
     fn clear_content(&mut self) {
-        self.active_menu = None;
+        self.pages.apply(nfm_egui::Outcome::Close);
         self.presentation = None;
         self.window = None;
         self.full_pane = false;
@@ -290,14 +304,18 @@ impl WindowMenuApp {
         }
     }
     /// Window height in points: the configured result rows, the view's header row
-    /// and, while it is visible, the preview pane.
+    /// and, while it is visible, the preview pane. A page with a height of its
+    /// own gets that.
     fn height(&self, ctx: &egui::Context, menu: &dyn PickerView) -> f32 {
+        if let Some(height) = menu.height(ctx, &self.appearance) {
+            return height + 2.0 * PICKER_MARGIN;
+        }
         let row = self.appearance.typography.preview_row_height(ctx);
         let mut rows = self.result_rows + 1;
         if menu.has_header() {
             rows += 1;
         }
-        let preview = if menu.picker().preview_visible() || menu.sized_with_preview() {
+        let preview = if preview_visible(menu) || menu.sized_with_preview() {
             self.preview_rows as f32 * row + 15.0
         } else {
             0.0
@@ -321,14 +339,14 @@ impl WindowMenuApp {
     }
     /// Size the window for the active picker; called again when its layout changes.
     fn present(&mut self, ctx: &egui::Context, bounds: ScreenBounds) {
-        let Some(menu) = &self.active_menu else {
+        let Some(menu) = self.pages.top() else {
             return;
         };
         let window = self.window(ctx, menu.as_ref(), bounds);
         self.presentation = Some(bounds);
         self.window = Some(window);
         self.full_pane = full_pane(menu.as_ref());
-        self.preview_visible = menu.picker().preview_visible();
+        self.preview_visible = preview_visible(menu.as_ref());
         let visible = unsafe { IsWindowVisible(self.hwnd as _) != 0 };
         unsafe {
             SetWindowPos(
@@ -374,17 +392,9 @@ impl WindowMenuApp {
                     self.clear_content();
                     self.session = Some(session);
                     self.opened_frame = Some(ctx.cumulative_frame_nr());
-                    let host = PickerHost {
-                        ctx,
-                        hwnd: self.hwnd,
-                        appearance: &self.appearance,
-                        result_rows: self.result_rows,
-                        preview_rows: self.preview_rows,
-                        file_preview_resolver: &self.file_preview_resolver,
-                    };
-                    match request.build(&host) {
+                    match self.build(ctx, request) {
                         Ok(menu) => {
-                            self.active_menu = Some(menu);
+                            self.pages.open(menu);
                             self.present(ctx, bounds);
                         }
                         Err(error) => self.finish(ctx, Outcome::Failed(error)),
@@ -404,6 +414,29 @@ impl WindowMenuApp {
             }
         }
     }
+    /// Build `request`'s picker as the page that goes on top of those showing.
+    fn build(
+        &self,
+        ctx: &egui::Context,
+        request: Box<dyn PickerRequest>,
+    ) -> Result<Box<dyn PickerView>, String> {
+        request.build(&PickerHost {
+            ctx,
+            hwnd: self.hwnd,
+            appearance: &self.appearance,
+            result_rows: self.result_rows,
+            preview_rows: self.preview_rows,
+            file_preview_resolver: &self.file_preview_resolver,
+        })
+    }
+    /// Size the window for the page now on top, which may have a header or
+    /// a preview the last one did not.
+    fn page_changed(&mut self, ctx: &egui::Context) {
+        if let Some(bounds) = self.presentation {
+            self.present(ctx, bounds);
+        }
+        ctx.request_repaint();
+    }
     pub(crate) fn ui(&mut self, ui: &mut egui::Ui) {
         let ctx = ui.ctx();
         if self.awaiting_handoff
@@ -417,7 +450,7 @@ impl WindowMenuApp {
         if self.opened_frame == Some(ctx.cumulative_frame_nr()) {
             ctx.input_mut(|input| input.events.clear());
         }
-        let Some(menu) = &mut self.active_menu else {
+        let Some(menu) = self.pages.top_mut() else {
             return;
         };
         let mut placement = Placement::new(ctx.content_rect());
@@ -427,10 +460,10 @@ impl WindowMenuApp {
         let outcome = menu.show(ctx, placement, &self.appearance, self.awaiting_handoff);
         // Ctrl+P and full-pane toggles change the window's size, as can a view
         // with its own bounds.
-        let menu = self.active_menu.as_deref().expect("shown above");
+        let menu = self.pages.top().expect("shown above").as_ref();
         if let Some(bounds) = self.presentation
             && (full_pane(menu) != self.full_pane
-                || menu.picker().preview_visible() != self.preview_visible
+                || preview_visible(menu) != self.preview_visible
                 || self.window != Some(self.window(ctx, menu, bounds)))
         {
             self.present(ctx, bounds);
@@ -441,6 +474,22 @@ impl WindowMenuApp {
                 self.awaiting_handoff = true;
                 if let Some(session) = self.session {
                     (self.completed)(session, Outcome::Action(action));
+                }
+            }
+            Some(Outcome::Push(request)) => match self.build(ctx, request) {
+                Ok(page) => {
+                    self.pages.apply(nfm_egui::Outcome::Push(page));
+                    self.page_changed(ctx);
+                }
+                // The page asking stays, to try again.
+                Err(error) => crate::error_log::report("picker page failed", error),
+            },
+            Some(Outcome::Back) => {
+                self.pages.apply(nfm_egui::Outcome::Back);
+                if self.pages.is_empty() {
+                    self.finish(ctx, Outcome::Cancelled);
+                } else {
+                    self.page_changed(ctx);
                 }
             }
             Some(outcome) => self.finish(ctx, outcome),

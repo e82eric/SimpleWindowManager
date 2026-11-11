@@ -80,8 +80,8 @@ impl PickerRequest for DataTable {
 }
 struct DataView(SharedPicker);
 impl PickerView for DataView {
-    fn picker(&self) -> &SharedPicker {
-        &self.0
+    fn picker(&self) -> Option<&SharedPicker> {
+        Some(&self.0)
     }
     fn has_header(&self) -> bool {
         true
@@ -98,14 +98,16 @@ impl PickerView for DataView {
     }
 }
 
-/// Read-only handling: accept or cancel closes; copy requests copy the row.
+/// Read-only handling: accepting closes, Esc goes back a page (closing from
+/// the first one), and copy requests copy the row.
 pub(crate) fn copy_or_close(
     ctx: &egui::Context,
     picker: &mut SharedPicker,
     event: Option<PickerEvent<SharedItem>>,
 ) -> Option<Outcome> {
     match event {
-        Some(PickerEvent::Accepted(_)) | Some(PickerEvent::Cancelled) => Some(Outcome::Cancelled),
+        Some(PickerEvent::Accepted(_)) => Some(Outcome::Cancelled),
+        Some(PickerEvent::Cancelled) => Some(Outcome::Back),
         Some(PickerEvent::CopyRequested(selection)) => {
             ctx.copy_text(selection.text);
             picker.notify_copied(ctx);

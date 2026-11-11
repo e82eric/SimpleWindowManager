@@ -36,6 +36,7 @@ fn commands(rows: Vec<Vec<String>>, menu_actions: Vec<String>) -> Box<dyn Picker
                 (row, action)
             })
             .collect(),
+        commands: Vec::new(),
     })
 }
 fn data(title: String, columns: Vec<String>, rows: Vec<DataRow>) -> Box<dyn PickerRequest> {
@@ -222,7 +223,8 @@ fn main() {
         }
         Outcome::Action(_) => panic!("unexpected action"),
         Outcome::Failed(error) => panic!("menu failed: {error}"),
-        Outcome::Cancelled => panic!("menu cancelled instead of accepting"),
+        Outcome::Cancelled | Outcome::Back => panic!("menu cancelled instead of accepting"),
+        Outcome::Push(_) => panic!("the host shows pushed pages itself"),
     }
     wait_until(|| unsafe { IsWindowVisible(hwnd) == 0 });
     host.show_request(2, bounds, Box::new(Windows)).unwrap();
