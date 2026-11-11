@@ -7,16 +7,16 @@ publish = false
 [dependencies]
 csv = "1"
 crossbeam-channel = "0.5"
-nfm-picker-sources = { git = "https://github.com/e82eric/npicker", rev = "8c15bfd" }
-nfm-window-egui = { git = "https://github.com/e82eric/npicker", rev = "8c15bfd" }
-nfm-process-egui = { git = "https://github.com/e82eric/npicker", rev = "8c15bfd" }
-nfm-file-system-egui = { git = "https://github.com/e82eric/npicker", rev = "8c15bfd" }
-nfm_file_system = { git = "https://github.com/e82eric/npicker", rev = "8c15bfd" }
-nfm-egui = { git = "https://github.com/e82eric/npicker", rev = "8c15bfd", features = ["opengl"] }
-nfm_search_core = { git = "https://github.com/e82eric/npicker", rev = "8c15bfd" }
-nfm-win32 = { git = "https://github.com/e82eric/npicker", rev = "8c15bfd" }
-nfm-preview-file = { git = "https://github.com/e82eric/npicker", rev = "8c15bfd" }
-nfm-preview = { git = "https://github.com/e82eric/npicker", rev = "8c15bfd" }
+nfm-picker-sources = { git = "https://github.com/e82eric/npicker", rev = "06eb8b2fcb38c32722ee16418fab98f8fa9632e7" }
+nfm-window-egui = { git = "https://github.com/e82eric/npicker", rev = "06eb8b2fcb38c32722ee16418fab98f8fa9632e7" }
+nfm-process-egui = { git = "https://github.com/e82eric/npicker", rev = "06eb8b2fcb38c32722ee16418fab98f8fa9632e7" }
+nfm-file-system-egui = { git = "https://github.com/e82eric/npicker", rev = "06eb8b2fcb38c32722ee16418fab98f8fa9632e7" }
+nfm_file_system = { git = "https://github.com/e82eric/npicker", rev = "06eb8b2fcb38c32722ee16418fab98f8fa9632e7" }
+nfm-egui = { git = "https://github.com/e82eric/npicker", rev = "06eb8b2fcb38c32722ee16418fab98f8fa9632e7", features = ["opengl"] }
+nfm_search_core = { git = "https://github.com/e82eric/npicker", rev = "06eb8b2fcb38c32722ee16418fab98f8fa9632e7" }
+nfm-win32 = { git = "https://github.com/e82eric/npicker", rev = "06eb8b2fcb38c32722ee16418fab98f8fa9632e7" }
+nfm-preview-file = { git = "https://github.com/e82eric/npicker", rev = "06eb8b2fcb38c32722ee16418fab98f8fa9632e7" }
+nfm-preview = { git = "https://github.com/e82eric/npicker", rev = "06eb8b2fcb38c32722ee16418fab98f8fa9632e7" }
 serde_json = "1"
 png = "0.18"
 pulldown-cmark = { version = "0.13", default-features = false }
