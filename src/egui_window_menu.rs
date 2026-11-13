@@ -375,7 +375,11 @@ impl WindowMenuApp {
             // Queued focus events can lag behind a Hide/Show pair. Use the actual
             // native foreground window so old events cannot cancel a new opening.
             let focused = unsafe { GetForegroundWindow() == self.hwnd as _ };
-            if self.had_focus && !focused {
+            if crate::screenshot::active() {
+                // The screenshot overlay has the focus; the picker waits
+                // behind it, and is left only after it has the focus again.
+                self.had_focus = false;
+            } else if self.had_focus && !focused {
                 self.finish(ctx, Outcome::Cancelled);
             } else {
                 self.had_focus |= focused;

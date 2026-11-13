@@ -4,8 +4,12 @@
 //! `selector::translate`), and Enter copies it to the clipboard. `0` makes
 //! the rectangle the whole monitor, which it also starts as with no windows.
 //!
+//! A picker open when a key binding starts this stays open: it is in the
+//! capture, and has the focus again once the overlay closes.
+//!
 //! Runs on the UI thread. Drawing is plain GDI on a back buffer.
 use std::cell::{Cell, RefCell};
+use std::sync::atomic::{AtomicBool, Ordering};
 use windows_sys::Win32::Foundation::{HWND, POINT, RECT};
 use windows_sys::Win32::Graphics::Gdi::*;
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::*;
@@ -191,6 +195,13 @@ impl Drop for Session {
     }
 }
 
+/// Whether the overlay is open. It takes the focus, and a picker open behind
+/// it must not take that for being left.
+static ACTIVE: AtomicBool = AtomicBool::new(false);
+pub(crate) fn active() -> bool {
+    ACTIVE.load(Ordering::Acquire)
+}
+
 thread_local! {
     static WINDOW: Cell<HWND> = const { Cell::new(std::ptr::null_mut()) };
     static SESSION: RefCell<Option<Session>> = const { RefCell::new(None) };
@@ -323,6 +334,8 @@ pub(crate) fn start(point: (i32, i32), windows: &[isize], hint_font_size: i32) {
         edit: false,
     };
     SESSION.with(|slot| *slot.borrow_mut() = Some(session));
+    // Before the overlay takes the focus from an open picker.
+    ACTIVE.store(true, Ordering::Release);
     unsafe {
         SetWindowPos(
             hwnd,
@@ -374,6 +387,11 @@ fn close() {
     unsafe {
         KillTimer(hwnd, YANK_TIMER);
         ShowWindow(hwnd, SW_HIDE);
+    }
+    ACTIVE.store(false, Ordering::Release);
+    // A picker that was open when a key binding started this is still there.
+    if crate::ui::menu_visible() {
+        crate::ui::post(crate::ui::Command::Focus);
     }
     // Only now, so Paint can't take the focus during the flash.
     if session.edit
