@@ -1,6 +1,7 @@
 //! What the screenshot's keys do, independent of drawing.
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
-    VK_BACK, VK_DOWN, VK_ESCAPE, VK_LEFT, VK_NUMPAD1, VK_NUMPAD9, VK_RETURN, VK_RIGHT, VK_UP,
+    VK_BACK, VK_DOWN, VK_ESCAPE, VK_LEFT, VK_NUMPAD0, VK_NUMPAD1, VK_NUMPAD9, VK_RETURN, VK_RIGHT,
+    VK_UP,
 };
 
 /// How far an edge moves per key, in pixels, without and with Ctrl.
@@ -61,6 +62,8 @@ pub(crate) enum Edges {
 pub(crate) enum Input {
     /// A window's digit, from 0 for `1`.
     Pick(usize),
+    /// The whole monitor, `0`.
+    Monitor,
     /// Move `edges` by `dx` horizontally and `dy` vertically.
     Resize {
         edges: Edges,
@@ -102,8 +105,8 @@ pub(crate) struct Selector {
 
 impl Selector {
     /// Digits for `windows` (monitor-relative); those off the monitor are
-    /// skipped and any past the ninth dropped. With one left, the rectangle
-    /// starts as that window; with none, as the whole monitor.
+    /// skipped and any past the ninth dropped. With none left, the rectangle
+    /// starts as the whole monitor.
     pub fn new(width: i32, height: i32, windows: &[Region]) -> Self {
         let mut windows: Vec<Region> = windows
             .iter()
@@ -119,10 +122,8 @@ impl Selector {
             windows,
             state: State::Pick,
         };
-        match selector.windows.as_slice() {
-            [] => selector.state = State::Adjust(selector.monitor()),
-            [only] => selector.state = State::Adjust(*only),
-            _ => {}
+        if selector.windows.is_empty() {
+            selector.state = State::Adjust(selector.monitor());
         }
         selector
     }
@@ -148,8 +149,8 @@ impl Selector {
     pub fn handle(&mut self, input: Input) -> Outcome {
         match (input, self.state) {
             (Input::Cancel, _) => return Outcome::Cancel,
-            // Back to the windows, when there was a choice; otherwise out.
-            (Input::Back, State::Adjust(_)) if self.windows.len() > 1 => self.state = State::Pick,
+            // Back to the windows, when there are any; otherwise out.
+            (Input::Back, State::Adjust(_)) if !self.windows.is_empty() => self.state = State::Pick,
             (Input::Back, _) => return Outcome::Cancel,
             (Input::Pick(index), State::Pick) => {
                 if let Some(&window) = self.windows.get(index) {
@@ -157,6 +158,7 @@ impl Selector {
                 }
             }
             (Input::Pick(_), State::Adjust(_)) => {}
+            (Input::Monitor, _) => self.state = State::Adjust(self.monitor()),
             (Input::Accept { edit }, State::Adjust(region)) => {
                 return Outcome::Capture { region, edit };
             }
@@ -211,6 +213,7 @@ pub(crate) fn translate(key: u16, ctrl: bool, shift: bool) -> Option<Input> {
     const J: u16 = b'J' as u16;
     const K: u16 = b'K' as u16;
     const L: u16 = b'L' as u16;
+    const ZERO: u16 = b'0' as u16;
     const ONE: u16 = b'1' as u16;
     const NINE: u16 = b'9' as u16;
     match key {
@@ -223,6 +226,7 @@ pub(crate) fn translate(key: u16, ctrl: bool, shift: bool) -> Option<Input> {
         VK_DOWN | J => resize(0, 1),
         ONE..=NINE => Some(Input::Pick(usize::from(key - ONE))),
         VK_NUMPAD1..=VK_NUMPAD9 => Some(Input::Pick(usize::from(key - VK_NUMPAD1))),
+        ZERO | VK_NUMPAD0 => Some(Input::Monitor),
         _ => None,
     }
 }
@@ -292,10 +296,14 @@ mod tests {
     }
 
     #[test]
-    fn a_single_window_starts_selected_and_back_cancels() {
+    fn a_single_window_is_picked_by_its_digit_like_any_other() {
         let only = region(10, 20, 300, 400);
         let mut s = Selector::new(1000, 1000, &[only]);
+        assert_eq!(s.state, State::Pick);
+        s.handle(Input::Pick(0));
         assert_eq!(s.selection(), Some(only));
+        assert_eq!(s.handle(Input::Back), Outcome::Continue);
+        assert_eq!(s.state, State::Pick);
         assert_eq!(s.handle(Input::Back), Outcome::Cancel);
     }
 
@@ -308,6 +316,7 @@ mod tests {
     #[test]
     fn each_pair_of_edges_moves_on_its_own() {
         let mut s = Selector::new(1000, 1000, &[region(100, 100, 500, 500)]);
+        s.handle(Input::Pick(0));
         s.handle(resize(Edges::TopLeft, 40, 0));
         s.handle(resize(Edges::TopLeft, 0, -4));
         assert_eq!(s.selection(), Some(region(140, 96, 500, 500)));
@@ -319,6 +328,7 @@ mod tests {
     #[test]
     fn edges_stay_on_the_monitor_and_cannot_cross() {
         let mut s = Selector::new(1000, 1000, &[region(100, 100, 140, 140)]);
+        s.handle(Input::Pick(0));
         s.handle(resize(Edges::TopLeft, 400, 400));
         assert_eq!(s.selection(), Some(region(139, 139, 140, 140)));
         s.handle(resize(Edges::TopLeft, -400, -400));
@@ -333,6 +343,21 @@ mod tests {
         let mut s = Selector::new(200, 100, &windows);
         s.handle(resize(Edges::BottomRight, -40, 0));
         assert_eq!(s.selection(), Some(region(0, 0, 160, 100)));
+    }
+
+    #[test]
+    fn zero_selects_the_whole_monitor_while_picking_or_trimming() {
+        let windows = [region(0, 0, 100, 100), region(100, 0, 200, 100)];
+        let mut s = Selector::new(200, 100, &windows);
+        s.handle(Input::Monitor);
+        assert_eq!(s.selection(), Some(region(0, 0, 200, 100)));
+        // Back still returns to the windows.
+        assert_eq!(s.handle(Input::Back), Outcome::Continue);
+        s.handle(Input::Pick(0));
+        s.handle(Input::Monitor);
+        assert_eq!(s.selection(), Some(region(0, 0, 200, 100)));
+        assert_eq!(translate(b'0'.into(), false, false), Some(Input::Monitor));
+        assert_eq!(translate(VK_NUMPAD0, false, false), Some(Input::Monitor));
     }
 
     #[test]

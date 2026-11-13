@@ -1,8 +1,8 @@
 //! Keyboard-driven region screenshots. The monitor is captured first and shown
 //! frozen, with a digit on each visible window of the workspace. Typing one
 //! makes that window the rectangle; arrows or hjkl then trim it (see
-//! `selector::translate`), and Enter copies it to the clipboard. With one
-//! window the rectangle starts as it, and with none as the whole monitor.
+//! `selector::translate`), and Enter copies it to the clipboard. `0` makes
+//! the rectangle the whole monitor, which it also starts as with no windows.
 //!
 //! Runs on the UI thread. Drawing is plain GDI on a back buffer.
 use std::cell::{Cell, RefCell};
@@ -638,6 +638,10 @@ fn render(session: &mut Session) {
                 let (x, y) = r.center();
                 badge(dc, x, y, &(index + 1).to_string(), ORANGE, 4);
             }
+            // The whole monitor's digit, at the top and in another color so
+            // it isn't taken for the window under it.
+            let (_, half_height) = badge_half_size(dc, &wide("0"));
+            badge(dc, s.width / 2, half_height + 2 * MARKER, "0", LIGHT, 4);
         }
         // The rectangle as it will be copied, the rest dimmed, with a border
         // just outside it so it hides none of what is copied.
