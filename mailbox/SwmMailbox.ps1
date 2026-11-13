@@ -5,7 +5,7 @@
 #   . C:\src\simplewindowmanager\mailbox\SwmMailbox.ps1
 #   Invoke-SwmMailboxCommand { .\build.ps1 }            # or its alias: mbx { ... }
 #   mbx -Title 'nterm release' -Log { cargo build --release }
-#   Enable-SwmMailboxPrompt        # or: report every command that takes 5 s or more
+#   Enable-SwmMailboxPrompt        # or: report every build that takes 5 s or more
 #
 # An entry is one small JSON file in %LOCALAPPDATA%\swm\mailbox\<mailbox>. SWM
 # only reads that folder, so everything here is a plain file write: there is no
@@ -224,16 +224,57 @@ function Invoke-SwmMailboxCommand {
 
 Set-Alias -Name mbx -Value Invoke-SwmMailboxCommand
 
-# Commands the prompt does not report: programs you sit in rather than wait for.
+# Both lists hold patterns for Test-SwmMailboxCommand: a command's name, or its
+# name and first arguments, with wildcards.
+#
+# Commands the prompt reports: work you start and wait for, such as a build.
+$script:SwmMailboxPromptReport = @(
+    'build*', 'msbuild', 'cargo', 'dotnet', 'nuget', 'npm', 'pnpm', 'yarn', 'tsc',
+    'make', 'nmake', 'cmake', 'ninja', 'go', 'gradle', 'gradlew', 'mvn', 'pytest',
+    'docker build'
+)
+# Commands that keep a line from being reported, even beside one of those:
+# programs you sit in rather than wait for.
 $script:SwmMailboxPromptIgnore = @(
     'mbx', 'Invoke-SwmMailboxCommand', 'exit', 'nvim', 'vim', 'vi', 'hx', 'nano', 'code',
     'ssh', 'wsl', 'claude', 'codex', 'pwsh', 'powershell', 'cmd', 'bash', 'less', 'more',
-    'man', 'lazygit', 'htop', 'btop', 'fzf', 'python', 'node', 'psql', 'sqlite3'
+    'man', 'lazygit', 'htop', 'btop', 'fzf', 'python', 'node', 'psql', 'sqlite3',
+    'cargo run', 'cargo watch', 'dotnet run', 'dotnet watch', 'npm start', 'npm run dev'
 )
 # Kept when this file is sourced again: the functions Enable-SwmMailboxPrompt
 # wrapped are only reachable from here.
 if (-not (Get-Variable SwmMailboxPrompt -Scope Script -ErrorAction Ignore)) {
     $script:SwmMailboxPrompt = $null
+}
+
+function Get-SwmMailboxCommands {
+    # Each command `Line` runs, in any of its statements, pipelines and script
+    # blocks, as its name and arguments. The name is without a path or extension:
+    # `cargo build` for `& 'C:\tools\cargo.exe' build`. A command named by an
+    # expression is left out.
+    param([string]$Line)
+    $tokens = $errors = $null
+    $ast = [Management.Automation.Language.Parser]::ParseInput($Line, [ref]$tokens, [ref]$errors)
+    foreach ($command in $ast.FindAll({ $args[0] -is [Management.Automation.Language.CommandAst] }, $true)) {
+        $name = $command.GetCommandName()
+        if (-not $name) { continue }
+        $name = [IO.Path]::GetFileNameWithoutExtension(($name -split '[\\/]')[-1])
+        $arguments = $command.CommandElements | Select-Object -Skip 1 | ForEach-Object { $_.Extent.Text }
+        (@($name) + @($arguments)) -join ' '
+    }
+}
+
+function Test-SwmMailboxCommand {
+    # Whether any of `Commands` (as Get-SwmMailboxCommands gives them) is one of
+    # `Patterns`: `cargo` is every cargo command, `cargo build` only its builds,
+    # and `build*` any command whose name starts that way.
+    param([string[]]$Commands, [string[]]$Patterns)
+    foreach ($command in $Commands) {
+        foreach ($pattern in $Patterns) {
+            if ($command -like $pattern -or $command -like "$pattern *") { return $true }
+        }
+    }
+    $false
 }
 
 function Start-SwmMailboxPromptCommand {
@@ -245,10 +286,11 @@ function Start-SwmMailboxPromptCommand {
     $settings.Pending = $null
     $text = (($Line -split "`r?`n" | ForEach-Object Trim | Where-Object { $_ }) -join '; ')
     if (-not $text) { return }
-    # The command's name: the first word, without a path, extension or call operator.
-    $name = ($text -replace '^[&.]\s+', '' -split '\s+')[0].Trim('"', "'")
-    $name = [IO.Path]::GetFileNameWithoutExtension(($name -split '[\\/]')[-1])
-    if ($name -in $settings.Ignore) { return }
+    # Every command the line runs, not only its first: `cd x; cargo build` is a
+    # build, and `cd x; claude --resume …` is sat in as much as `claude` is.
+    $commands = @(Get-SwmMailboxCommands $Line)
+    if (-not (Test-SwmMailboxCommand $commands $settings.Report)) { return }
+    if (Test-SwmMailboxCommand $commands $settings.Ignore) { return }
     if ($text.Length -gt 120) { $text = $text.Substring(0, 120) + '…' }
     $started = [DateTime]::UtcNow
     $entry = @{
@@ -297,21 +339,26 @@ function Complete-SwmMailboxPromptCommand {
 }
 
 function Enable-SwmMailboxPrompt {
-    # Reports every command that runs for `After` seconds or more to a mailbox,
-    # with nothing to type: running while it runs, then done, failed or stopped.
-    # Call it once, at the end of your profile, after anything else that replaces
-    # the prompt. `mbx -Log` remains for a command whose output you want to open
-    # from the entry.
+    # Reports builds and the like that run for `After` seconds or more to a
+    # mailbox, with nothing to type: running while they run, then done, failed or
+    # stopped. Call it once, at the end of your profile, after anything else that
+    # replaces the prompt. `mbx` remains for a command that is not on the list,
+    # and `mbx -Log` for one whose output you want to open from the entry.
     [CmdletBinding()]
     param(
         [string]$Mailbox = 'Builds',
         [ValidateRange(1, 3600)][int]$After = 5,
-        # Command names not to report, instead of the built-in list.
+        # The commands to report, instead of the built-in list: names such as
+        # `cargo`, a name and its first arguments such as `git clone`, with
+        # wildcards. `*` is every command.
+        [string[]]$Report = $script:SwmMailboxPromptReport,
+        # Commands that keep a line from being reported, instead of the built-in
+        # list; written the same way.
         [string[]]$Ignore = $script:SwmMailboxPromptIgnore
     )
     $previous = $script:SwmMailboxPrompt
     $script:SwmMailboxPrompt = @{
-        Mailbox = $Mailbox; After = $After; Ignore = $Ignore; Pending = $null
+        Mailbox = $Mailbox; After = $After; Report = $Report; Ignore = $Ignore; Pending = $null
         Prompt = $previous.Prompt; ReadLine = $previous.ReadLine
     }
     try { Clear-SwmMailboxOldEntries $Mailbox } catch { }

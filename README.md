@@ -429,7 +429,7 @@ written.
   cannot have SWM read a file that user could not.
 
 `mailbox\SwmMailbox.ps1` writes entries from PowerShell 7. Dot-source it at the
-end of your profile and have the prompt report every command that takes 5 seconds
+end of your profile and have the prompt report every build that takes 5 seconds
 or more, with nothing to type:
 
 ```powershell
@@ -438,12 +438,22 @@ Enable-SwmMailboxPrompt                  # -Mailbox Builds -After 5
 ```
 
 The entry is `running` while the command runs, then `done`, `failed` (with the
-exit code, when a program gave one) or `stopped` after Ctrl+C. Commands you sit in rather than wait for, such as `nvim`,
-`ssh` and `claude`, are not reported; `-Ignore` replaces that list of names. It
-wraps the prompt and PSReadLine's line reader, whatever they already are, and
+exit code, when a program gave one) or `stopped` after Ctrl+C.
+
+Only a line that runs a command on a list is reported: `build*` (so
+`.\build.ps1`), `msbuild`, `cargo`, `dotnet`, `npm`, `make` and other build tools,
+wherever in the line they run (`cd x; cargo build`). `-Report` replaces that list.
+A pattern is a command's name, or its name and first arguments (`git clone`), with
+wildcards; `-Report '*'` reports every command. A second list keeps a line from
+being reported even so, for programs you sit in rather than wait for: `nvim`,
+`ssh`, `claude`, `cargo run` and the like, replaced by `-Ignore`. The lists are
+`$SwmMailboxPromptReport` and `$SwmMailboxPromptIgnore` in the script.
+
+It wraps the prompt and PSReadLine's line reader, whatever they already are, and
 costs about 2 ms a command.
 
-To also keep a command's output, wrap it instead:
+To report a command that is not on the list, or to also keep its output, wrap it
+instead:
 
 ```powershell
 mbx { .\build.ps1 }                                  # Invoke-SwmMailboxCommand
