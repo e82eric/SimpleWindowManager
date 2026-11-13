@@ -34,6 +34,9 @@ const COLUMNS: [&str; 4] = ["Time", "Project", "Speaker", "Text"];
 const SNIPPET_CHARS: usize = 160;
 /// Characters of the matching line shown before the match when it is cut.
 const SNIPPET_LEAD: usize = 40;
+/// The custom picker command that copies the command resuming a match's
+/// conversation.
+const COPY_RESUME: usize = 0;
 /// How often found messages are published to the picker.
 const PUBLISH_EVERY: Duration = Duration::from_millis(100);
 /// The most transcripts read at once.
@@ -92,6 +95,8 @@ struct Grep {
 #[derive(Clone, Debug, PartialEq)]
 struct Hit {
     transcript: PathBuf,
+    /// Where the conversation was started, which is where it can be resumed.
+    started_in: String,
     project: String,
     you: bool,
     /// As the transcript records it, an RFC 3339 time.
@@ -114,6 +119,10 @@ impl PickerRequest for Grep {
             PickerConfig {
                 title: format!("Claude · {text}"),
                 preview_visible: true,
+                commands: vec![nfm_egui::PickerCommand::custom(
+                    COPY_RESUME,
+                    "Copy resume command",
+                )],
                 ..host.config()
             },
             None,
@@ -303,7 +312,37 @@ fn hits_in(path: &Path, text: &str, needle: &str) -> Vec<Hit> {
             hits.push(hit);
         }
     }
+    if !hits.is_empty() {
+        let started_in = started_in(text).unwrap_or_default();
+        for hit in &mut hits {
+            hit.started_in.clone_from(&started_in);
+        }
+    }
     hits
+}
+
+/// The working directory a transcript's first entry records: where the
+/// conversation was started. Later entries may record others.
+fn started_in(text: &str) -> Option<String> {
+    const KEY: &str = r#""cwd":"#;
+    let value = &text[text.find(KEY)? + KEY.len()..];
+    serde_json::Deserializer::from_str(value)
+        .into_iter::<String>()
+        .next()?
+        .ok()
+}
+
+/// The PowerShell command that takes a conversation up again: Claude Code
+/// finds a session by its id only from the folder it was started in.
+fn resume_command(hit: &Hit) -> Option<String> {
+    let session = hit.transcript.file_stem()?.to_str()?;
+    let resume = format!("claude --resume {session}");
+    Some(if hit.started_in.is_empty() {
+        resume
+    } else {
+        let folder = hit.started_in.replace('\'', "''");
+        format!("Set-Location -LiteralPath '{folder}'; {resume}")
+    })
 }
 
 /// The prompt or reply in a transcript line, if it contains `needle`. Like the
@@ -324,6 +363,7 @@ fn message_hit(path: &Path, line: &str, needle: &str) -> Option<Hit> {
     }
     Some(Hit {
         transcript: path.to_owned(),
+        started_in: String::new(),
         project: project(entry["cwd"].as_str().unwrap_or_default()),
         you,
         time: entry["timestamp"].as_str().unwrap_or_default().to_owned(),
@@ -446,6 +486,17 @@ impl PickerView for GrepView {
                 self.opening = open(ctx, hit, self.options.clone());
                 None
             }
+            Some(PickerEvent::CustomAction {
+                action: COPY_RESUME,
+                selection,
+            }) => {
+                let hit = self.hits.lock().unwrap().get(selection.index).cloned()?;
+                // The toast says what was copied, not the row's text.
+                let resume = resume_command(&hit)?;
+                ctx.copy_text(resume.clone());
+                self.picker.notify_copied_value(ctx, &resume);
+                None
+            }
             event => crate::egui_data_menu::copy_or_close(ctx, &mut self.picker, event),
         }
     }
@@ -514,6 +565,27 @@ mod tests {
         );
         assert_eq!(hits[0].project, "src/nfm");
         assert_eq!(hits[0].time, "2026-11-07T10:00:00Z");
+    }
+
+    #[test]
+    fn a_hit_resumes_its_conversation_from_where_it_started() {
+        let moved = TRANSCRIPT.replacen("G:\\\\src\\\\nfm", "G:\\\\src\\\\it's", 1);
+        let hits = hits_in(Path::new(r"C:\projects\G--src\0a1b-2c.jsonl"), &moved, "picker");
+        // Both hits, though the second's entry records another folder.
+        for hit in &hits {
+            assert_eq!(
+                resume_command(hit).as_deref(),
+                Some(r"Set-Location -LiteralPath 'G:\src\it''s'; claude --resume 0a1b-2c")
+            );
+        }
+        let nowhere = Hit {
+            started_in: String::new(),
+            ..hits[0].clone()
+        };
+        assert_eq!(
+            resume_command(&nowhere).as_deref(),
+            Some("claude --resume 0a1b-2c")
+        );
     }
 
     #[test]

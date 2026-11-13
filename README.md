@@ -350,7 +350,10 @@ reply containing it, ignoring ASCII case, newest conversation first, as the
 search finds them; the query then fuzzy-finds among those. The preview shows
 the whole message with the matching line marked, and Enter opens the message's
 conversation. Esc goes back a step each time: from the conversation to the
-matches, to the search text, to Commands.
+matches, to the search text, to Commands. The matches' command palette
+(Ctrl+Shift+/) has **Copy resume command**, which copies the PowerShell command
+that resumes the selected match's conversation: it changes to the folder the
+conversation was started in and runs `claude --resume` with its id.
 
 `Configuration::picker_command` lists a command of your own the same way: a
 `PickerCommand` has a name, the argument it asks for, and a function that is
