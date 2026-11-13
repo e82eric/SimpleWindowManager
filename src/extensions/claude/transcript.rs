@@ -77,6 +77,49 @@ fn conversation(transcript: &str, options: &ClaudeOptions) -> Conversation {
     out
 }
 
+/// How much of the end of a transcript is read for an interrupt.
+const INTERRUPT_TAIL_BYTES: u64 = 64 * 1024;
+
+/// `Interrupted`, if the transcript at `path` ends with a turn the person
+/// stopped at or after `since`, which is when its mailbox entry last started
+/// running or waiting.
+pub(super) fn interrupted(path: &Path, since: std::time::SystemTime) -> Option<String> {
+    let text = crate::extensions::spool::tail(path, INTERRUPT_TAIL_BYTES).ok()?;
+    let since = since.duration_since(std::time::UNIX_EPOCH).ok()?.as_secs();
+    interrupted_since(&text, since).then(|| "Interrupted".to_owned())
+}
+
+/// Whether the transcript's last message is Claude Code's note that the person
+/// interrupted the turn, written at or after `since` (seconds since 1970). An
+/// earlier note belongs to a turn before the one the entry is running now.
+fn interrupted_since(transcript: &str, since: u64) -> bool {
+    for line in transcript.lines().rev() {
+        let Ok(entry) = serde_json::from_str::<Value>(line) else {
+            continue;
+        };
+        if entry["isSidechain"] == true {
+            continue;
+        }
+        match entry["type"].as_str() {
+            // Claude has answered since any interrupt.
+            Some("assistant") => return false,
+            Some("user") => {}
+            // Records of the session itself, such as its mode.
+            _ => continue,
+        }
+        let content = &entry["message"]["content"];
+        let text = content.as_str().or_else(|| content[0]["text"].as_str());
+        if text.is_some_and(|text| text.starts_with("[Request interrupted by user")) {
+            return entry["timestamp"]
+                .as_str()
+                .and_then(nfm_picker_sources::value::parse_timestamp)
+                .and_then(|time| u64::try_from(time.timestamp()).ok())
+                .is_some_and(|time| time >= since);
+        }
+    }
+    false
+}
+
 /// The prompt in a `user` entry, if a person typed it. Claude delivers task
 /// notifications as messages too; newer transcripts mark who a message came
 /// from.
@@ -167,6 +210,40 @@ mod tests {
             "Bash cargo test"
         );
         assert_eq!(call(r#"{"input":{}}"#), "Tool");
+    }
+
+    #[test]
+    fn a_turn_is_interrupted_when_the_note_of_it_is_the_last_message_since_its_prompt() {
+        const PROMPT: &str = r#"{"type":"user","timestamp":"2026-11-12T05:45:25.100Z","message":{"content":"resync"}}"#;
+        const REPLY: &str = r#"{"type":"assistant","timestamp":"2026-11-12T05:45:28Z","message":{"content":[{"type":"text","text":"Looking."}]}}"#;
+        const NOTE: &str = r#"{"type":"user","isSidechain":false,"timestamp":"2026-11-12T05:45:31.385Z","message":{"role":"user","content":[{"type":"text","text":"[Request interrupted by user]"}]}}"#;
+        const MODE: &str = r#"{"type":"mode","mode":"normal"}"#;
+        const SUBAGENT: &str = r#"{"type":"assistant","isSidechain":true,"timestamp":"2026-11-12T05:45:40Z","message":{"content":[{"type":"text","text":"still going"}]}}"#;
+        let noted = nfm_picker_sources::value::parse_timestamp("2026-11-12T05:45:31Z")
+            .unwrap()
+            .timestamp() as u64;
+        let prompted = noted - 6;
+        let interrupted = |lines: &[&str], since| interrupted_since(&transcript(lines), since);
+
+        assert!(interrupted(&[PROMPT, REPLY, NOTE], prompted));
+        // The session's own records and a subagent's messages may follow it.
+        assert!(interrupted(&[PROMPT, NOTE, MODE, SUBAGENT, "{"], prompted));
+        assert!(interrupted(&[NOTE], noted));
+        // Stopped while a tool was asking for permission.
+        let tool = NOTE.replace("by user]", "by user for tool use]");
+        assert!(interrupted(&[PROMPT, &tool], prompted));
+
+        // Still working, or finished.
+        assert!(!interrupted(&[PROMPT, REPLY], prompted));
+        assert!(!interrupted(&[], prompted));
+        // Claude answered after it.
+        assert!(!interrupted(&[PROMPT, NOTE, REPLY], prompted));
+        // The entry started running after it: a turn before this one was interrupted.
+        assert!(!interrupted(&[PROMPT, NOTE], noted + 1));
+        assert!(!interrupted(&[PROMPT, NOTE, PROMPT], noted + 30));
+        // A prompt that only quotes the note.
+        let quoted = PROMPT.replace("resync", "why [Request interrupted by user]?");
+        assert!(!interrupted(&[&quoted], 0));
     }
 
     #[test]

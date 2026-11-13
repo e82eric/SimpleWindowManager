@@ -500,9 +500,12 @@ asks you to trust new hooks with `/hooks`):
 ```
 
 Each event starts PowerShell, about a quarter of a second; `async` keeps that
-from delaying Claude. A session that is interrupted stays `running` until its
-next prompt or until the agent exits, since Claude Code has no hook for an
-interrupt.
+from delaying Claude. Claude Code has no hook for a turn stopped with Escape, so
+the hook leaves that entry `running`; SWM reads the end of the session's
+transcript instead, and lists a turn Claude Code recorded as interrupted as done,
+with `Interrupted` as its detail. A kind of your own does the same with
+`Kind::ended`, which is asked how the work in a running or waiting entry's log
+ended, if it has.
 
 ## Implemented surface
 

@@ -97,9 +97,13 @@ pub struct Kind {
     /// have for every kind.
     pub color: Color32,
     viewer: Option<Arc<ViewLog>>,
+    ended: Option<Arc<Ended>>,
 }
 /// From a log's path and a title to the picker that shows it.
 type ViewLog = dyn Fn(&Path, String) -> Result<DocumentPicker, String> + Send + Sync;
+/// From a log's path and when its entry entered its state to how the work has
+/// ended since, if the log shows that it has.
+type Ended = dyn Fn(&Path, SystemTime) -> Option<String> + Send + Sync;
 impl Kind {
     pub fn new(name: impl Into<String>, shape: DrawShape, color: Color32) -> Self {
         Self {
@@ -107,7 +111,21 @@ impl Kind {
             shape,
             color,
             viewer: None,
+            ended: None,
         }
+    }
+    /// Has the logs of this kind's running and waiting entries say when the work
+    /// ended without its writer reporting it, such as an agent's turn that was
+    /// interrupted. `ended` is given the log and when the entry entered its
+    /// state, and returns how the work ended since, such as `Interrupted`: the
+    /// entry is then listed as done with that as its detail. It runs as the
+    /// desktop user, each time the log has been written.
+    pub fn ended(
+        mut self,
+        ended: impl Fn(&Path, SystemTime) -> Option<String> + Send + Sync + 'static,
+    ) -> Self {
+        self.ended = Some(Arc::new(ended));
+        self
     }
     /// Shows the log of an entry of this kind with `viewer`, rather than as text.
     /// The viewer runs as the desktop user, as every read of the folder does.
@@ -271,13 +289,19 @@ fn run(mailbox: &MailboxSender, options: &SpoolOptions) {
         return;
     };
     let mut files = Files::default();
+    let mut logs = Logs::default();
     let mut tracker = Tracker::default();
     let mut reported = false;
     loop {
         let now = SystemTime::now();
+        let read = || {
+            let mut entries = files.read(&directory);
+            logs.settle(&mut entries, options);
+            entries
+        };
         // A failure here is the desktop shell being away, such as while Explorer
         // restarts: keep what is shown and say so once.
-        match crate::process::as_desktop_user(|| files.read(&directory)) {
+        match crate::process::as_desktop_user(read) {
             Ok(mut entries) => {
                 reported = false;
                 for entry in &mut entries {
@@ -465,6 +489,48 @@ fn read_limited(path: &Path) -> Option<String> {
     (bytes.len() as u64 <= MAX_FILE_BYTES).then(|| String::from_utf8_lossy(&bytes).into_owned())
 }
 
+/// What the logs of running and waiting entries said of how their work ended
+/// (`Kind::ended`). A log is asked again only when it has been written, or its
+/// entry has entered a state since.
+#[derive(Default)]
+struct Logs(HashMap<String, (LogRead, Option<String>)>);
+/// When a log was written, its length, and when its entry entered its state.
+type LogRead = (SystemTime, u64, SystemTime);
+impl Logs {
+    /// Makes each entry whose log says its work has ended a done one, kept as
+    /// finished work is: it no longer depends on its process.
+    fn settle(&mut self, entries: &mut [Entry], options: &SpoolOptions) {
+        let mut asked = HashMap::new();
+        for entry in entries {
+            if ![RUNNING, WAITING].contains(&entry.state.as_str()) {
+                continue;
+            }
+            let ended = options.kind_of(entry).and_then(|kind| kind.ended.as_ref());
+            let (Some(ended), Some(log)) = (ended, &entry.log) else {
+                continue;
+            };
+            let Ok(metadata) = std::fs::metadata(log) else {
+                continue;
+            };
+            let Ok(written) = metadata.modified() else {
+                continue;
+            };
+            let read = (written, metadata.len(), entry.time);
+            let how = match self.0.remove(&entry.id) {
+                Some((before, how)) if before == read => how,
+                _ => ended(log, entry.time),
+            };
+            asked.insert(entry.id.clone(), (read, how.clone()));
+            if let Some(how) = how {
+                entry.state = DONE.to_owned();
+                entry.detail = how;
+                entry.pid = None;
+            }
+        }
+        self.0 = asked;
+    }
+}
+
 /// What the mailbox shows, and when each entry's process was found gone.
 #[derive(Default)]
 struct Tracker {
@@ -567,7 +633,8 @@ fn log_picker(
     title: String,
     options: &SpoolOptions,
 ) -> Result<DocumentPicker, String> {
-    let text = tail(path).map_err(|error| format!("reading {}: {error}", path.display()))?;
+    let text = tail(path, LOG_TAIL_BYTES)
+        .map_err(|error| format!("reading {}: {error}", path.display()))?;
     let mut out = DocumentWriter::default();
     let mut items = Vec::new();
     let colored = |color| Style {
@@ -667,14 +734,13 @@ fn strip_escapes(line: &str) -> String {
     out
 }
 
-/// The last `LOG_TAIL_BYTES` of `path`, without a partial first line.
-fn tail(path: &Path) -> std::io::Result<String> {
+/// The last `length` bytes of `path`, without a partial first line.
+pub(crate) fn tail(path: &Path, length: u64) -> std::io::Result<String> {
     let mut file = std::fs::File::open(path)?;
-    let length = file.metadata()?.len();
-    let start = length.saturating_sub(LOG_TAIL_BYTES);
+    let start = file.metadata()?.len().saturating_sub(length);
     file.seek(SeekFrom::Start(start))?;
     let mut bytes = Vec::new();
-    file.take(LOG_TAIL_BYTES).read_to_end(&mut bytes)?;
+    file.take(length).read_to_end(&mut bytes)?;
     let text = String::from_utf8_lossy(&bytes).into_owned();
     Ok(match (start > 0, text.find('\n')) {
         (true, Some(newline)) => text[newline + 1..].to_owned(),
@@ -787,6 +853,60 @@ mod tests {
                 "claude-done",
             ]
         );
+    }
+
+    #[test]
+    fn a_log_that_says_its_work_ended_makes_a_running_entry_done() {
+        let dir = std::env::temp_dir().join(format!("swm-spool-ended-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let log = dir.join("session.jsonl");
+        std::fs::write(&log, "working").unwrap();
+        let asked = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let count = asked.clone();
+        let options = SpoolOptions::named("Agents")
+            .kind(
+                Kind::new("claude", ring, Color32::RED).ended(move |log, _| {
+                    count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    (std::fs::read_to_string(log).unwrap() == "interrupted")
+                        .then(|| "Interrupted".to_owned())
+                }),
+            )
+            .kind(Kind::new("codex", ring, Color32::BLUE));
+        let of = |kind: &str, state: &str| {
+            let json = serde_json::json!({ "state": state, "kind": kind, "pid": 7, "log": log });
+            entry(kind, &json.to_string())
+        };
+        let mut logs = Logs::default();
+        let mut settle = |entries: &mut Vec<Entry>| {
+            logs.settle(entries, &options);
+            let asked = asked.load(std::sync::atomic::Ordering::Relaxed);
+            (entries[0].state.clone(), entries[0].pid, asked)
+        };
+        let mut entries = vec![of("claude", "running"), of("codex", "running")];
+        assert_eq!(settle(&mut entries), (RUNNING.to_owned(), Some(7), 1));
+        // The log has not been written since: not asked again.
+        assert_eq!(settle(&mut entries), (RUNNING.to_owned(), Some(7), 1));
+
+        std::fs::write(&log, "interrupted").unwrap();
+        let mut entries = vec![of("claude", "waiting"), of("codex", "running")];
+        // Done, and no longer its process's: it stays listed after the agent exits.
+        assert_eq!(settle(&mut entries), (DONE.to_owned(), None, 2));
+        assert_eq!(entries[0].detail, "Interrupted");
+        // A kind that does not ask its logs keeps what its writer said.
+        assert_eq!(entries[1].state, RUNNING);
+        let mut entries = vec![of("claude", "running")];
+        assert_eq!(settle(&mut entries), (DONE.to_owned(), None, 2));
+
+        // A later prompt: the entry entered its state again, so the log is asked again.
+        let mut entries = vec![Entry {
+            time: UNIX_EPOCH + NOW + DAY,
+            ..of("claude", "running")
+        }];
+        assert_eq!(settle(&mut entries).2, 3);
+        // Only work in progress is asked about.
+        let mut entries = vec![of("claude", "done"), of("claude", "failed")];
+        assert_eq!(settle(&mut entries), (DONE.to_owned(), Some(7), 3));
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]

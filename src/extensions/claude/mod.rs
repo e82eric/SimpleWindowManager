@@ -25,6 +25,9 @@ use nfm_egui::egui::{self, Color32};
 pub fn kind(options: ClaudeOptions) -> crate::extensions::spool::Kind {
     crate::extensions::spool::Kind::new("claude", spark, options.claude)
         .viewer(move |path, title| transcript::picker(path, title, &options))
+        // Claude Code has no hook for a turn stopped with Escape; its transcript
+        // records it.
+        .ended(transcript::interrupted)
 }
 
 /// Claude's spark: uneven rays around a center, filling `area`. Pass it to
