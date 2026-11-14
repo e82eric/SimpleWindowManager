@@ -65,6 +65,10 @@ pub fn release(x: i32, y: i32) {
 pub fn dirty() {
     DIRTY.store(true, Ordering::Release);
 }
+/// Whether a change is waiting to be published.
+pub fn is_dirty() -> bool {
+    DIRTY.load(Ordering::Acquire)
+}
 pub fn publish(runtime: &Runtime) {
     let snapshot = Arc::new(Snapshot {
         configuration: Arc::new(runtime.configuration.clone()),

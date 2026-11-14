@@ -12,6 +12,78 @@ const MAX_WORKSPACES: usize = 10;
 /// other activations again.
 const FOCUS_EXPECTATION_DURATION: std::time::Duration = std::time::Duration::from_millis(500);
 
+/// Decides when an inconsistency found by polling is worth a log line: once it
+/// has been seen on two polls running, since one sighting may be an event still
+/// on its way, and then not again until it changes or clears.
+struct DriftWatch<T> {
+    pending: Option<T>,
+    reported: Option<T>,
+}
+
+impl<T: PartialEq> DriftWatch<T> {
+    const fn new() -> Self {
+        Self {
+            pending: None,
+            reported: None,
+        }
+    }
+
+    /// Record this poll's finding; true when it should be logged.
+    fn observe(&mut self, seen: Option<T>) -> bool {
+        if seen.is_none() || seen != self.reported {
+            self.reported = None;
+        }
+        if seen.is_none() || self.reported.is_some() {
+            self.pending = None;
+            return false;
+        }
+        if seen == self.pending {
+            self.reported = self.pending.take();
+            return true;
+        }
+        self.pending = seen;
+        false
+    }
+
+    /// A poll that could not look breaks a run of sightings.
+    fn interrupt(&mut self) {
+        self.pending = None;
+    }
+}
+
+#[cfg(test)]
+mod drift_watch_tests {
+    use super::DriftWatch;
+
+    #[test]
+    fn drift_is_logged_once_after_two_sightings_running() {
+        let mut watch = DriftWatch::new();
+        assert!(!watch.observe(Some(1)));
+        assert!(watch.observe(Some(1)));
+        // It lasts, and is not logged again.
+        assert!(!watch.observe(Some(1)));
+        assert!(!watch.observe(Some(1)));
+        // A different drift starts over.
+        assert!(!watch.observe(Some(2)));
+        assert!(watch.observe(Some(2)));
+        // So does the same drift after it cleared.
+        assert!(!watch.observe(None));
+        assert!(!watch.observe(Some(2)));
+        assert!(watch.observe(Some(2)));
+    }
+
+    #[test]
+    fn single_sightings_are_not_logged() {
+        let mut watch = DriftWatch::new();
+        assert!(!watch.observe(Some(1)));
+        assert!(!watch.observe(None));
+        assert!(!watch.observe(Some(1)));
+        watch.interrupt();
+        assert!(!watch.observe(Some(1)));
+        assert!(!watch.observe(Some(2)));
+    }
+}
+
 pub struct Runtime {
     pub configuration: Configuration,
     pub hidden_window_monitor: Monitor,
@@ -26,6 +98,11 @@ pub struct Runtime {
     /// Window the manager just focused, and when to stop holding out for its
     /// activation; see `foreground_changed`.
     expected_foreground: Option<(isize, std::time::Instant)>,
+    /// What `report_ui_drift` last saw wrong with the focus state, the border
+    /// and the bars.
+    focus_drift: DriftWatch<(isize, bool)>,
+    border_drift: DriftWatch<&'static str>,
+    bar_drift: DriftWatch<String>,
     pub event_foreground_hwnd: isize,
     pub is_foreground_window_same_as_selected: bool,
 }
@@ -105,6 +182,9 @@ impl Runtime {
             drop_target_window: None,
             border_frame: std::cell::Cell::new(None),
             expected_foreground: None,
+            focus_drift: DriftWatch::new(),
+            border_drift: DriftWatch::new(),
+            bar_drift: DriftWatch::new(),
             event_foreground_hwnd: 0,
             is_foreground_window_same_as_selected: false,
         }
@@ -1004,18 +1084,27 @@ impl Runtime {
         crate::worker::dirty();
     }
 
-    pub fn refresh_ui_state(&mut self) {
+    /// Compare what the events have recorded with what is really on screen
+    /// and log any difference. Nothing is corrected: the events are meant to
+    /// keep the state right on their own, and this is how a miss gets noticed.
+    pub fn report_ui_drift(&mut self) {
         let foreground = foreground_window();
         // The foreground hook skips this process, so a picker or other popup
-        // of ours never becomes the focused window through an event. Polling
-        // must agree, or the bar flips to this process while one is open. A
-        // bar is the exception: it is focused on purpose for an empty
-        // workspace.
+        // of ours is never recorded as the focused window. A bar is: it is
+        // focused on purpose for an empty workspace.
         let own_popup = is_own_process_window(foreground) && !self.is_bar(foreground);
-        if own_popup {
+        // Nor is there anything to compare while no window is foreground, or
+        // while a focus request is still waiting for its event.
+        let awaiting = self
+            .expected_foreground
+            .is_some_and(|(_, deadline)| std::time::Instant::now() < deadline);
+        if own_popup || foreground == 0 || awaiting {
+            self.focus_drift.interrupt();
+            self.border_drift.interrupt();
+            self.bar_drift.interrupt();
             return;
         }
-        self.is_foreground_window_same_as_selected = self
+        let same_as_selected = self
             .configuration
             .state
             .selected_monitor
@@ -1023,9 +1112,70 @@ impl Runtime {
             .and_then(|workspace| self.configuration.state.workspaces[workspace.0].selected)
             .and_then(|client| self.configuration.state.clients[client.0].as_ref())
             .is_some_and(|client| client.data.hwnd == foreground);
-        self.event_foreground_hwnd = foreground;
-        self.redraw_bars();
-        self.border_window_update();
+        let polled = (foreground, same_as_selected);
+        let recorded = (
+            self.event_foreground_hwnd,
+            self.is_foreground_window_same_as_selected,
+        );
+        if self
+            .focus_drift
+            .observe((polled != recorded).then_some(polled))
+        {
+            crate::error_log::report(
+                "focus state drifted",
+                format!(
+                    "recorded foreground {} (selected: {}), actual {} (selected: {})",
+                    window_label(recorded.0),
+                    recorded.1,
+                    window_label(polled.0),
+                    polled.1,
+                ),
+            );
+        }
+        let border = self.border_window.as_ref().and_then(|border| {
+            let target = self.border_target().map(|(hwnd, rect, _)| (hwnd, rect));
+            crate::border::border_drift(border, target)
+        });
+        if self.border_drift.observe(border) {
+            crate::error_log::report(
+                "border drifted",
+                format!("the border needs to be {}", border.unwrap_or_default()),
+            );
+        }
+        let bars = self.bar_drift_description();
+        if self.bar_drift.observe(bars.clone()) {
+            crate::error_log::report("bar drifted", bars.unwrap_or_default());
+        }
+    }
+
+    /// The first bar whose published contents differ from what the state now
+    /// gives, unless a publication is already due.
+    fn bar_drift_description(&self) -> Option<String> {
+        if crate::worker::is_dirty() {
+            return None;
+        }
+        let published = crate::worker::snapshot()?;
+        (0..self.configuration.state.monitors.len()).find_map(|monitor| {
+            let shown = published.bars.get(monitor)?.as_ref()?;
+            let current = self.bar_snapshot(monitor)?;
+            let mut stale = Vec::new();
+            if shown.focused_window != current.focused_window {
+                stale.push(format!(
+                    "focused window \"{}\" should be \"{}\"",
+                    shown.focused_window, current.focused_window
+                ));
+            }
+            if shown.workspace_info != current.workspace_info {
+                stale.push(format!(
+                    "workspace \"{}\" should be \"{}\"",
+                    shown.workspace_info, current.workspace_info
+                ));
+            }
+            if shown.tags != current.tags || shown.selected_monitor != current.selected_monitor {
+                stale.push("workspace tags are out of date".to_string());
+            }
+            (!stale.is_empty()).then(|| format!("bar {monitor}: {}", stale.join("; ")))
+        })
     }
 
     pub fn create_border_window(&mut self) -> PlatformResult<()> {
@@ -1077,15 +1227,11 @@ impl Runtime {
         }
     }
 
-    pub fn border_window_update(&self) {
-        let Some(border) = &self.border_window else {
-            return;
-        };
-        if !crate::ui::menu_visible() {
-            crate::platform::set_border_lost_focus(!self.is_foreground_window_same_as_selected);
-        }
-        let target = self
-            .configuration
+    /// The window the border belongs on and its frame there, and whether that
+    /// frame is the cached one: it is only while it still describes the
+    /// window's layout.
+    fn border_target(&self) -> Option<(isize, Rect, bool)> {
+        self.configuration
             .state
             .selected_monitor
             .and_then(|monitor| self.configuration.state.monitors[monitor.0].workspace)
@@ -1094,23 +1240,29 @@ impl Runtime {
             .filter(|client| client.is_visible && !is_iconic(client.data.hwnd))
             .map(|client| {
                 let expected = client.data.rect;
-                let rect = match self.border_frame.get() {
+                match self.border_frame.get() {
                     Some((hwnd, layout, actual))
                         if hwnd == client.data.hwnd && layout == expected =>
                     {
-                        actual
+                        (client.data.hwnd, actual, true)
                     }
-                    _ => {
-                        self.border_frame.set(None);
-                        expected
-                    }
-                };
-                (client.data.hwnd, rect)
-            });
-        if target.is_none() {
+                    _ => (client.data.hwnd, expected, false),
+                }
+            })
+    }
+
+    pub fn border_window_update(&self) {
+        let Some(border) = &self.border_window else {
+            return;
+        };
+        if !crate::ui::menu_visible() {
+            crate::platform::set_border_lost_focus(!self.is_foreground_window_same_as_selected);
+        }
+        let target = self.border_target();
+        if !target.is_some_and(|(_, _, cached)| cached) {
             self.border_frame.set(None);
         }
-        crate::border::update_border(border, target);
+        crate::border::update_border(border, target.map(|(hwnd, rect, _)| (hwnd, rect)));
     }
 
     pub fn bar_snapshot(&self, monitor_index: usize) -> Option<crate::bar::BarSnapshot> {
@@ -1844,7 +1996,28 @@ fn cursor_position() -> PlatformResult<(i32, i32)> {
 fn set_foreground_window(hwnd: isize) {
     // Windows may deny foreground activation as normal focus-stealing policy.
     // Callers already preserve their state and retry where appropriate.
-    let _ = unsafe { windows_sys::Win32::UI::WindowsAndMessaging::SetForegroundWindow(hwnd as _) };
+    if unsafe { windows_sys::Win32::UI::WindowsAndMessaging::SetForegroundWindow(hwnd as _) } == 0 {
+        report_refused_activation(hwnd);
+    }
+}
+
+/// No event follows a refused activation, so the log is the only trace of it.
+fn report_refused_activation(hwnd: isize) {
+    crate::error_log::report(
+        "activation refused",
+        format!("SetForegroundWindow({}) was refused", window_label(hwnd)),
+    );
+}
+
+/// A window's handle and executable, for log messages.
+fn window_label(hwnd: isize) -> String {
+    let image = crate::snapshot::capture_foreground_window(hwnd)
+        .map(|window| window.data.process_image_name)
+        .unwrap_or_default();
+    match image.rsplit(['\\', '/']).next() {
+        Some(name) if !name.is_empty() => format!("{hwnd:#x} {name}"),
+        _ => format!("{hwnd:#x}"),
+    }
 }
 fn is_window(hwnd: isize) -> bool {
     unsafe { windows_sys::Win32::UI::WindowsAndMessaging::IsWindow(hwnd as _) != 0 }
@@ -1859,7 +2032,9 @@ fn nudge_set_foreground_window(hwnd: isize) {
     use windows_sys::Win32::UI::Input::KeyboardAndMouse::keybd_event;
     unsafe {
         keybd_event(0, 0, 0, 0);
-        let _ = windows_sys::Win32::UI::WindowsAndMessaging::SetForegroundWindow(hwnd as _);
+        if windows_sys::Win32::UI::WindowsAndMessaging::SetForegroundWindow(hwnd as _) == 0 {
+            report_refused_activation(hwnd);
+        }
     }
 }
 

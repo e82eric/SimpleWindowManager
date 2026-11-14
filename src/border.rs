@@ -483,6 +483,43 @@ pub fn create_border_window(
     })
 }
 
+/// What `update_border` would have to do to put the border on `target`, if
+/// anything. Changes nothing.
+pub fn border_drift(
+    window: &BorderWindow,
+    target: Option<(isize, crate::Rect)>,
+) -> Option<&'static str> {
+    use windows_sys::Win32::UI::WindowsAndMessaging::*;
+    unsafe {
+        let visible = IsWindowVisible(window.hwnd as _) != 0;
+        let Some((target_hwnd, target)) = target else {
+            return visible.then_some("hidden");
+        };
+        let target = border_rect(target);
+        let mut current = windows_sys::Win32::Foundation::RECT::default();
+        if GetWindowRect(window.hwnd as _, &mut current) == 0 {
+            return None;
+        }
+        let topmost =
+            |hwnd: isize| GetWindowLongW(hwnd as _, GWL_EXSTYLE) as u32 & WS_EX_TOPMOST != 0;
+        if !visible {
+            Some("shown")
+        } else if current.right - current.left != target.right - target.left
+            || current.bottom - current.top != target.bottom - target.top
+        {
+            Some("resized")
+        } else if current.left != target.left || current.top != target.top {
+            Some("moved")
+        } else if topmost(window.hwnd) != topmost(target_hwnd)
+            || GetWindow(target_hwnd as _, GW_HWNDNEXT) != window.hwnd as _
+        {
+            Some("restacked")
+        } else {
+            None
+        }
+    }
+}
+
 pub fn update_border(window: &BorderWindow, target: Option<(isize, crate::Rect)>) {
     use windows_sys::Win32::Graphics::Gdi::InvalidateRect;
     use windows_sys::Win32::UI::WindowsAndMessaging::*;

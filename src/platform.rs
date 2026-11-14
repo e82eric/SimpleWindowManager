@@ -37,7 +37,7 @@ pub(crate) fn window_message_name(message: u32) -> &'static str {
     }
 }
 
-unsafe extern "system" fn refresh_ui_state(
+unsafe extern "system" fn report_ui_drift(
     _hwnd: windows_sys::Win32::Foundation::HWND,
     _message: u32,
     _timer_id: usize,
@@ -46,7 +46,7 @@ unsafe extern "system" fn refresh_ui_state(
     if let Some(runtime) = RUNTIME.get()
         && let Ok(mut runtime) = runtime.try_lock()
     {
-        runtime.refresh_ui_state();
+        runtime.report_ui_drift();
     }
 }
 
@@ -876,6 +876,7 @@ unsafe extern "system" fn handle_windows_event(
         return;
     };
     let Ok(mut runtime) = runtime.try_lock() else {
+        report_dropped_event(event, hwnd as isize);
         return;
     };
     let raw = hwnd as isize;
@@ -948,6 +949,34 @@ fn win_event_name(event: u32) -> &'static str {
         EVENT_SYSTEM_MINIMIZESTART => "EVENT_SYSTEM_MINIMIZESTART",
         _ => "UNKNOWN_WIN_EVENT",
     }
+}
+
+/// An event that arrives while the runtime is busy is lost, and the state it
+/// would have updated stays stale. Events come in bursts, so report at most
+/// one a second, with how many were lost since the last report.
+fn report_dropped_event(event: u32, hwnd: isize) {
+    use std::time::{Duration, Instant};
+    static DROPPED: Mutex<(u32, Option<Instant>)> = Mutex::new((0, None));
+    let mut dropped = DROPPED
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    dropped.0 += 1;
+    if dropped
+        .1
+        .is_some_and(|last| last.elapsed() < Duration::from_secs(1))
+    {
+        return;
+    }
+    let count = std::mem::take(&mut dropped.0);
+    dropped.1 = Some(Instant::now());
+    drop(dropped);
+    crate::error_log::report(
+        "windows event dropped",
+        format!(
+            "{} for {hwnd:#x} arrived while the runtime was busy ({count} dropped since the last report)",
+            win_event_name(event),
+        ),
+    );
 }
 
 fn report_win_event_error(event: u32, hwnd: isize, object: i32, child: i32, error: PlatformError) {
@@ -1129,7 +1158,7 @@ pub(crate) fn run_worker(
         crate::worker::publish(&runtime);
     }
     cleanup.hooks = install_win_event_hooks()?;
-    cleanup.timer = unsafe { SetTimer(std::ptr::null_mut(), 0, 1500, Some(refresh_ui_state)) };
+    cleanup.timer = unsafe { SetTimer(std::ptr::null_mut(), 0, 1500, Some(report_ui_drift)) };
     let mut message = MSG::default();
     while !stop.load(Ordering::Acquire) {
         // Polling also drains commands whose wake arrived during a nested loop.
