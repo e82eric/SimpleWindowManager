@@ -545,7 +545,18 @@ impl Runtime {
             && let Some(bar) = crate::ui::bar_handle(monitor.0)
         {
             set_foreground_window(bar);
+            // The foreground hook skips this process, so no event will report
+            // the bar taking focus.
+            if foreground_window() == bar {
+                self.event_foreground_hwnd = bar;
+                self.is_foreground_window_same_as_selected = false;
+            }
         }
+    }
+
+    fn is_bar(&self, hwnd: isize) -> bool {
+        (0..self.configuration.state.monitors.len())
+            .any(|monitor| crate::ui::bar_handle(monitor) == Some(hwnd))
     }
 
     fn toggle_routing(&mut self, mode: WindowRoutingMode) {
@@ -1000,9 +1011,7 @@ impl Runtime {
         // must agree, or the bar flips to this process while one is open. A
         // bar is the exception: it is focused on purpose for an empty
         // workspace.
-        let own_popup = is_own_process_window(foreground)
-            && !(0..self.configuration.state.monitors.len())
-                .any(|monitor| crate::ui::bar_handle(monitor) == Some(foreground));
+        let own_popup = is_own_process_window(foreground) && !self.is_bar(foreground);
         if own_popup {
             return;
         }
@@ -1166,7 +1175,12 @@ impl Runtime {
                 item.clients.len(),
                 mode
             ),
-            focused_window: format!("{} ({}){}{}", process, pid, indicator, admin),
+            // A focused bar means the workspace has nothing to focus.
+            focused_window: if self.is_bar(foreground) {
+                String::new()
+            } else {
+                format!("{} ({}){}{}", process, pid, indicator, admin)
+            },
             focus_style: self.configuration.bar_focus,
             segments: crate::bar::rendered_segments(&self.configuration.bar_segments),
             mailboxes: Vec::new(),
