@@ -1150,13 +1150,7 @@ impl Runtime {
             .filter(|name| !name.is_empty())
             .unwrap_or("Unknown");
         let pid = data.map(|data| data.process_id).unwrap_or(0);
-        let indicator = if focused.is_none() {
-            " (F)"
-        } else if self.is_foreground_window_same_as_selected {
-            ""
-        } else {
-            " (*)"
-        };
+        let indicator = if focused.is_none() { " (F)" } else { "" };
         let admin = if data.is_some_and(|data| data.is_elevated) {
             " (A)"
         } else {
