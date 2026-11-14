@@ -995,6 +995,17 @@ impl Runtime {
 
     pub fn refresh_ui_state(&mut self) {
         let foreground = foreground_window();
+        // The foreground hook skips this process, so a picker or other popup
+        // of ours never becomes the focused window through an event. Polling
+        // must agree, or the bar flips to this process while one is open. A
+        // bar is the exception: it is focused on purpose for an empty
+        // workspace.
+        let own_popup = is_own_process_window(foreground)
+            && !(0..self.configuration.state.monitors.len())
+                .any(|monitor| crate::ui::bar_handle(monitor) == Some(foreground));
+        if own_popup {
+            return;
+        }
         self.is_foreground_window_same_as_selected = self
             .configuration
             .state
@@ -1770,6 +1781,17 @@ fn primary_taskbar_height() -> i32 {
 
 fn foreground_window() -> isize {
     unsafe { windows_sys::Win32::UI::WindowsAndMessaging::GetForegroundWindow() as isize }
+}
+
+fn is_own_process_window(hwnd: isize) -> bool {
+    let mut process_id = 0;
+    unsafe {
+        windows_sys::Win32::UI::WindowsAndMessaging::GetWindowThreadProcessId(
+            hwnd as _,
+            &mut process_id,
+        ) != 0
+            && process_id == windows_sys::Win32::System::Threading::GetCurrentProcessId()
+    }
 }
 
 /// A click activates a window on button down, so a held button means an
