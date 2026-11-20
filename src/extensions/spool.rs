@@ -67,7 +67,10 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+pub mod remote;
 pub mod watch;
+
+pub use remote::Remotes;
 
 pub const RUNNING: &str = "running";
 pub const WAITING: &str = "waiting";
@@ -246,6 +249,9 @@ pub struct SpoolOptions {
     pub highlight: Color32,
     /// Logs open filling the picker monitor up to the bar, rather than centered.
     pub full_pane: bool,
+    /// Other machines whose folders of this name are listed too, each entry
+    /// under its machine's name; see `spool::remote`.
+    pub remotes: Remotes,
 }
 impl SpoolOptions {
     pub fn named(name: impl Into<String>) -> Self {
@@ -256,6 +262,7 @@ impl SpoolOptions {
             kinds: Vec::new(),
             highlight: Color32::from_rgb(0x3c, 0x38, 0x36),
             full_pane: false,
+            remotes: Remotes::default(),
         }
     }
     /// Gives the entries of a kind, such as `claude::kind(options)`, badges and a
@@ -266,6 +273,12 @@ impl SpoolOptions {
     pub fn kind(mut self, kind: Kind) -> Self {
         self.kinds.retain(|known| known.name != kind.name);
         self.kinds.push(kind);
+        self
+    }
+    /// Lists the folders of this name on `remotes` too: the same list given to
+    /// several mailboxes is one connection to each machine.
+    pub fn remotes(mut self, remotes: &Remotes) -> Self {
+        self.remotes = remotes.clone();
         self
     }
     fn kind_of(&self, entry: &Entry) -> Option<&Kind> {
@@ -437,6 +450,7 @@ fn run(mailbox: &MailboxSender, options: &SpoolOptions) {
         let now = SystemTime::now();
         let read = || {
             let mut entries = files.read(&directory);
+            entries.extend(options.remotes.entries(&options.name));
             logs.settle(&mut entries, options);
             entries
         };
@@ -531,6 +545,9 @@ struct Entry {
     kind: Option<String>,
     /// Not listed until this long after `time`.
     delay: Option<Duration>,
+    /// Whether its process runs, for an entry of another machine, which is
+    /// the one that can say (`spool::remote`).
+    elsewhere: Option<bool>,
     /// The other text in the file, by name: its kind's, and nothing here.
     fields: BTreeMap<String, String>,
 }
@@ -577,6 +594,7 @@ impl Entry {
             delay: number("delay")
                 .filter(|seconds| *seconds > 0)
                 .map(|seconds| Duration::from_secs(seconds.min(MAX_DELAY_SECONDS))),
+            elsewhere: None,
             fields: value
                 .as_object()
                 .into_iter()
@@ -590,8 +608,12 @@ impl Entry {
                 .collect(),
         })
     }
-    /// Whether the entry names a process that is still running.
+    /// Whether the entry names a process that is still running: here, or for
+    /// an entry of another machine, as that machine said.
     fn process_is_running(&self) -> bool {
+        if let Some(running) = self.elsewhere {
+            return self.pid.is_some() && running;
+        }
         self.pid.is_some_and(|pid| {
             let since = crate::process::running_since(pid);
             since.is_some() && self.started.is_none_or(|started| since == Some(started))

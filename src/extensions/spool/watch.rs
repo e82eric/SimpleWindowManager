@@ -91,7 +91,12 @@ impl Message {
             return Some(Self::Pass);
         }
         let named = |of: &Value| {
-            let name = |key: &str| of[key].as_str().filter(|name| is_id(name)).map(str::to_owned);
+            let name = |key: &str| {
+                of[key]
+                    .as_str()
+                    .filter(|name| is_id(name))
+                    .map(str::to_owned)
+            };
             Some((name("mailbox")?, name("id")?))
         };
         if let Some(entry) = value.get("entry") {
@@ -422,7 +427,8 @@ mod tests {
 
         // What is added, holding back a character that is not all there yet.
         let mut file = std::fs::OpenOptions::new().append(true).open(&log).unwrap();
-        file.write_all("fourth \u{e9}".as_bytes().split_last().unwrap().1).unwrap();
+        file.write_all("fourth \u{e9}".as_bytes().split_last().unwrap().1)
+            .unwrap();
         assert_eq!(logs(&mut watch), [(false, "fourth ".to_owned())]);
         assert_eq!(logs(&mut watch), []);
         file.write_all(&"\u{e9}".as_bytes()[1..]).unwrap();

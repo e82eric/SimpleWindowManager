@@ -402,3 +402,134 @@ mod tests {
         assert_eq!(quote_argument(r#"a\"b"#), r#""a\\\"b""#);
     }
 }
+
+/// A program started by `run_piped_as_desktop_user`. It is stopped when this
+/// is dropped.
+pub struct Piped {
+    /// What the program writes, to its output and its error output alike.
+    pub output: std::io::PipeReader,
+    /// The program's input, which ends when this is dropped.
+    _input: std::io::PipeWriter,
+    child: PipedChild,
+}
+enum PipedChild {
+    Started(std::process::Child),
+    AsDesktopUser(Handle),
+}
+impl Drop for Piped {
+    fn drop(&mut self) {
+        match &mut self.child {
+            PipedChild::Started(child) => {
+                let _ = child.kill();
+                let _ = child.wait();
+            }
+            PipedChild::AsDesktopUser(process) => unsafe {
+                windows_sys::Win32::System::Threading::TerminateProcess(process.0, 1);
+            },
+        }
+    }
+}
+
+/// Whether this process runs elevated, as SWM normally does.
+pub fn is_elevated() -> bool {
+    use windows_sys::Win32::Security::{
+        GetTokenInformation, TOKEN_ELEVATION, TOKEN_QUERY, TokenElevation,
+    };
+    use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
+    let mut token = std::ptr::null_mut();
+    if unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token) } == 0 {
+        return false;
+    }
+    let token = Handle(token, "CloseHandle(own token)");
+    let mut elevation = TOKEN_ELEVATION { TokenIsElevated: 0 };
+    let mut returned = 0;
+    let read = unsafe {
+        GetTokenInformation(
+            token.0,
+            TokenElevation,
+            &mut elevation as *mut _ as _,
+            std::mem::size_of::<TOKEN_ELEVATION>() as u32,
+            &mut returned,
+        )
+    };
+    read != 0 && elevation.TokenIsElevated != 0
+}
+
+/// Run `program` with `args` as the desktop user rather than SWM's elevated
+/// user, with no window, no input, and what it writes given back to read. For
+/// a program SWM listens to, such as an `ssh`.
+pub fn run_piped_as_desktop_user(program: &str, args: &[&str]) -> Result<Piped, String> {
+    use std::os::windows::io::AsRawHandle;
+    use std::os::windows::process::CommandExt;
+    use windows_sys::Win32::Foundation::{HANDLE_FLAG_INHERIT, SetHandleInformation};
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    let failed = |what: &str, error: &dyn std::fmt::Debug| format!("{what}: {error:?}");
+    let (output, write) = std::io::pipe().map_err(|error| failed("pipe", &error))?;
+    // An input that stays open and says nothing: an `ssh` started with no
+    // console and no input at all gives nothing back.
+    let (read, input) = std::io::pipe().map_err(|error| failed("pipe", &error))?;
+
+    // Not elevated: the program is the desktop user's as it is.
+    if !is_elevated() {
+        let both = write.try_clone().map_err(|error| failed("pipe", &error))?;
+        let child = std::process::Command::new(program)
+            .args(args)
+            .stdin(read)
+            .stdout(write)
+            .stderr(both)
+            .creation_flags(CREATE_NO_WINDOW)
+            .spawn()
+            .map_err(|error| failed(program, &error))?;
+        let child = PipedChild::Started(child);
+        return Ok(Piped { output, _input: input, child });
+    }
+
+    use std::mem::{size_of, zeroed};
+    use windows_sys::Win32::Security::TokenPrimary;
+    use windows_sys::Win32::System::Threading::{
+        CreateProcessWithTokenW, PROCESS_INFORMATION, STARTF_USESHOWWINDOW, STARTF_USESTDHANDLES,
+        STARTUPINFOW,
+    };
+    // The program is given these three handles and no others: its input is a
+    // pipe nothing is written to, and its output and error output are the pipe.
+    for handle in [read.as_raw_handle(), write.as_raw_handle()] {
+        let inherited =
+            unsafe { SetHandleInformation(handle as _, HANDLE_FLAG_INHERIT, HANDLE_FLAG_INHERIT) };
+        check_bool(inherited, "SetHandleInformation").map_err(|error| failed("pipe", &error))?;
+    }
+    let primary = shell_token(TokenPrimary).map_err(|error| failed("desktop user", &error))?;
+    let mut startup: STARTUPINFOW = unsafe { zeroed() };
+    startup.cb = size_of::<STARTUPINFOW>() as u32;
+    startup.dwFlags = STARTF_USESTDHANDLES | STARTF_USESHOWWINDOW;
+    startup.wShowWindow = 0;
+    startup.hStdInput = read.as_raw_handle() as _;
+    startup.hStdOutput = write.as_raw_handle() as _;
+    startup.hStdError = write.as_raw_handle() as _;
+    let mut info: PROCESS_INFORMATION = unsafe { zeroed() };
+    let mut command: Vec<u16> = std::iter::once(program)
+        .chain(args.iter().copied())
+        .map(quote_argument)
+        .collect::<Vec<_>>()
+        .join(" ")
+        .encode_utf16()
+        .chain([0])
+        .collect();
+    let created = unsafe {
+        CreateProcessWithTokenW(
+            primary.0,
+            1,
+            std::ptr::null(),
+            command.as_mut_ptr(),
+            CREATE_NO_WINDOW,
+            std::ptr::null(),
+            std::ptr::null(),
+            &startup,
+            &mut info,
+        )
+    };
+    check_bool(created, "CreateProcessWithTokenW").map_err(|error| failed(program, &error))?;
+    drop(Handle(info.hThread, "CloseHandle(created thread)"));
+    let child = PipedChild::AsDesktopUser(Handle(info.hProcess, "CloseHandle(created process)"));
+    // `write` closes here, so the pipe ends when the program does.
+    Ok(Piped { output, _input: input, child })
+}
