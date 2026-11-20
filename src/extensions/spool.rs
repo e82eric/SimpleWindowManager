@@ -1,7 +1,8 @@
 //! A bar mailbox producer that lists the entry files other programs write to a
 //! folder: a build wrapper, an agent's hooks, anything that can write a file.
-//! SWM only reads the folder; it opens no pipe or socket and runs nothing an
-//! entry names.
+//! SWM only reads the folder; it listens for nothing and runs nothing an entry
+//! names. With `SpoolOptions::remotes` it also lists the folders of other
+//! machines, which it connects out to (`remote`).
 //!
 //! ```ignore
 //! use crate::extensions::spool;

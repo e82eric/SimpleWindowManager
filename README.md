@@ -194,7 +194,10 @@ File previews come from npicker's `nfm-preview` resolver. Set
 `configuration.file_preview_resolver` to change tool paths, the video frame
 position or text highlighting (see `default_user_config.rs`).
 
-The wrapper builds release by default; pass `-Dev` for a debug build. An
+The wrapper builds release by default; pass `-Dev` for a debug build, and
+`-AsInvoker` for an SWM that does not ask for administrator rights when it
+starts: it runs as whoever starts it, and cannot move the windows of programs
+that run elevated. An
 additional `-Timings` switch generates Cargo's build timing report at
 `target/cargo-timings/cargo-timing.html`:
 
@@ -395,8 +398,9 @@ to show beside the argument.
 
 `extensions::spool` fills a mailbox from entry files that other programs write
 to a folder, so anything that can write a file can report to the bar: a build
-wrapper, an agent's hooks, a scheduled task. SWM only reads the folder. It opens
-no pipe or socket, and runs nothing an entry names.
+wrapper, an agent's hooks, a scheduled task. SWM only reads the folder. It listens
+for nothing, and runs nothing an entry names. (It connects out only for
+[mailboxes of other machines](#mailboxes-of-other-machines), if you list any.)
 
 ```rust
 use crate::extensions::spool;
@@ -560,6 +564,65 @@ transcript instead, and lists a turn Claude Code recorded as interrupted as done
 with `Interrupted` as its detail. A kind of your own does the same with
 `Kind::ended`, which is asked how the work in a running or waiting entry's log
 ended, if it has.
+
+#### Mailboxes of other machines
+
+A mailbox can also list the folders of the same name on other Windows machines,
+so agents and builds that run there show on this machine's bar. Each entry is
+listed under its machine's name, `vm · claude · src/nterm`:
+
+```rust
+let remotes = spool::Remotes::new().machine("vm", "me@192.168.56.10");
+spool::register_with(configuration, spool::SpoolOptions::named("Agents").remotes(&remotes));
+spool::register_with(configuration, spool::SpoolOptions::named("Builds").remotes(&remotes));
+```
+
+`machine` takes the name to list the machine under and what `ssh` is given to
+find it: `user@host`, or a `Host` of your ssh configuration. The same list given
+to several mailboxes is one connection to each machine.
+
+For each machine SWM keeps an `ssh` running, as the desktop user, that runs
+`swm-mailbox.exe watch` there and reads what it prints: the entries of that
+machine's folders, whether each one's process runs there, and its log as it
+grows. SWM only connects out, and only to the machines listed. The `ssh` asks
+nothing, as there is nowhere to answer, and forwards nothing: the machine must
+take a key or an agent, not a password, and its host key must already be known,
+so connect once by hand (`ssh me@host`) and accept it. `swm-mailbox watch`
+listens for nothing and ends when the connection does. Nothing else is needed on
+the other machine: not SWM, and no service.
+
+Set a machine up from this one, after `build.ps1`, which builds
+`swm-mailbox.exe` beside SWM:
+
+```powershell
+.\mailbox\Deploy-SwmMailbox.ps1 -Address me@192.168.56.10 -Hooks
+```
+
+It copies `swm-mailbox.exe` and the hook scripts to `%LOCALAPPDATA%\swm\bin`
+there. With `-Hooks` it also adds Claude Code's hooks to that account's
+`~/.claude/settings.json`, leaving the rest of the file as it is (the file as it
+was is kept beside it as `settings.json.before-swm-hooks`); without, it says how
+to. For builds, add the two lines it prints to that machine's PowerShell profile.
+Run it again to update a machine, and with `-Remove` to take everything out
+again. `Remotes::machine_with` names another place for `swm-mailbox.exe` there.
+
+- **What a machine says is only text to show.** SWM never looks for a process
+  an entry of another machine names, and never opens a path it names: an
+  entry's log is the copy SWM keeps of what the machine sent of it, in
+  `%LOCALAPPDATA%\swm\remote\<machine>\<mailbox>`. That is the end of the log,
+  512 KiB of it at first, so a long conversation opens at its later part.
+- **Not connected.** While a machine is not heard from, its entries stay as they
+  were, and the running ones say `vm not connected since 14:02`: the work there
+  may well be going on. SWM tries again after 5 seconds, then less often, up to
+  once a minute. Why a connection ended is in SWM's error log, once each time
+  a machine goes quiet, with the last lines `ssh` said.
+- **Versions.** `swm-mailbox` says first which version its messages are. SWM
+  lists nothing of a machine with another version and says in the error log
+  which side to update.
+- **To see what SWM sees**, `swm-mailbox show vm me@192.168.56.10` connects the
+  same way from a terminal and prints what would be listed, or why nothing is.
+- **Not yet.** A session's card says `not attached` for another machine's
+  sessions, whatever is true there. Linux machines are not supported.
 
 ## Implemented surface
 

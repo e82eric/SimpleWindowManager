@@ -1,6 +1,8 @@
 param(
     [switch]$Dev,
     [switch]$Timings,
+    # Build an SWM that does not ask for administrator rights when it starts.
+    [switch]$AsInvoker,
     [Parameter(ValueFromRemainingArguments = $true)]
     [string[]]$CargoArgs
 )
@@ -44,6 +46,8 @@ for ($index = 0; $index -lt $lines.Count; $index++) {
 }
 Write-Host '----- effective SWM configuration end -------'
 
+# Set or cleared each time, so a build without the switch asks for them again.
+$env:SWM_AS_INVOKER = if ($AsInvoker) { '1' } else { $null }
 $arguments = @('build', '--manifest-path', (Join-Path $portDirectory 'Cargo.toml'))
 if (-not $Dev) {
     $arguments += '--release'
