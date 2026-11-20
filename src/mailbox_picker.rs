@@ -4,11 +4,18 @@
 //! elsewhere closes it. Fuzzy search reads the cards' text, including the age.
 //! The picker lists the entries as they were when it opened: it is open only
 //! briefly, and the bar shows what changes meanwhile.
+//!
+//! A mailbox can give its drop-down content of its own (`BarMailbox::picker`):
+//! more columns on each card, and commands for the selected entry. Opening,
+//! placing and closing the drop-down, and telling the producer, stay here.
 use crate::egui_window_menu::{BarAlign, BarAnchor, ScreenBounds};
-use crate::mailbox::{Activation, BarMailbox, MailboxEvent, MailboxState};
+use crate::mailbox::{
+    Activation, BarMailbox, MailboxActions, MailboxContent, MailboxEntry, MailboxEvent,
+    MailboxState,
+};
 use crate::picker::{Outcome, PickerHost, PickerRequest, PickerView};
 use nfm_egui::shared::{self, SharedPicker};
-use nfm_egui::{Appearance, PickerConfig, PickerEvent, Placement, egui};
+use nfm_egui::{Appearance, PickerCommand, PickerConfig, PickerEvent, Placement, egui};
 use nfm_picker_sources::structured::{
     StructuredPickerItem, StructuredSchema, StructuredStreamingSnapshot, StructuredStreamingStore,
 };
@@ -22,7 +29,9 @@ const WIDTH: f32 = 800.0;
 /// Cards shown before the list scrolls.
 const MAX_ROWS: usize = 6;
 
+/// The columns every card has; a mailbox's content can add its own.
 const COLUMNS: [&str; 7] = ["Id", "State", "Source", "Title", "Detail", "Time", "Dot"];
+/// The built-in card, for content without a template of its own.
 const TEMPLATE: &str = "Source:muted|Time:right:muted;Title:title;Detail:muted";
 
 /// The mailbox whose picker is open.
@@ -68,11 +77,19 @@ impl PickerRequest for Request {
             anchor,
         } = *self;
         let state = mailbox.current();
-        let (snapshot, template) = snapshot(&mailbox, &state)?;
+        let content = mailbox.content(&state);
+        let (snapshot, template) = snapshot(&mailbox, &state, &content)?;
         let source = Arc::new(SnapshotStore::new());
         source.publish(snapshot);
         source.complete();
         let rows = state.entries.len().clamp(1, MAX_ROWS);
+        // A content's command is known to the picker by its place in the list.
+        let commands = content
+            .commands
+            .iter()
+            .enumerate()
+            .map(|(index, command)| PickerCommand::custom(index, command.name.clone()))
+            .collect();
         let result_rows = match anchor {
             // The window is sized for the entries (see `window_bounds`), which
             // limits the cards to them.
@@ -88,6 +105,7 @@ impl PickerRequest for Request {
                 title: mailbox.name.clone(),
                 result_rows,
                 preview_visible: false,
+                commands,
                 ..Default::default()
             },
             None,
@@ -101,6 +119,8 @@ impl PickerRequest for Request {
             rows,
             template,
             picker,
+            state,
+            content,
         }))
     }
 }
@@ -113,14 +133,20 @@ fn cards_in_rows(host: &PickerHost<'_>, template: &RowTemplate, rows: usize) -> 
     ((rows as f32 * line) / card).floor().max(1.0) as usize
 }
 
-/// The entries as a structured source with a card template.
+/// The entries as a structured source with a card template: the built-in
+/// columns, then the content's own.
 fn snapshot(
     mailbox: &BarMailbox,
     state: &MailboxState,
+    content: &MailboxContent,
 ) -> Result<(Arc<StructuredStreamingSnapshot>, RowTemplate), String> {
+    let own = content.columns.as_ref();
+    let mut columns = COLUMNS.map(String::from).to_vec();
+    columns.extend(own.into_iter().flat_map(|own| own.names.iter().cloned()));
+    let width = columns.len();
     // Ages are worded when shown; the column stays a time for sorts and filters.
     // Newest first until the query has text or sorts of its own.
-    let schema = StructuredSchema::new(COLUMNS.map(String::from).to_vec())?
+    let schema = StructuredSchema::new(columns)?
         .with_types("Time:datetime")?
         .with_default_sort("/!Descending==Time")?
         .with_formatter("Time", |seconds| {
@@ -135,7 +161,7 @@ fn snapshot(
             )
         })?;
     let template = schema
-        .row_template(TEMPLATE, Some("Dot"))
+        .row_template(own.map_or(TEMPLATE, |own| &own.template), Some("Dot"))
         .map_err(|error| error.to_string())?;
     let mut store = StructuredStreamingStore::new(schema);
     store.set_row_template(template.clone())?;
@@ -149,20 +175,21 @@ fn snapshot(
             .style(&entry.state)
             .and_then(|style| style.icon.as_ref())
             .map_or(crate::palette::MUTED, |icon| icon.color);
-        store.add_record(&csv::StringRecord::from(vec![
+        let mut record = vec![
             entry.id.clone(),
             entry.state.clone(),
             entry.source.clone(),
             entry.title.clone(),
             entry.detail.clone(),
             seconds.to_string(),
-            format!(
-                "glyph:●@#{:02x}{:02x}{:02x}",
-                color.r(),
-                color.g(),
-                color.b()
-            ),
-        ]))?;
+            MailboxContent::dot(color),
+        ];
+        if let Some(own) = own {
+            record.extend((own.values)(entry));
+        }
+        // A value for each column, whatever the content gave.
+        record.resize(width, String::new());
+        store.add_record(&csv::StringRecord::from(record))?;
     }
     Ok((store.snapshot(), template))
 }
@@ -176,6 +203,18 @@ struct View {
     rows: usize,
     template: RowTemplate,
     picker: SharedPicker,
+    /// The entries listed, for the content's commands.
+    state: Arc<MailboxState>,
+    content: MailboxContent,
+}
+
+/// The entry a selected row is.
+fn entry_of<'a>(
+    state: &'a MailboxState,
+    row: Option<&StructuredPickerItem>,
+) -> Option<&'a MailboxEntry> {
+    let id = row?.fields.get("Id")?;
+    state.entries.iter().find(|entry| entry.id == *id)
 }
 impl PickerView for View {
     fn picker(&self) -> Option<&SharedPicker> {
@@ -225,15 +264,25 @@ impl PickerView for View {
     ) -> Option<Outcome> {
         match self.picker.show(ctx, placement, appearance, false).event {
             Some(PickerEvent::Accepted(selection)) => {
-                if let Some(item) = selection.item.downcast_ref::<StructuredPickerItem>()
-                    && let Some(id) = item.fields.get("Id")
-                {
+                if let Some(entry) = entry_of(&self.state, selection.item.downcast_ref()) {
                     self.mailbox.send(MailboxEvent::Activated {
-                        id: id.clone(),
+                        id: entry.id.clone(),
                         how: Activation::Enter,
                     });
                 }
                 Some(Outcome::Cancelled)
+            }
+            Some(PickerEvent::CustomAction { action, selection }) => {
+                if let Some(command) = self.content.commands.get(action)
+                    && let Some(entry) = entry_of(&self.state, selection.item.downcast_ref())
+                {
+                    let mut actions = MailboxActions {
+                        ctx,
+                        picker: &mut self.picker,
+                    };
+                    (command.run)(entry, &mut actions);
+                }
+                None
             }
             Some(PickerEvent::Cancelled) => Some(Outcome::Cancelled),
             Some(PickerEvent::CopyRequested(selection)) => {
@@ -241,7 +290,7 @@ impl PickerView for View {
                 self.picker.notify_copied(ctx);
                 None
             }
-            Some(PickerEvent::CustomAction { .. }) | None => None,
+            None => None,
         }
     }
 }
@@ -279,7 +328,11 @@ mod tests {
             title: format!("Title {id}"),
             detail: "detail".into(),
             time: SystemTime::now() - Duration::from_secs(ago),
+            fields: Default::default(),
         }
+    }
+    fn cards(state: &MailboxState) -> (Arc<StructuredStreamingSnapshot>, RowTemplate) {
+        snapshot(&mailbox(), state, &MailboxContent::cards()).unwrap()
     }
 
     #[test]
@@ -288,9 +341,10 @@ mod tests {
             counts: vec![],
             entries: vec![entry("a", "waiting", 600), entry("b", "idle", 7200)],
         };
-        let (snapshot, _) = snapshot(&mailbox(), &state).unwrap();
+        let (snapshot, _) = cards(&state);
         assert_eq!(snapshot.len(), 2);
         let fields = snapshot.row_fields(0).unwrap();
+        assert_eq!(fields.values.len(), COLUMNS.len());
         assert_eq!(fields.values[0], "a");
         assert_eq!(fields.values[5], "10 minutes ago");
         assert_eq!(fields.values[6], "glyph:●@#d20f39");
@@ -315,12 +369,41 @@ mod tests {
     }
 
     #[test]
+    fn a_mailboxs_content_adds_its_columns_to_each_card() {
+        let mut open = entry("a", "waiting", 600);
+        open.fields.insert("where".into(), "nterm".into());
+        let state = MailboxState {
+            counts: vec![],
+            entries: vec![open, entry("b", "idle", 7200)],
+        };
+        let content = MailboxContent::cards().columns(
+            &["Where", "Nowhere"],
+            "Source:muted|Where:accent|Nowhere:muted;Title:title",
+            |entry| match entry.field("where") {
+                // Fewer values than columns: the rest are empty.
+                Some(place) => vec![place.to_owned()],
+                None => vec![String::new(), "closed".into(), "ignored".into()],
+            },
+        );
+        let (snapshot, _) = snapshot(&mailbox(), &state, &content).unwrap();
+        let own = |row| snapshot.row_fields(row).unwrap().values[COLUMNS.len()..].to_vec();
+        assert_eq!(own(0), ["nterm", ""]);
+        assert_eq!(own(1), ["", "closed"]);
+        // The built-in columns are as they are without content.
+        assert_eq!(snapshot.row_fields(0).unwrap().values[0], "a");
+        assert_eq!(snapshot.item(1).unwrap().fields["Id"], "b");
+        // A template naming a column the content does not have opens nothing.
+        let unknown = MailboxContent::cards().columns(&[], "Missing:muted", |_| Vec::new());
+        assert!(super::snapshot(&mailbox(), &state, &unknown).is_err());
+    }
+
+    #[test]
     fn the_window_is_as_tall_as_its_cards() {
         let ctx = egui::Context::default();
         ctx.run_ui(Default::default(), |_| {})
             .drop_without_applying_deltas();
         let appearance = crate::egui_window_menu::desktop_appearance();
-        let (_, template) = snapshot(&mailbox(), &MailboxState::default()).unwrap();
+        let (_, template) = cards(&MailboxState::default());
         let one = nfm_egui::results_height(&ctx, &appearance, Some(&template), 1);
         let three = nfm_egui::results_height(&ctx, &appearance, Some(&template), 3);
         let card = (three - one) / 2.0;
@@ -342,7 +425,7 @@ mod tests {
             preview_rows: crate::egui_window_menu::PREVIEW_ROWS,
             file_preview_resolver: &resolver,
         };
-        let (_, template) = snapshot(&mailbox(), &MailboxState::default()).unwrap();
+        let (_, template) = cards(&MailboxState::default());
         // The result rows alone fit 2 cards; with the preview's rows, 7.
         assert_eq!(cards_in_rows(&host, &template, host.result_rows), 2);
         assert_eq!(

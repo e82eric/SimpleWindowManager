@@ -297,6 +297,36 @@ of a styled document and previews the whole document at the selected part, and
 `markdown_document::DocumentWriter` builds such documents from lines and
 markdown.
 
+The drop-down is SWM's: it opens below the mailbox or centered, closes on a
+second press, and sends the producer those events. A mailbox gives it content of
+its own with `picker`, a function from the entries about to be listed to a
+`MailboxContent`:
+
+```rust
+use crate::mailbox::MailboxContent;
+
+configuration.bar_mailbox("Agents", my_producer).picker(|_state| {
+    MailboxContent::cards()
+        // Another column on each card, placed by an NFM row template.
+        .columns(
+            &["Branch"],
+            "Source:muted|Branch:accent|Time:right:muted;Title:title;Detail:muted",
+            |entry| vec![entry.field("branch").unwrap_or_default().to_owned()],
+        )
+        // A command for the selected entry, in the command palette (Ctrl+Shift+/).
+        .command("Copy branch", |entry, drop_down| {
+            if let Some(branch) = entry.field("branch") {
+                drop_down.copy(branch);
+            }
+        })
+});
+```
+
+`MailboxEntry::fields` holds what a producer knows of an entry beyond what the
+cards show, by name, for that content to use. A template can place the built-in
+columns `Source`, `Title`, `Detail` and `Time` too; `MailboxContent::dot(color)`
+is a value that a column styled `icon` shows as a dot.
+
 ## Extensions
 
 Extensions are opt-in features in `src/extensions`, built and tested with SWM
@@ -328,8 +358,9 @@ spool::register_with(
 `ClaudeOptions` and `CodexOptions` set the badge's color while running (`claude`,
 `codex`), the preview's markdown
 theme (including the bat theme for code), the selected prompt's highlight, the
-speakers' colors, and `full_pane`, which opens the session filling the monitor up
-to the bar (Ctrl+Shift+F switches back). `claude::spark` draws Claude's spark for
+speakers' colors, `full_pane`, which opens the session filling the monitor up
+to the bar (Ctrl+Shift+F switches back), and `show_attached`, which has each
+session's card say whether its agent is still running. `claude::spark` draws Claude's spark for
 `Icon::drawn` in a state's style.
 
 Codex's session files are its own and their format is not documented. The viewer
@@ -372,9 +403,12 @@ use crate::extensions::spool;
 
 // A mailbox of its own, with a style for each state below.
 spool::register(configuration, "Builds");
-// Or the producer alone, for a mailbox declared and styled by hand.
+// Or the producer and the drop-down's content alone, for a mailbox declared and
+// styled by hand.
+let options = spool::SpoolOptions::named("Agents");
 configuration
-    .bar_mailbox("Agents", spool::producer(spool::SpoolOptions::named("Agents")))
+    .bar_mailbox("Agents", spool::producer(options.clone()))
+    .picker(spool::picker(&options))
     .header("Agents:")
     .state(spool::STOPPED, StateStyle::icon(Icon::glyph("■", Color32::GOLD)));
 ```
@@ -424,6 +458,21 @@ written.
 - **Opening an entry** shows its `log` in a picker: text with a row per error and
   warning, or what its kind's viewer shows. An entry without a log has nothing
   to open.
+- **A kind's own fields.** Any other text in an entry, such as
+  `"branch": "main"`, is kept with it and means nothing to the folder: it is for
+  the entry's kind. `Kind::command(name, run)` lists a command in the
+  drop-down's command palette (Ctrl+Shift+/) while entries of the kind are
+  listed, and runs `run` with the selected one. `Kind::note(note)` puts a short
+  note on each of the kind's cards, after the source. Both are given the listed
+  entry, whose `fields` hold that text.
+- **Agents' sessions.** The Claude and Codex kinds use two such fields, which
+  the agent hooks below write. `"resume": "claude --resume <id>"` is a command
+  line that opens the session again: **Copy resume command** copies it, and SWM
+  never runs it. `"attached": "40472:133754961234999999"` names the agent's
+  process, by its ID and creation time: with
+  `ClaudeOptions { show_attached: true, .. }` (and the same in `CodexOptions`)
+  each session's card says whether it is `attached`, with a green dot and the
+  process ID, or `not attached`.
 - **Limits.** 200 entry files of at most 64 KiB, and the last 512 KiB of a log.
   The files are read as the desktop user rather than as elevated SWM, so an entry
   cannot have SWM read a file that user could not.
@@ -476,8 +525,13 @@ for permission, `done` when the turn ends. It uses only the agents' documented h
 one script serves both. It prints nothing and always exits 0; problems are
 appended to `agent-hook.errors.txt` in the folder.
 
+An entry names the agent's process, so the list can say the session is
+attached, and the command that resumes it. `SessionStart` gives a session that
+is opened again the process it is open in now, and `SessionEnd` takes it off a
+finished one, which then has only its conversation to show.
+
 Claude Code, in `~/.claude/settings.json`, with the same hook under
-`UserPromptSubmit`, `PostToolUse`, `PermissionRequest`, `Notification`, `Stop`
+`SessionStart`, `UserPromptSubmit`, `PostToolUse`, `PermissionRequest`, `Notification`, `Stop`
 and `SessionEnd`:
 
 ```json
@@ -488,7 +542,7 @@ and `SessionEnd`:
 } ] } ] } }
 ```
 
-Codex, in `~/.codex/hooks.json`, with the same hook under `UserPromptSubmit`,
+Codex, in `~/.codex/hooks.json`, with the same hook under `SessionStart`, `UserPromptSubmit`,
 `PostToolUse`, `PermissionRequest`, `Stop`, `Interrupt` and `SessionEnd` (Codex
 asks you to trust new hooks with `/hooks`):
 

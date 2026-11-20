@@ -4,4 +4,5 @@
 pub mod claude;
 pub mod codex;
 pub mod conversation;
+pub mod session;
 pub mod spool;

@@ -20,6 +20,10 @@ pub struct ClaudeOptions {
     /// The session opens filling the picker monitor up to the bar, rather than
     /// centered; Ctrl+Shift+F switches between the two. Off by default.
     pub full_pane: bool,
+    /// In a mailbox's drop-down, each session's card says whether it is
+    /// `attached`, with the process ID, or `not attached`: whether the Claude
+    /// Code that reported it is still running. Off by default.
+    pub show_attached: bool,
 }
 impl Default for ClaudeOptions {
     fn default() -> Self {
@@ -29,6 +33,7 @@ impl Default for ClaudeOptions {
             you: Color32::from_rgb(0x8e, 0xc0, 0x7c),
             claude: Color32::from_rgb(0xd9, 0x77, 0x57),
             full_pane: false,
+            show_attached: false,
         }
     }
 }

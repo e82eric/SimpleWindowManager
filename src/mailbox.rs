@@ -16,8 +16,13 @@
 //!     })),
 //! );
 //! ```
+//!
+//! The drop-down is SWM's: it opens below the mailbox, lists a card per entry,
+//! and tells the producer what was opened. A mailbox gives it content of its
+//! own, such as a command for the selected entry, with `BarMailbox::picker`.
 use crossbeam_channel::{Receiver, Sender};
 use nfm_egui::egui;
+use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
 
@@ -163,6 +168,112 @@ pub struct MailboxEntry {
     pub title: String,
     pub detail: String,
     pub time: SystemTime,
+    /// What else the producer knows of the entry, by name, for the content the
+    /// mailbox gives its drop-down to show or act on; see `BarMailbox::picker`.
+    /// The built-in cards show none of it.
+    pub fields: BTreeMap<String, String>,
+}
+impl MailboxEntry {
+    /// The field `name`, if the entry has it and it is not empty.
+    pub fn field(&self, name: &str) -> Option<&str> {
+        self.fields
+            .get(name)
+            .map(String::as_str)
+            .filter(|value| !value.is_empty())
+    }
+}
+
+/// What a mailbox's drop-down shows and can do beyond the built-in cards; see
+/// `BarMailbox::picker`. SWM still opens, places and closes the drop-down and
+/// tells the producer of it: this only says what is in it. Every row is one
+/// entry, and accepting a row activates its entry.
+#[derive(Default)]
+pub struct MailboxContent {
+    pub(crate) columns: Option<Columns>,
+    pub(crate) commands: Vec<Command>,
+}
+/// Columns of a content's own and the template that lays out a card.
+pub(crate) struct Columns {
+    pub names: Vec<String>,
+    pub template: String,
+    pub values: Box<dyn Fn(&MailboxEntry) -> Vec<String>>,
+}
+/// A command of a content's own for the selected entry.
+pub(crate) struct Command {
+    pub name: String,
+    pub run: Box<dyn Fn(&MailboxEntry, &mut MailboxActions<'_>)>,
+}
+impl MailboxContent {
+    /// The built-in cards alone: each entry's state dot, source and age, its
+    /// title, and its detail.
+    pub fn cards() -> Self {
+        Self::default()
+    }
+    /// Adds columns named `names` to each card, laid out by `template`, an NFM
+    /// row template: lines separated by `;`, slots by `|`, each a column and
+    /// its styles. It can place the built-in columns `Source`, `Title`,
+    /// `Detail` and `Time` as well; the state's dot always leads the card.
+    /// `values` gives an entry's value for each of `names`, in order; an empty
+    /// value takes no room.
+    pub fn columns(
+        mut self,
+        names: &[&str],
+        template: &str,
+        values: impl Fn(&MailboxEntry) -> Vec<String> + 'static,
+    ) -> Self {
+        self.columns = Some(Columns {
+            names: names.iter().map(|name| (*name).to_owned()).collect(),
+            template: template.to_owned(),
+            values: Box::new(values),
+        });
+        self
+    }
+    /// Lists `name` in the drop-down's command palette (Ctrl+Shift+/). Choosing
+    /// it runs `run` with the selected entry, on the UI thread.
+    pub fn command(
+        mut self,
+        name: impl Into<String>,
+        run: impl Fn(&MailboxEntry, &mut MailboxActions<'_>) + 'static,
+    ) -> Self {
+        self.commands.push(Command {
+            name: name.into(),
+            run: Box::new(run),
+        });
+        self
+    }
+    /// A value that shows as a dot in `color`, for a column the template styles
+    /// as `icon`.
+    pub fn dot(color: egui::Color32) -> String {
+        format!(
+            "glyph:●@#{:02x}{:02x}{:02x}",
+            color.r(),
+            color.g(),
+            color.b()
+        )
+    }
+}
+
+/// What a drop-down's command can do; see `MailboxContent::command`.
+pub struct MailboxActions<'a> {
+    pub(crate) ctx: &'a egui::Context,
+    pub(crate) picker: &'a mut nfm_egui::shared::SharedPicker,
+}
+impl MailboxActions<'_> {
+    /// Copies `text` to the clipboard and says so in the drop-down, which stays
+    /// open.
+    pub fn copy(&mut self, text: &str) {
+        self.ctx.copy_text(text.to_owned());
+        self.picker.notify_copied_value(self.ctx, text);
+    }
+}
+
+/// Gives a mailbox's drop-down its content: see `BarMailbox::picker`.
+#[derive(Clone)]
+struct Content(Arc<dyn Fn(&MailboxState) -> MailboxContent + Send + Sync>);
+impl std::fmt::Debug for Content {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Content")
+    }
 }
 
 /// What the person did in the drop-down.
@@ -214,6 +325,7 @@ pub struct BarMailbox {
     /// Shown in this order; a state with no count is left out.
     pub states: Vec<(String, StateStyle)>,
     pub producer: Producer,
+    content: Option<Content>,
     shared: Arc<Shared>,
 }
 impl BarMailbox {
@@ -226,6 +338,7 @@ impl BarMailbox {
             header: None,
             states: Vec::new(),
             producer: Producer(Arc::new(producer)),
+            content: None,
             shared: Arc::new(Shared {
                 state: Mutex::new(Arc::default()),
                 events: crossbeam_channel::bounded(64),
@@ -248,6 +361,27 @@ impl BarMailbox {
             None => self.states.push((name, style)),
         }
         self
+    }
+    /// Gives the drop-down content of the mailbox's own, such as a command for
+    /// the selected entry or another column on each card. `content` is asked
+    /// each time the drop-down opens, with the entries it will list, and runs
+    /// on the UI thread. Without one the drop-down shows
+    /// `MailboxContent::cards`. Either way SWM opens the drop-down below the
+    /// mailbox or centered, closes it on a second press, and sends the producer
+    /// `Opened`, `Closed` and `Activated`.
+    pub fn picker(
+        &mut self,
+        content: impl Fn(&MailboxState) -> MailboxContent + Send + Sync + 'static,
+    ) -> &mut Self {
+        self.content = Some(Content(Arc::new(content)));
+        self
+    }
+    /// What the drop-down shows for `state`.
+    pub(crate) fn content(&self, state: &MailboxState) -> MailboxContent {
+        match &self.content {
+            Some(content) => (content.0)(state),
+            None => MailboxContent::cards(),
+        }
     }
     pub(crate) fn current(&self) -> Arc<MailboxState> {
         self.shared.state.lock().unwrap().clone()

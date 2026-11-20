@@ -44,19 +44,24 @@
 //! transcript. A kind also gives its entries badges of their own on the bar; see
 //! `SpoolOptions::kind`.
 //!
+//! Any other text an entry holds, such as `"branch": "main"`, is kept with it
+//! but means nothing here: it is for the entry's kind, which can add commands
+//! for its entries to the drop-down and a note to their cards (`Kind::command`,
+//! `Kind::note`).
+//!
 //! SWM runs elevated and the folder belongs to the desktop user, so the files
 //! are read as that user (see `process::as_desktop_user`): an entry cannot have
 //! SWM read what the user could not. Entries are also limited in number and size.
 use crate::document_picker::{DocumentItem, DocumentPicker};
 use crate::mailbox::{
-    Animation, BarMailbox, DrawShape, Icon, MailboxEntry, MailboxEvent, MailboxSender,
-    MailboxState, StateStyle,
+    Animation, BarMailbox, DrawShape, Icon, MailboxActions, MailboxContent, MailboxEntry,
+    MailboxEvent, MailboxSender, MailboxState, StateStyle,
 };
 use crate::markdown_document::{DocumentWriter, line_range};
 use nfm_egui::egui::Color32;
 use nfm_egui::styled_document::Style;
 use serde_json::Value;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -68,6 +73,19 @@ pub const DONE: &str = "done";
 pub const FAILED: &str = "failed";
 /// The state of an entry whose process is gone.
 pub const STOPPED: &str = "stopped";
+/// The field of a listed entry that holds its kind's name.
+const KIND: &str = "kind";
+/// What an entry file says that is read here; anything else is the kind's.
+const KNOWN: [&str; 10] = [
+    "state", "source", "title", "detail", "time", "pid", "started", "log", "kind", "delay",
+];
+/// The fields of its kind's an entry can have; any more are ignored.
+const MAX_FIELDS: usize = 32;
+/// A card with its kind's note after the source: a dot and `Note` in the
+/// accent color for a colored one, `Plain` dimmed for one without a color.
+const NOTE_COLUMNS: [&str; 3] = ["Mark", "Note", "Plain"];
+const NOTE_TEMPLATE: &str =
+    "Source:muted|Mark:icon|Note:accent|Plain:muted|Time:right:muted;Title:title;Detail:muted";
 
 /// Entry files read from the folder; any more are ignored.
 const MAX_FILES: usize = 200;
@@ -98,9 +116,49 @@ pub struct Kind {
     pub color: Color32,
     viewer: Option<Arc<ViewLog>>,
     ended: Option<Arc<Ended>>,
+    commands: Vec<(String, Arc<RunCommand>)>,
+    note: Option<Arc<NoteOf>>,
 }
 /// From a log's path and a title to the picker that shows it.
 type ViewLog = dyn Fn(&Path, String) -> Result<DocumentPicker, String> + Send + Sync;
+/// A drop-down command, run with the selected entry.
+type RunCommand = dyn Fn(&MailboxEntry, &mut MailboxActions<'_>) + Send + Sync;
+/// From a listed entry to the note on its card, if it has one.
+type NoteOf = dyn Fn(&MailboxEntry) -> Option<Note> + Send + Sync;
+
+/// A short note on an entry's card, after its source; see `Kind::note`.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Note {
+    pub text: String,
+    /// A dot in this color before the text, which is then in the accent color.
+    /// Without one the text is dimmed, like the source.
+    pub color: Option<Color32>,
+}
+impl Note {
+    pub fn plain(text: impl Into<String>) -> Self {
+        Self {
+            text: text.into(),
+            color: None,
+        }
+    }
+    pub fn colored(text: impl Into<String>, color: Color32) -> Self {
+        Self {
+            text: text.into(),
+            color: Some(color),
+        }
+    }
+    /// The note as `NOTE_COLUMNS`.
+    fn columns(note: Option<Self>) -> Vec<String> {
+        match note {
+            Some(Self {
+                text,
+                color: Some(color),
+            }) => vec![MailboxContent::dot(color), text, String::new()],
+            Some(Self { text, color: None }) => vec![String::new(), String::new(), text],
+            None => Vec::new(),
+        }
+    }
+}
 /// From a log's path and when its entry entered its state to how the work has
 /// ended since, if the log shows that it has.
 type Ended = dyn Fn(&Path, SystemTime) -> Option<String> + Send + Sync;
@@ -112,7 +170,31 @@ impl Kind {
             color,
             viewer: None,
             ended: None,
+            commands: Vec::new(),
+            note: None,
         }
+    }
+    /// Lists `name` in the command palette (Ctrl+Shift+/) of a drop-down that
+    /// lists entries of this kind. Choosing it on one of them runs `run` with
+    /// that entry, whose `fields` hold what its file says beyond what is read
+    /// here; on an entry of another kind it does nothing. Kinds that give a
+    /// command the same name share its place in the list.
+    pub fn command(
+        mut self,
+        name: impl Into<String>,
+        run: impl Fn(&MailboxEntry, &mut MailboxActions<'_>) + Send + Sync + 'static,
+    ) -> Self {
+        self.commands.push((name.into(), Arc::new(run)));
+        self
+    }
+    /// Puts a note on the card of each entry of this kind, after its source:
+    /// what `note` returns for the entry, asked each time the drop-down opens.
+    pub fn note(
+        mut self,
+        note: impl Fn(&MailboxEntry) -> Option<Note> + Send + Sync + 'static,
+    ) -> Self {
+        self.note = Some(Arc::new(note));
+        self
     }
     /// Has the logs of this kind's running and waiting entries say when the work
     /// ended without its writer reporting it, such as an agent's turn that was
@@ -229,6 +311,7 @@ pub fn register_with(
     const DONE_COLOR: Color32 = Color32::from_rgb(0xb8, 0xbb, 0x26);
     let name = options.name.clone();
     let kinds = options.kinds.clone();
+    let content = picker(&options);
     let glyph = |text: &str, color| StateStyle::icon(Icon::glyph(text, color));
     let pulse = Animation::Pulse {
         min: 0.4,
@@ -249,7 +332,8 @@ pub fn register_with(
         .state(WAITING, StateStyle::icon(waiting))
         .state(FAILED, glyph("✗", crate::palette::CRITICAL))
         .state(STOPPED, glyph("■", crate::palette::WARNING))
-        .state(DONE, glyph("✓", DONE_COLOR));
+        .state(DONE, glyph("✓", DONE_COLOR))
+        .picker(content);
     for kind in kinds {
         let icon = |color| Icon::drawn(kind.shape, color);
         let running = icon(kind.color).animation(scale.clone());
@@ -278,6 +362,61 @@ pub fn ring(painter: &nfm_egui::egui::Painter, area: nfm_egui::egui::Rect, color
 /// `Configuration::bar_mailbox`, for a mailbox declared by hand.
 pub fn producer(options: SpoolOptions) -> impl Fn(MailboxSender) + Send + Sync + 'static {
     move |mailbox| run(&mailbox, &options)
+}
+
+/// What the drop-down of the folder `options` names has beyond the cards: pass
+/// it to `BarMailbox::picker`, for a mailbox declared by hand. It is what the
+/// kinds of the entries listed give: their commands, and their notes on their
+/// entries' cards.
+pub fn picker(
+    options: &SpoolOptions,
+) -> impl Fn(&MailboxState) -> MailboxContent + Send + Sync + 'static {
+    let kinds = options.kinds.clone();
+    move |state| content(&kinds, state)
+}
+
+fn content(kinds: &[Kind], state: &MailboxState) -> MailboxContent {
+    // Only the kinds with an entry listed have a say.
+    let listed = |kind: &&Kind| {
+        let mut entries = state.entries.iter();
+        entries.any(|entry| entry.field(KIND) == Some(kind.name.as_str()))
+    };
+    let kinds: Vec<&Kind> = kinds.iter().filter(listed).collect();
+    let mut content = MailboxContent::cards();
+
+    let notes: HashMap<String, Arc<NoteOf>> = kinds
+        .iter()
+        .filter_map(|kind| Some((kind.name.clone(), kind.note.clone()?)))
+        .collect();
+    if !notes.is_empty() {
+        content = content.columns(&NOTE_COLUMNS, NOTE_TEMPLATE, move |entry| {
+            let note = entry.field(KIND).and_then(|kind| notes.get(kind));
+            Note::columns(note.and_then(|note| note(entry)))
+        });
+    }
+
+    let mut names: Vec<&String> = Vec::new();
+    for (name, _) in kinds.iter().flat_map(|kind| &kind.commands) {
+        if !names.contains(&name) {
+            names.push(name);
+        }
+    }
+    for name in names {
+        // Each kind's own command of this name, for its entries.
+        let runs: HashMap<String, Arc<RunCommand>> = kinds
+            .iter()
+            .filter_map(|kind| {
+                let (_, run) = kind.commands.iter().find(|(known, _)| known == name)?;
+                Some((kind.name.clone(), run.clone()))
+            })
+            .collect();
+        content = content.command(name.clone(), move |entry, drop_down| {
+            if let Some(run) = entry.field(KIND).and_then(|kind| runs.get(kind)) {
+                run(entry, drop_down);
+            }
+        });
+    }
+    content
 }
 
 fn run(mailbox: &MailboxSender, options: &SpoolOptions) {
@@ -330,6 +469,25 @@ fn run(mailbox: &MailboxSender, options: &SpoolOptions) {
     }
 }
 
+/// The ID of the process `reference` names, if it still runs. An entry's field
+/// names a process as `<pid>:<started>`, its ID and its creation time as a
+/// FILETIME, so that a later process given the same ID is not taken for it; the
+/// writers in `mailbox\SwmMailbox.ps1` write them so. For a kind that says
+/// whether its entry's work is still open somewhere.
+pub fn running_process(reference: &str) -> Option<u32> {
+    let (pid, started) = process_reference(reference)?;
+    (crate::process::running_since(pid) == Some(started)).then_some(pid)
+}
+
+/// The process ID and creation time in `<pid>:<started>`.
+fn process_reference(reference: &str) -> Option<(u32, u64)> {
+    let (pid, started) = reference.trim().split_once(':')?;
+    Some((
+        pid.parse().ok().filter(|pid| *pid != 0)?,
+        started.parse().ok()?,
+    ))
+}
+
 /// Shows the entry's log, as its kind is shown or as text. An entry without a
 /// log has nothing to open.
 fn open(mailbox: &MailboxSender, entry: &Entry, options: &SpoolOptions) -> Result<(), String> {
@@ -371,6 +529,8 @@ struct Entry {
     kind: Option<String>,
     /// Not listed until this long after `time`.
     delay: Option<Duration>,
+    /// The other text in the file, by name: its kind's, and nothing here.
+    fields: BTreeMap<String, String>,
 }
 impl Entry {
     /// `text` is the file's contents and `written` when it was last written.
@@ -415,6 +575,17 @@ impl Entry {
             delay: number("delay")
                 .filter(|seconds| *seconds > 0)
                 .map(|seconds| Duration::from_secs(seconds.min(MAX_DELAY_SECONDS))),
+            fields: value
+                .as_object()
+                .into_iter()
+                .flatten()
+                .filter(|(name, _)| !KNOWN.contains(&name.as_str()))
+                .filter_map(|(name, value)| {
+                    let value = value.as_str().filter(|value| !value.trim().is_empty())?;
+                    Some((name.clone(), value.to_owned()))
+                })
+                .take(MAX_FIELDS)
+                .collect(),
         })
     }
     /// Whether the entry names a process that is still running.
@@ -604,6 +775,13 @@ impl Tracker {
                 },
                 state,
                 time,
+                // With its kind, which the drop-down's content goes by.
+                fields: entry
+                    .fields
+                    .clone()
+                    .into_iter()
+                    .chain(entry.kind.clone().map(|kind| (KIND.to_owned(), kind)))
+                    .collect(),
             });
             self.shown.insert(entry.id.clone(), (entry, running));
         }
@@ -907,6 +1085,122 @@ mod tests {
         let mut entries = vec![of("claude", "done"), of("claude", "failed")];
         assert_eq!(settle(&mut entries), (DONE.to_owned(), Some(7), 3));
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_field_names_a_process_by_id_and_start_time() {
+        assert_eq!(
+            process_reference(" 12840:134388167973335495 "),
+            Some((12840, 134388167973335495))
+        );
+        for unusable in ["", "12840", "0:1", "x:1", "1:x", "1:-1"] {
+            assert_eq!(process_reference(unusable), None, "{unusable}");
+        }
+        let this = std::process::id();
+        let started = crate::process::running_since(this).unwrap();
+        assert_eq!(running_process(&format!("{this}:{started}")), Some(this));
+        // The same ID, started at another time: a later process.
+        assert_eq!(running_process(&format!("{this}:{}", started + 1)), None);
+    }
+
+    #[test]
+    fn what_else_an_entry_says_is_kept_for_its_kind() {
+        let said = entry(
+            "a",
+            r#"{"state":"done","kind":"claude","time":1700000000,"count":3,
+                "resume":"claude --resume a","attached":"40472:7","empty":" "}"#,
+        );
+        // Text only, and none of what is read here.
+        let fields: Vec<_> = said.fields.iter().collect();
+        assert_eq!(
+            fields,
+            [
+                (&"attached".to_owned(), &"40472:7".to_owned()),
+                (&"resume".to_owned(), &"claude --resume a".to_owned())
+            ]
+        );
+        // Listed with its kind as well, for the drop-down's content to go by.
+        let listed = Tracker::default().update(vec![said], UNIX_EPOCH + NOW, DAY, |_| false);
+        let listed = &listed.entries[0];
+        assert_eq!(listed.field("resume"), Some("claude --resume a"));
+        assert_eq!(listed.field(KIND), Some("claude"));
+        let plain = entry("b", r#"{"state":"done","time":1700000000}"#);
+        let listed = Tracker::default().update(vec![plain], UNIX_EPOCH + NOW, DAY, |_| false);
+        assert!(listed.entries[0].fields.is_empty());
+    }
+
+    fn listed_entry(id: &str, kind: &str) -> MailboxEntry {
+        let kind = Some((KIND.to_owned(), kind.to_owned())).filter(|_| !kind.is_empty());
+        MailboxEntry {
+            id: id.into(),
+            state: DONE.into(),
+            source: String::new(),
+            title: String::new(),
+            detail: String::new(),
+            time: UNIX_EPOCH,
+            fields: kind.into_iter().collect(),
+        }
+    }
+
+    #[test]
+    fn the_drop_down_has_what_the_kinds_of_its_entries_give() {
+        let state = |entries| MailboxState {
+            counts: Vec::new(),
+            entries,
+        };
+        let commands = |content: &MailboxContent| -> Vec<String> {
+            let names = content.commands.iter().map(|command| command.name.clone());
+            names.collect()
+        };
+        let claude = Kind::new("claude", ring, Color32::RED)
+            .command("Copy resume command", |_, _| {})
+            .note(|entry| Some(Note::colored(format!("open {}", entry.id), Color32::RED)));
+        let codex = Kind::new("codex", ring, Color32::BLUE)
+            .command("Copy resume command", |_, _| {})
+            .command("Fork", |_, _| {})
+            .note(|_| Some(Note::plain("closed")));
+        let build = Kind::new("build", ring, Color32::GREEN).command("Rerun", |_, _| {});
+        let options = SpoolOptions::named("Agents")
+            .kind(claude)
+            .kind(codex)
+            .kind(build);
+        let drop_down = picker(&options);
+
+        // Plain cards when no entry is of a kind with anything to add.
+        let plain = drop_down(&state(vec![
+            listed_entry("a", ""),
+            listed_entry("b", "other"),
+        ]));
+        assert!(plain.columns.is_none());
+        assert!(commands(&plain).is_empty());
+
+        // Only the kinds listed, and a name two of them share is listed once.
+        let agents = drop_down(&state(vec![
+            listed_entry("a", "claude"),
+            listed_entry("b", "codex"),
+            listed_entry("c", ""),
+        ]));
+        assert_eq!(commands(&agents), ["Copy resume command", "Fork"]);
+        let columns = agents.columns.as_ref().unwrap();
+        assert_eq!(columns.names, NOTE_COLUMNS);
+        assert_eq!(columns.template, NOTE_TEMPLATE);
+        // Each entry's note is its own kind's: a dot and text, or dimmed text.
+        let note = |id: &str, kind: &str| (columns.values)(&listed_entry(id, kind));
+        assert_eq!(
+            note("a", "claude"),
+            [
+                MailboxContent::dot(Color32::RED),
+                "open a".to_owned(),
+                String::new()
+            ]
+        );
+        assert_eq!(note("b", "codex"), ["", "", "closed"]);
+        assert!(note("c", "").is_empty());
+
+        // A kind with commands and no note leaves the cards as they are.
+        let builds = drop_down(&state(vec![listed_entry("a", "build")]));
+        assert_eq!(commands(&builds), ["Rerun"]);
+        assert!(builds.columns.is_none());
     }
 
     #[test]

@@ -71,7 +71,17 @@ function Set-SwmMailboxEntry {
         [string]$Kind,
         # Seconds after `Time` before SWM lists the entry, for work that is only
         # worth showing once it has run a while. Remove the entry if it ends sooner.
-        [int]$Delay
+        [int]$Delay,
+        # These two are kept with the entry for its kind, which decides what they
+        # are for; an entry of no kind makes no use of them.
+        #
+        # A command line that takes the work up again, such as an agent's resume
+        # command. An agent's kind has the drop-down copy it; SWM never runs it.
+        [string]$Resume,
+        # The process the work is open in, such as an agent. While it runs the
+        # entry is attached, and an agent's kind can have the list say so. Unlike
+        # `ProcessId` it does not decide the state.
+        [int]$Attached
     )
     $entry = [ordered]@{
         state = $State
@@ -92,6 +102,9 @@ function Set-SwmMailboxEntry {
     }
     if ($Log) { $entry.log = $Log }
     if ($Kind) { $entry.kind = $Kind }
+    if ($Resume) { $entry.resume = $Resume }
+    $attachedTo = if ($Attached) { Format-SwmMailboxProcess $Attached }
+    if ($attachedTo) { $entry.attached = $attachedTo }
 
     $folder = Get-SwmMailboxFolder $Mailbox
     [IO.Directory]::CreateDirectory($folder) | Out-Null
@@ -143,6 +156,15 @@ function Get-SwmMailboxAncestor {
         $process = try { $process.Parent } catch { $null }
     }
     0
+}
+
+function Format-SwmMailboxProcess {
+    # A process as entries name one, `<pid>:<started>`: with its start time, a
+    # later process given the same id is not mistaken for it. Empty if it is gone.
+    param([int]$ProcessId = $PID)
+    $process = Get-Process -Id $ProcessId -ErrorAction SilentlyContinue
+    if (-not $process) { return '' }
+    try { '{0}:{1}' -f $process.Id, $process.StartTime.ToFileTimeUtc() } catch { '' }
 }
 
 function Format-SwmMailboxDuration {

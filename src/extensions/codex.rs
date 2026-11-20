@@ -38,6 +38,10 @@ pub struct CodexOptions {
     /// The session opens filling the picker monitor up to the bar, rather than
     /// centered; Ctrl+Shift+F switches between the two. Off by default.
     pub full_pane: bool,
+    /// In a mailbox's drop-down, each session's card says whether it is
+    /// `attached`, with the process ID, or `not attached`: whether the Codex
+    /// that reported it is still running. Off by default.
+    pub show_attached: bool,
 }
 impl Default for CodexOptions {
     fn default() -> Self {
@@ -47,6 +51,7 @@ impl Default for CodexOptions {
             you: Color32::from_rgb(0x8e, 0xc0, 0x7c),
             codex: crate::palette::ACCENT,
             full_pane: false,
+            show_attached: false,
         }
     }
 }
@@ -55,7 +60,10 @@ impl Default for CodexOptions {
 /// `"kind": "codex"` have a ring as their badges, in Codex's color while running,
 /// and open as the session's conversation.
 pub fn kind(options: CodexOptions) -> Kind {
-    Kind::new("codex", ring, options.codex).viewer(move |path, title| picker(path, title, &options))
+    let show_attached = options.show_attached;
+    let kind = Kind::new("codex", ring, options.codex)
+        .viewer(move |path, title| picker(path, title, &options));
+    crate::extensions::session::kind(kind, show_attached)
 }
 
 /// The picker for the rollout at `path`.

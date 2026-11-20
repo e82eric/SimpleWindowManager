@@ -23,11 +23,13 @@ use nfm_egui::egui::{self, Color32};
 /// running, and open as the session's conversation.
 /// `SpoolOptions::named("Agents").kind(claude::kind(options))`.
 pub fn kind(options: ClaudeOptions) -> crate::extensions::spool::Kind {
-    crate::extensions::spool::Kind::new("claude", spark, options.claude)
+    let show_attached = options.show_attached;
+    let kind = crate::extensions::spool::Kind::new("claude", spark, options.claude)
         .viewer(move |path, title| transcript::picker(path, title, &options))
         // Claude Code has no hook for a turn stopped with Escape; its transcript
         // records it.
-        .ended(transcript::interrupted)
+        .ended(transcript::interrupted);
+    crate::extensions::session::kind(kind, show_attached)
 }
 
 /// Claude's spark: uneven rays around a center, filling `area`. Pass it to

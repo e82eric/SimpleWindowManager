@@ -52,6 +52,8 @@ try {
     }
 
     $state = $null
+    $unchanged = $false
+    $closed = $false
     $title = $existing.title
     $detail = ''
     switch ($name) {
@@ -78,15 +80,43 @@ try {
             $state = 'done'
             $detail = Brief ($hook.last_assistant_message ?? $hook['last-assistant-message'])
             if (-not $title -and $hook['input-messages']) { $title = Brief $hook['input-messages'][-1] }
+            # A turn that ends with background work in flight is paused, not
+            # done: Claude Code starts the next turn itself when that work
+            # finishes, and that turn's own end reports the session done.
+            # A monitor is not such work: it watches for as long as the session
+            # is open and may never finish. If it does wake the session, that
+            # turn's first tool reports it running again.
+            $pending = @($hook.background_tasks | Where-Object { $_ -and $_.type -ne 'monitor' })
+            if ($pending) {
+                $state = 'running'
+                $kinds = $pending | Group-Object { $_.type ?? 'task' } | ForEach-Object { "$($_.Count) $($_.Name)$(if ($_.Count -gt 1) { 's' })" }
+                $detail = "Waiting on $($kinds -join ', ')"
+            }
         }
         'Interrupt' {
             $state = 'done'
             $detail = 'Interrupted'
         }
+        'SessionStart' {
+            # A session opened again: its entry stays as it is and is written
+            # with the agent it is open in now.
+            if (-not $existing) { exit 0 }
+            $state = $existing.state
+            $detail = $existing.detail
+            $unchanged = $true
+        }
         'SessionEnd' {
-            # A finished turn stays listed; a session closed mid-turn has nothing to show.
-            if ($existing -and $existing.state -ne 'done') { Remove-SwmMailboxEntry $Mailbox $id }
-            exit 0
+            # A session closed mid-turn has nothing to show. A finished turn stays
+            # listed, attached to nothing: the agent is no longer open.
+            if (-not $existing) { exit 0 }
+            if ($existing.state -ne 'done') {
+                Remove-SwmMailboxEntry $Mailbox $id
+                exit 0
+            }
+            $state = 'done'
+            $detail = $existing.detail
+            $unchanged = $true
+            $closed = $true
         }
         default { exit 0 }
     }
@@ -94,8 +124,12 @@ try {
     # The kind is what a mailbox gives each agent its own badges and viewer by.
     $entry = @{ Mailbox = $Mailbox; Id = $id; State = $state; Title = $title ?? 'New session'; Kind = $Agent }
     if ($detail) { $entry.Detail = $detail }
+    # Nothing happened in the session, so it keeps its place in the list.
+    if ($unchanged -and $existing.time) {
+        $entry.Time = [DateTimeOffset]::FromUnixTimeSeconds([long]$existing.time).UtcDateTime
+    }
     # Which agent, then the last two folders of where it runs.
-    $entry.Source = $Agent
+    $entry.Source = $existing.source ?? $Agent
     if ($hook.cwd) {
         $parts = @($hook.cwd -split '[\\/]' | Where-Object { $_ -and $_ -notmatch ':$' })
         if ($parts) { $entry.Source = "$Agent · " + (($parts | Select-Object -Last 2) -join '/') }
@@ -103,8 +137,8 @@ try {
     $names = if ($Agent -eq 'claude') { '^(claude|node)$' } else { '^codex' }
     # While a turn runs the entry belongs to the agent's process, so a session that
     # is killed shows as stopped. A finished turn stays after the agent exits.
-    $agentId = if ($state -ne 'done') { Get-SwmMailboxAncestor $names }
-    if ($agentId) { $entry.ProcessId = $agentId }
+    $agentId = Get-SwmMailboxAncestor $names
+    if ($agentId -and $state -ne 'done') { $entry.ProcessId = $agentId }
     # The session's transcript, which SWM shows as the entry's kind is shown.
     # Codex's is found by the session's id when the event does not give it,
     # once: later events take it from the entry.
@@ -115,6 +149,17 @@ try {
             Sort-Object LastWriteTimeUtc | Select-Object -Last 1 -ExpandProperty FullName
     }
     if ($log) { $entry.Log = $log }
+    # The command that opens the session again, for the drop-down to copy. Both
+    # agents look a session up from the folder it was started in, which is where
+    # the first event comes from; a later one may come from another folder.
+    $resume = $existing.resume
+    if (-not $resume) {
+        $resume = if ($Agent -eq 'claude') { "claude --resume $session" } else { "codex resume $session" }
+        if ($hook.cwd) { $resume = "Set-Location -LiteralPath '" + $hook.cwd.Replace("'", "''") + "'; $resume" }
+    }
+    $entry.Resume = $resume
+    # The agent's process: while it runs the session is attached.
+    if ($agentId -and -not $closed) { $entry.Attached = $agentId }
     Set-SwmMailboxEntry @entry
 } catch {
     # Recorded for whoever is setting the hook up; never shown to the agent.
