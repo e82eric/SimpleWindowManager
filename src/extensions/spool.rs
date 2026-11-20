@@ -67,6 +67,8 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+pub mod watch;
+
 pub const RUNNING: &str = "running";
 pub const WAITING: &str = "waiting";
 pub const DONE: &str = "done";
@@ -608,10 +610,25 @@ fn is_id(id: &str) -> bool {
 }
 
 /// The folder's entries. A file is read again only when it has been written.
-#[derive(Default)]
-struct Files(HashMap<String, (SystemTime, u64, Option<Entry>)>);
-impl Files {
+/// `T` is what is kept of each file: the entry, or for `watch` its text too.
+struct Files<T = Entry>(HashMap<String, (SystemTime, u64, Option<T>)>);
+impl<T> Default for Files<T> {
+    fn default() -> Self {
+        Self(HashMap::new())
+    }
+}
+impl Files<Entry> {
     fn read(&mut self, directory: &Path) -> Vec<Entry> {
+        self.read_as(directory, Entry::parse)
+    }
+}
+impl<T: Clone> Files<T> {
+    /// `parse` is given a file's ID, its text and when it was written.
+    fn read_as(
+        &mut self,
+        directory: &Path,
+        parse: impl Fn(&str, &str, SystemTime) -> Option<T>,
+    ) -> Vec<T> {
         let mut read = HashMap::new();
         let files = std::fs::read_dir(directory).into_iter().flatten().flatten();
         for file in files {
@@ -637,7 +654,7 @@ impl Files {
             }
             let entry = match self.0.remove(id) {
                 Some((at, length, entry)) if at == written && length == metadata.len() => entry,
-                _ => read_limited(&path).and_then(|text| Entry::parse(id, &text, written)),
+                _ => read_limited(&path).and_then(|text| parse(id, &text, written)),
             };
             read.insert(id.to_owned(), (written, metadata.len(), entry));
         }
