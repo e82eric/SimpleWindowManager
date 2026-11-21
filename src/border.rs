@@ -308,6 +308,19 @@ mod dcomp {
         });
     }
 
+    /// Block until the composition engine has taken the last committed layout.
+    pub unsafe fn wait_for_commit() {
+        STATE.with(|slot| {
+            if let Some(state) = slot.borrow().as_ref() {
+                if let Err(error) = logged("WaitForCommitCompletion(border)", unsafe {
+                    state.device.WaitForCommitCompletion()
+                }) {
+                    error.report();
+                }
+            }
+        });
+    }
+
     pub fn clean() {
         STATE.with(|slot| *slot.borrow_mut() = None);
     }
@@ -550,14 +563,31 @@ pub fn update_border(window: &BorderWindow, target: Option<(isize, crate::Rect)>
             return;
         }
         let visible = IsWindowVisible(window.hwnd as _) != 0;
-        let flags = if current.right - current.left == width
-            && current.bottom - current.top == height
-            && visible
-        {
+        let resized =
+            current.right - current.left != width || current.bottom - current.top != height;
+        let flags = if !resized && visible {
             SWP_NOREDRAW
         } else {
             SWP_SHOWWINDOW
         };
+        // The window's bounds and the layout of the pieces inside it reach the
+        // compositor separately. A resized window shown with the pieces still
+        // laid out for the old size draws an edge across its middle, so keep
+        // it hidden until the new layout has been taken.
+        if resized
+            && visible
+            && SetWindowPos(
+                window.hwnd as _,
+                std::ptr::null_mut(),
+                0,
+                0,
+                0,
+                0,
+                SWP_HIDEWINDOW | SWP_NOSIZE | SWP_NOMOVE | SWP_NOACTIVATE | SWP_NOZORDER,
+            ) == 0
+        {
+            crate::error_log::last_win32("SetWindowPos(hide border to resize) failed");
+        }
         // Keep the transparent composition host behind the application: its
         // transparent pixels do not provide cross-process hit-test transparency.
         let target_topmost =
@@ -589,6 +619,9 @@ pub fn update_border(window: &BorderWindow, target: Option<(isize, crate::Rect)>
             || flags == SWP_SHOWWINDOW
             || z_order_changed
         {
+            // A resize is placed while hidden: its WM_SIZE commits the new
+            // layout, and the window is shown once that has been taken.
+            let place = if resized { 0 } else { flags };
             if SetWindowPos(
                 window.hwnd as _,
                 target_hwnd as _,
@@ -596,8 +629,24 @@ pub fn update_border(window: &BorderWindow, target: Option<(isize, crate::Rect)>
                 target.top,
                 width,
                 height,
-                flags | SWP_NOACTIVATE | if z_order_changed { 0 } else { SWP_NOZORDER },
+                place | SWP_NOACTIVATE | if z_order_changed { 0 } else { SWP_NOZORDER },
             ) == 0
+            {
+                crate::error_log::last_win32("SetWindowPos(place border) failed");
+            }
+            if resized {
+                dcomp::wait_for_commit();
+            }
+            if place != flags
+                && SetWindowPos(
+                    window.hwnd as _,
+                    std::ptr::null_mut(),
+                    0,
+                    0,
+                    0,
+                    0,
+                    SWP_SHOWWINDOW | SWP_NOSIZE | SWP_NOMOVE | SWP_NOACTIVATE | SWP_NOZORDER,
+                ) == 0
             {
                 crate::error_log::last_win32("SetWindowPos(show border) failed");
             }
