@@ -46,7 +46,10 @@ if ($Remove) {
 }
 
 if (-not $Program) {
-    $target = $env:CARGO_TARGET_DIR ?? (Join-Path (Split-Path -Parent $PSScriptRoot) 'target')
+    # Where cargo builds to is asked of cargo: a setting of its own can move it.
+    $manifest = Join-Path (Split-Path -Parent $PSScriptRoot) 'Cargo.toml'
+    $target = (& cargo metadata --format-version 1 --no-deps --manifest-path $manifest | ConvertFrom-Json).target_directory
+    if (-not $target) { throw "cargo did not say where it builds to: give -Program" }
     $Program = Join-Path $target 'release\swm-mailbox.exe'
 }
 if (-not (Test-Path -LiteralPath $Program)) { throw "No swm-mailbox.exe at ${Program}: run build.ps1 first, or give -Program" }
