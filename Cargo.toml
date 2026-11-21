@@ -4,6 +4,12 @@ version = "0.1.0"
 edition = "2024"
 publish = false
 
+# `swm-mailbox watch`, which the SWM of another machine runs here through ssh.
+# Named here because its file is not in src/bin: .gitignore has `bin`.
+[[bin]]
+name = "swm-mailbox"
+path = "src/swm_mailbox.rs"
+
 [dependencies]
 csv = "1"
 crossbeam-channel = "0.5"
