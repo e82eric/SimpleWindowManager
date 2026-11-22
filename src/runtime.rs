@@ -2829,17 +2829,10 @@ fn apply_workspaces_windows_deferred(
     result
 }
 
-// A translated frame belongs to a mouse drag: retain the pre-drag border.
-// A changed size belongs to a resize and must still update the outline.
+// A frame that changes under the mouse belongs to a drag or a resize: retain
+// the border from before the gesture. Releasing the button refreshes it.
 fn border_frame_after_location_change(previous: Rect, actual: Rect, mouse_dragging: bool) -> Rect {
-    if mouse_dragging
-        && previous.right - previous.left == actual.right - actual.left
-        && previous.bottom - previous.top == actual.bottom - actual.top
-    {
-        previous
-    } else {
-        actual
-    }
+    if mouse_dragging { previous } else { actual }
 }
 
 #[cfg(test)]
@@ -3146,7 +3139,7 @@ mod parity_tests {
     }
 
     #[test]
-    fn border_follows_resizing_during_a_mouse_gesture() {
+    fn border_stays_at_the_original_frame_during_a_mouse_resize() {
         let original = Rect::from_xywh(10, 20, 300, 400);
         for resized in [
             Rect::from_xywh(10, 20, 350, 400),
@@ -3155,6 +3148,10 @@ mod parity_tests {
         ] {
             assert_eq!(
                 border_frame_after_location_change(original, resized, true),
+                original
+            );
+            assert_eq!(
+                border_frame_after_location_change(original, resized, false),
                 resized
             );
         }
