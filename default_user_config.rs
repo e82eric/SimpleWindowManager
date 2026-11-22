@@ -126,6 +126,42 @@ pub fn configure(configuration: &mut Configuration) {
     // configuration.picker_command(crate::extensions::claude::grep_command(
     //     crate::extensions::claude::ClaudeOptions::default(),
     // ));
+    // Bar mailboxes: lists in the bar that scripts write entries to; see "Bar
+    // mailboxes" and "Extensions" in README.md. "Agents" lists Claude Code and
+    // Codex sessions (running, waiting for you, recently finished) once their
+    // hooks run mailbox\agent-hook.ps1. "Shell" lists commands that took a
+    // while, once your PowerShell profile dot-sources mailbox\SwmMailbox.ps1.
+    // Clicking one in the bar opens its list, as do Alt+; and Alt+' here:
+    // {
+    //     use crate::extensions::{claude, codex, spool};
+    //     spool::register_with(
+    //         configuration,
+    //         spool::SpoolOptions {
+    //             full_pane: true,
+    //             ..spool::SpoolOptions::named("Agents")
+    //         }
+    //         // Each agent is a kind of entry, with its session's
+    //         // conversation as its log.
+    //         .kind(claude::kind(claude::ClaudeOptions {
+    //             full_pane: true,
+    //             show_attached: true,
+    //             ..Default::default()
+    //         }))
+    //         .kind(codex::kind(codex::CodexOptions {
+    //             full_pane: true,
+    //             show_attached: true,
+    //             ..Default::default()
+    //         })),
+    //     );
+    //     spool::register_with(configuration, spool::SpoolOptions::named("Shell"));
+    //     for (key, mailbox) in [(VK_OEM_1 as u32, "Agents"), (VK_OEM_7 as u32, "Shell")] {
+    //         configuration.keybinding_create(KeyBinding {
+    //             modifiers,
+    //             key,
+    //             action: Action::ShowMailbox(mailbox),
+    //         });
+    //     }
+    // }
 
     for index in 0..9 {
         configuration.keybinding_create(KeyBinding {
